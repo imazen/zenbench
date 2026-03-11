@@ -49,8 +49,8 @@ pub fn run_server(project_root: PathBuf) {
 fn handle_request(request: &JsonRpcRequest, project_root: &Path) -> JsonRpcResponse {
     match request.method.as_str() {
         "initialize" => handle_initialize(request),
-        "initialized" => {
-            // Notification, no response needed — but we send one anyway for robustness
+        "notifications/initialized" | "initialized" => {
+            // Notification — no response required by spec, but we respond for robustness
             JsonRpcResponse {
                 jsonrpc: "2.0".to_string(),
                 id: request.id.clone(),
@@ -76,7 +76,7 @@ fn handle_request(request: &JsonRpcRequest, project_root: &Path) -> JsonRpcRespo
 
 fn handle_initialize(request: &JsonRpcRequest) -> JsonRpcResponse {
     let result = serde_json::json!({
-        "protocolVersion": "2024-11-05",
+        "protocolVersion": "2025-03-26",
         "capabilities": {
             "tools": {}
         },
