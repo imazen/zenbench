@@ -269,6 +269,7 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
         individual_results.push(BenchmarkResult {
             name: bench.name.clone(),
             summary,
+            tags: bench.tags.clone(),
         });
     }
 
@@ -277,6 +278,7 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
         benchmarks: individual_results,
         analyses,
         completed_rounds,
+        throughput: group.throughput.clone(),
     }
 }
 
@@ -307,6 +309,7 @@ fn run_standalone(
     BenchmarkResult {
         name: bench.name.clone(),
         summary,
+        tags: bench.tags.clone(),
     }
 }
 

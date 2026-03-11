@@ -17,11 +17,11 @@ pub mod platform;
 mod results;
 mod stats;
 
-pub use bench::{BenchFn, BenchGroup, Bencher, Benchmark, GroupConfig, Suite};
+pub use bench::{BenchFn, BenchGroup, Bencher, Benchmark, GroupConfig, Suite, Throughput};
 pub use ci::CiEnvironment;
 pub use engine::Engine;
 pub use gate::{GateConfig, ResourceGate};
-pub use results::{BenchmarkResult, ComparisonResult, RunId, SuiteResult};
+pub use results::{format_ns, BenchmarkResult, ComparisonResult, RunId, SuiteResult};
 pub use stats::{PairedAnalysis, Summary};
 
 /// Re-export `black_box` from std for convenience.
@@ -35,7 +35,7 @@ pub fn black_box<T>(x: T) -> T {
 
 /// Prelude for convenient imports.
 pub mod prelude {
-    pub use crate::bench::{BenchGroup, Bencher, Suite};
+    pub use crate::bench::{BenchGroup, Bencher, Suite, Throughput};
     pub use crate::black_box;
     pub use crate::gate::GateConfig;
     pub use crate::results::SuiteResult;

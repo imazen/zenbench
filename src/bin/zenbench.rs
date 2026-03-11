@@ -52,6 +52,14 @@ enum Commands {
         /// Output as JSON.
         #[arg(long)]
         json: bool,
+
+        /// Output as markdown tables with bar charts.
+        #[arg(long)]
+        markdown: bool,
+
+        /// Output as CSV.
+        #[arg(long)]
+        csv: bool,
     },
 
     /// Compare two result files.
@@ -106,7 +114,9 @@ fn main() {
             run_id,
             project,
             json,
-        } => cmd_results(&project, &run_id, json),
+            markdown,
+            csv,
+        } => cmd_results(&project, &run_id, json, markdown, csv),
         Commands::Compare {
             baseline,
             candidate,
@@ -189,7 +199,7 @@ fn cmd_kill(project: &Path, target: &str) {
     }
 }
 
-fn cmd_results(project: &Path, run_id: &str, json: bool) {
+fn cmd_results(project: &Path, run_id: &str, json: bool, markdown: bool, csv: bool) {
     let actual_id = if run_id == "latest" {
         match daemon::list_runs(project) {
             Ok(runs) => {
@@ -216,6 +226,10 @@ fn cmd_results(project: &Path, run_id: &str, json: bool) {
                     Ok(result) => {
                         if json {
                             println!("{}", serde_json::to_string_pretty(&result).unwrap());
+                        } else if markdown {
+                            print!("{}", result.to_markdown());
+                        } else if csv {
+                            print!("{}", result.to_csv());
                         } else {
                             result.print_report();
                         }
@@ -439,21 +453,8 @@ fn run_bench_in_dir(
     }
 }
 
-/// Format nanoseconds as human-readable time.
 fn format_ns(ns: f64) -> String {
-    let abs = ns.abs();
-    let sign = if ns < 0.0 { "-" } else { "" };
-    if abs >= 1_000_000_000.0 {
-        format!("{sign}{:.2}s", abs / 1_000_000_000.0)
-    } else if abs >= 1_000_000.0 {
-        format!("{sign}{:.2}ms", abs / 1_000_000.0)
-    } else if abs >= 1_000.0 {
-        format!("{sign}{:.2}µs", abs / 1_000.0)
-    } else if abs >= 0.01 {
-        format!("{sign}{:.1}ns", abs)
-    } else {
-        format!("{sign}{:.3}ns", abs)
-    }
+    zenbench::format_ns(ns)
 }
 
 /// Print a colored comparison between two suite results.
