@@ -1,0 +1,31 @@
+[package]
+name = "zenbench"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Interleaved microbenchmarking with resource gating, paired statistics, and fire-and-forget mode"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/imazen/zenbench"
+keywords = ["benchmark", "performance", "profiling", "testing"]
+categories = ["development-tools", "development-tools::profiling"]
+
+[features]
+default = ["cli", "daemon"]
+cli = ["dep:clap"]
+daemon = []
+# MCP server support (future)
+# mcp = []
+
+[[bin]]
+name = "zenbench"
+path = "src/bin/zenbench.rs"
+required-features = ["cli"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sysinfo = "0.38"
+fs4 = { version = "0.13", features = ["sync"] }
+clap = { version = "4", features = ["derive"], optional = true }
+
+[dev-dependencies]
