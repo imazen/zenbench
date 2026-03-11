@@ -18,7 +18,9 @@ far more power to detect real differences.
 - **Interleaved execution** — randomized round-robin eliminates thermal, turbo, and load bias
 - **Resource gating** — waits for CPU load, RAM, temperature, and process contention to clear
 - **Cross-process coordination** — file lock prevents concurrent benchmark processes from corrupting each other
-- **Paired statistics** — Welford streaming, bootstrap CI, Cohen's d, drift detection
+- **Paired statistics** — Welford streaming, bootstrap CI, Cohen's d, Wilcoxon signed-rank test, drift detection
+- **Robust metrics** — median, MAD (scaled), and mean/variance for both parametric and non-parametric analysis
+- **Anti-aliasing jitter** — varies iteration count ±20% per round to prevent timer synchronization artifacts
 - **Cache firewall** — spoils CPU cache between samples to reduce cache-state bias
 - **Fire-and-forget** — spawn detached benchmark processes, query progress, auto-kill stale runs
 - **CI-aware** — auto-detects GitHub Actions, GitLab CI, etc. and adjusts gate thresholds
@@ -26,6 +28,8 @@ far more power to detect real differences.
 - **`#![forbid(unsafe_code)]`** — no unsafe anywhere
 
 ## Quick start
+
+Add to `Cargo.toml`:
 
 ```toml
 [dev-dependencies]
@@ -36,8 +40,29 @@ name = "my_bench"
 harness = false
 ```
 
-```rust,no_run
+Using the `main!` macro (recommended for `cargo bench`):
+
+```rust,ignore
 // benches/my_bench.rs
+use zenbench::black_box;
+
+zenbench::main!(|suite| {
+    suite.compare("sorting", |group| {
+        group.bench("std_sort", |b| {
+            b.with_input(|| (0..1000).rev().collect::<Vec<i32>>())
+                .run(|mut v| { v.sort(); black_box(v) })
+        });
+        group.bench("sort_unstable", |b| {
+            b.with_input(|| (0..1000).rev().collect::<Vec<i32>>())
+                .run(|mut v| { v.sort_unstable(); black_box(v) })
+        });
+    });
+});
+```
+
+Or using `zenbench::run()` directly:
+
+```rust,no_run
 # fn main() {
 zenbench::run(|suite| {
     suite.compare("sorting", |group| {
@@ -61,10 +86,10 @@ $ cargo bench --bench my_bench
 ## Resource gating
 
 Before each measurement round, zenbench checks:
-- CPU utilization (default: wait if >15%)
+- CPU utilization (default: wait if >30%)
 - Available RAM (default: wait if <512MB)
-- CPU temperature (default: wait if >85°C)
-- Heavy processes (default: wait if any process >10% CPU)
+- CPU temperature (default: wait if >90°C)
+- Heavy processes (default: wait if >3 processes using >10% CPU)
 
 ```rust
 use zenbench::GateConfig;
@@ -79,6 +104,18 @@ zenbench::run_gated(
     },
 );
 ```
+
+## Statistics
+
+Zenbench provides multiple layers of statistical analysis:
+
+- **Paired differences** — per-round diffs eliminate system-state confounds
+- **IQR outlier filtering** — Tukey's 1.5×IQR fences remove measurement spikes
+- **Bootstrap 95% CI** — 10,000 resamples for confidence interval on mean difference
+- **Cohen's d** — standardized effect size for practical significance
+- **Wilcoxon signed-rank test** — non-parametric p-value, valid for non-normal distributions
+- **Spearman drift detection** — flags thermal throttling or systematic load changes
+- **Multiple-comparison warning** — Bonferroni correction when groups have many benchmarks
 
 ## CLI
 
@@ -95,15 +132,16 @@ $ zenbench clean --max-age-hours 48
 
 ## Design principles
 
-Built on lessons from criterion, divan, tango, and the Mytkowicz "Producing Wrong Data"
-paper:
+Built on lessons from criterion, divan, tango, nanobench, and the Mytkowicz "Producing
+Wrong Data" paper:
 
 1. **Interleave, don't sequence.** Same-round pairing eliminates system-state confounds.
 2. **Gate, don't hope.** Check system state before measuring, not after.
 3. **Pair, don't pool.** Paired statistical tests have more power than independent tests.
 4. **Detect drift.** Spearman correlation flags thermal throttling or load changes.
 5. **Spoil caches.** Cache firewall prevents one benchmark from warming caches for the next.
-6. **Coordinate.** File lock prevents concurrent benchmark processes from fighting.
+6. **Jitter iterations.** Anti-aliasing prevents synchronization with periodic system events.
+7. **Coordinate.** File lock prevents concurrent benchmark processes from fighting.
 
 ## License
 
