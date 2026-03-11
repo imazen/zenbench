@@ -63,6 +63,26 @@ enum Commands {
         candidate: PathBuf,
     },
 
+    /// Compare current code against a previous git version.
+    ///
+    /// Builds and runs the specified benchmark at both the old and current
+    /// commits, then prints a comparison. Requires the benchmark to use
+    /// zenbench::main!() so results can be captured via ZENBENCH_RESULT_PATH.
+    SelfCompare {
+        /// Benchmark target name (as in `cargo bench --bench <name>`).
+        #[arg(long)]
+        bench: String,
+
+        /// Git ref to compare against (tag, branch, or commit hash).
+        /// Defaults to the most recent version tag (v*).
+        #[arg(long, name = "ref")]
+        git_ref: Option<String>,
+
+        /// Extra arguments to pass to `cargo bench`.
+        #[arg(long)]
+        cargo_args: Option<String>,
+    },
+
     /// Clean up old run metadata.
     Clean {
         /// Project root directory.
@@ -91,6 +111,11 @@ fn main() {
             baseline,
             candidate,
         } => cmd_compare(&baseline, &candidate),
+        Commands::SelfCompare {
+            bench,
+            git_ref,
+            cargo_args,
+        } => cmd_self_compare(&bench, git_ref.as_deref(), cargo_args.as_deref()),
         Commands::Clean {
             project,
             max_age_hours,
@@ -224,36 +249,317 @@ fn cmd_compare(baseline_path: &Path, candidate_path: &Path) {
         }
     };
 
-    eprintln!("Baseline:  {} ({})", baseline.run_id, baseline.timestamp);
-    eprintln!("Candidate: {} ({})", candidate.run_id, candidate.timestamp);
+    print_comparison(&baseline, &candidate);
+}
+
+fn cmd_self_compare(bench_name: &str, git_ref: Option<&str>, cargo_args: Option<&str>) {
+    // Resolve the git ref to compare against
+    let reference = match git_ref {
+        Some(r) => r.to_string(),
+        None => match find_last_version_tag() {
+            Some(tag) => {
+                eprintln!("[zenbench] comparing against tag: {tag}");
+                tag
+            }
+            None => {
+                eprintln!("Error: no version tags found and no --ref specified.");
+                eprintln!("  Create a tag first (git tag v0.1.0) or specify --ref <commit>");
+                std::process::exit(1);
+            }
+        },
+    };
+
+    // Verify the ref exists
+    if !git_ref_exists(&reference) {
+        eprintln!("Error: git ref '{reference}' does not exist.");
+        std::process::exit(1);
+    }
+
+    let current_hash = zenbench::platform::git_short_hash().unwrap_or_else(|| "HEAD".to_string());
+    eprintln!("[zenbench] self-compare: {reference} (baseline) vs {current_hash} (candidate)");
+
+    // Create temp directory for results
+    let tmp_dir = std::env::temp_dir().join("zenbench-self-compare");
+    std::fs::create_dir_all(&tmp_dir).unwrap_or_else(|e| {
+        eprintln!("Error creating temp dir: {e}");
+        std::process::exit(1);
+    });
+    let baseline_result_path = tmp_dir.join("baseline.json");
+    let candidate_result_path = tmp_dir.join("candidate.json");
+
+    // Step 1: Create worktree for the old ref
+    let worktree_path = tmp_dir.join("worktree");
+    eprintln!("[zenbench] creating worktree at {reference}...");
+    if worktree_path.exists() {
+        // Clean up leftover worktree
+        run_git(&[
+            "worktree",
+            "remove",
+            "--force",
+            worktree_path.to_str().unwrap(),
+        ]);
+    }
+    if !run_git(&[
+        "worktree",
+        "add",
+        "--detach",
+        worktree_path.to_str().unwrap(),
+        &reference,
+    ]) {
+        eprintln!("Error: failed to create git worktree at {reference}.");
+        std::process::exit(1);
+    }
+
+    // Step 2: Build and run baseline (old version)
+    eprintln!("[zenbench] building and running baseline ({reference})...");
+    let baseline_ok = run_bench_in_dir(
+        &worktree_path,
+        bench_name,
+        &baseline_result_path,
+        cargo_args,
+    );
+
+    // Step 3: Build and run candidate (current version)
+    eprintln!("[zenbench] building and running candidate ({current_hash})...");
+    let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let candidate_ok =
+        run_bench_in_dir(&current_dir, bench_name, &candidate_result_path, cargo_args);
+
+    // Step 4: Clean up worktree
+    eprintln!("[zenbench] cleaning up worktree...");
+    run_git(&[
+        "worktree",
+        "remove",
+        "--force",
+        worktree_path.to_str().unwrap(),
+    ]);
+
+    // Step 5: Compare results
+    if !baseline_ok {
+        eprintln!("Error: baseline benchmark failed to produce results.");
+        eprintln!("  Make sure the benchmark uses zenbench::main!() macro.");
+        std::process::exit(1);
+    }
+    if !candidate_ok {
+        eprintln!("Error: candidate benchmark failed to produce results.");
+        std::process::exit(1);
+    }
+
+    let baseline = match zenbench::SuiteResult::load(&baseline_result_path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error loading baseline results: {e}");
+            std::process::exit(1);
+        }
+    };
+    let candidate = match zenbench::SuiteResult::load(&candidate_result_path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error loading candidate results: {e}");
+            std::process::exit(1);
+        }
+    };
+
     eprintln!();
+    print_comparison(&baseline, &candidate);
+
+    // Clean up temp files
+    let _ = std::fs::remove_file(&baseline_result_path);
+    let _ = std::fs::remove_file(&candidate_result_path);
+}
+
+/// Find the most recent version tag (matching v* pattern).
+fn find_last_version_tag() -> Option<String> {
+    let output = std::process::Command::new("git")
+        .args(["tag", "--sort=-version:refname", "--list", "v*"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout.lines().next().map(|s| s.trim().to_string())
+}
+
+/// Check if a git ref exists.
+fn git_ref_exists(git_ref: &str) -> bool {
+    std::process::Command::new("git")
+        .args(["rev-parse", "--verify", git_ref])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// Run a git command, returning true on success.
+fn run_git(args: &[&str]) -> bool {
+    std::process::Command::new("git")
+        .args(args)
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// Build and run a benchmark in a specific directory.
+/// Returns true if the result file was produced.
+fn run_bench_in_dir(
+    dir: &Path,
+    bench_name: &str,
+    result_path: &Path,
+    cargo_args: Option<&str>,
+) -> bool {
+    let mut cmd = std::process::Command::new("cargo");
+    cmd.current_dir(dir)
+        .args(["bench", "--bench", bench_name])
+        .env("ZENBENCH_RESULT_PATH", result_path);
+
+    if let Some(args) = cargo_args {
+        for arg in args.split_whitespace() {
+            cmd.arg(arg);
+        }
+    }
+
+    let status = cmd.status();
+
+    match status {
+        Ok(s) if s.success() => result_path.exists(),
+        Ok(s) => {
+            eprintln!(
+                "  cargo bench exited with status {} in {}",
+                s,
+                dir.display()
+            );
+            result_path.exists() // might still have results
+        }
+        Err(e) => {
+            eprintln!("  failed to run cargo bench in {}: {e}", dir.display());
+            false
+        }
+    }
+}
+
+/// Format nanoseconds as human-readable time.
+fn format_ns(ns: f64) -> String {
+    let abs = ns.abs();
+    let sign = if ns < 0.0 { "-" } else { "" };
+    if abs >= 1_000_000_000.0 {
+        format!("{sign}{:.2}s", abs / 1_000_000_000.0)
+    } else if abs >= 1_000_000.0 {
+        format!("{sign}{:.2}ms", abs / 1_000_000.0)
+    } else if abs >= 1_000.0 {
+        format!("{sign}{:.2}µs", abs / 1_000.0)
+    } else if abs >= 0.01 {
+        format!("{sign}{:.1}ns", abs)
+    } else {
+        format!("{sign}{:.3}ns", abs)
+    }
+}
+
+/// Print a colored comparison between two suite results.
+fn print_comparison(baseline: &zenbench::SuiteResult, candidate: &zenbench::SuiteResult) {
+    let base_git = baseline
+        .git_hash
+        .as_deref()
+        .map(|h| if h.len() > 8 { &h[..8] } else { h })
+        .unwrap_or("?");
+    let cand_git = candidate
+        .git_hash
+        .as_deref()
+        .map(|h| if h.len() > 8 { &h[..8] } else { h })
+        .unwrap_or("?");
+
+    eprintln!("═══════════════════════════════════════════════════════════════");
+    eprintln!("  zenbench comparison");
+    eprintln!("  baseline:  {} (git: {})", baseline.run_id, base_git);
+    eprintln!("  candidate: {} (git: {})", candidate.run_id, cand_git);
+    eprintln!("═══════════════════════════════════════════════════════════════");
+
+    // Compare comparison groups by name
+    for cand_group in &candidate.comparisons {
+        if let Some(base_group) = baseline
+            .comparisons
+            .iter()
+            .find(|g| g.group_name == cand_group.group_name)
+        {
+            eprintln!();
+            eprintln!("  group: {}", cand_group.group_name);
+            eprintln!("  ───────────────────────────────────────────────────────────");
+
+            for cand_bench in &cand_group.benchmarks {
+                if let Some(base_bench) = base_group
+                    .benchmarks
+                    .iter()
+                    .find(|b| b.name == cand_bench.name)
+                {
+                    print_bench_diff(
+                        &cand_bench.name,
+                        base_bench.summary.mean,
+                        cand_bench.summary.mean,
+                    );
+                } else {
+                    eprintln!(
+                        "    {:<30}  {:>10}  (new)",
+                        cand_bench.name,
+                        format_ns(cand_bench.summary.mean)
+                    );
+                }
+            }
+        }
+    }
 
     // Compare standalone benchmarks by name
+    let mut has_standalone = false;
     for cand_bench in &candidate.standalones {
         if let Some(base_bench) = baseline
             .standalones
             .iter()
             .find(|b| b.name == cand_bench.name)
         {
-            let pct = if base_bench.summary.mean.abs() > f64::EPSILON {
-                (cand_bench.summary.mean - base_bench.summary.mean) / base_bench.summary.mean
-                    * 100.0
-            } else {
-                0.0
-            };
-
-            let arrow = if pct < -1.0 {
-                "\x1b[32m"
-            } else if pct > 1.0 {
-                "\x1b[31m"
-            } else {
-                ""
-            };
-            let reset = if arrow.is_empty() { "" } else { "\x1b[0m" };
-
-            println!("  {:<30}  {}{:+.2}%{}", cand_bench.name, arrow, pct, reset);
+            if !has_standalone {
+                eprintln!();
+                eprintln!("  standalone:");
+                eprintln!("  ───────────────────────────────────────────────────────────");
+                has_standalone = true;
+            }
+            print_bench_diff(
+                &cand_bench.name,
+                base_bench.summary.mean,
+                cand_bench.summary.mean,
+            );
         }
     }
+
+    eprintln!();
+    eprintln!("═══════════════════════════════════════════════════════════════");
+    eprintln!();
+}
+
+/// Print a single benchmark comparison line with color.
+fn print_bench_diff(name: &str, base_mean: f64, cand_mean: f64) {
+    let pct = if base_mean.abs() > f64::EPSILON {
+        (cand_mean - base_mean) / base_mean * 100.0
+    } else {
+        0.0
+    };
+
+    let (arrow, reset) = if pct < -1.0 {
+        ("\x1b[32m", "\x1b[0m") // green = faster
+    } else if pct > 1.0 {
+        ("\x1b[31m", "\x1b[0m") // red = slower
+    } else {
+        ("", "") // no change
+    };
+
+    eprintln!(
+        "    {:<30}  {:>10} → {:>10}  {}{:+.2}%{}",
+        name,
+        format_ns(base_mean),
+        format_ns(cand_mean),
+        arrow,
+        pct,
+        reset,
+    );
 }
 
 fn cmd_clean(project: &Path, max_age_hours: u64) {
