@@ -69,3 +69,72 @@ pub fn run_gated<F: FnOnce(&mut Suite)>(gate: GateConfig, f: F) -> SuiteResult {
     let engine = Engine::with_gate(suite, gate);
     engine.run()
 }
+
+/// Run a benchmark suite and save results to a JSON file.
+///
+/// If the `ZENBENCH_RESULT_PATH` env var is set (fire-and-forget mode),
+/// results are saved there. Otherwise, results are saved to a timestamped
+/// file in the current directory.
+pub fn run_and_save<F: FnOnce(&mut Suite)>(f: F) -> SuiteResult {
+    let result = run(f);
+
+    let path = daemon::result_path_from_env().unwrap_or_else(|| {
+        let name = format!("zenbench-{}.json", result.run_id);
+        std::path::PathBuf::from(name)
+    });
+
+    if let Err(e) = result.save(&path) {
+        eprintln!("[zenbench] error saving results to {}: {e}", path.display());
+    } else {
+        eprintln!("[zenbench] results saved to {}", path.display());
+    }
+
+    result
+}
+
+/// Macro for defining benchmark binaries with `cargo bench`.
+///
+/// Use this in a `benches/*.rs` file with `harness = false` in `Cargo.toml`.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// // benches/my_bench.rs
+/// zenbench::main!(|suite| {
+///     suite.compare("sorting", |group| {
+///         let data: Vec<i32> = (0..1000).rev().collect();
+///         group.bench("std_sort", move |b| {
+///             let d = data.clone();
+///             b.with_input(move || d.clone())
+///                 .run(|mut v| { v.sort(); v })
+///         });
+///         group.bench("sort_unstable", move |b| {
+///             let data: Vec<i32> = (0..1000).rev().collect();
+///             b.with_input(move || data.clone())
+///                 .run(|mut v| { v.sort_unstable(); v })
+///         });
+///     });
+/// });
+/// ```
+///
+/// In `Cargo.toml`:
+/// ```toml
+/// [[bench]]
+/// name = "my_bench"
+/// harness = false
+/// ```
+#[macro_export]
+macro_rules! main {
+    (|$suite:ident| $body:block) => {
+        fn main() {
+            let result = $crate::run(|$suite: &mut $crate::Suite| $body);
+
+            // Save results if in fire-and-forget mode
+            if let Some(path) = $crate::daemon::result_path_from_env() {
+                if let Err(e) = result.save(&path) {
+                    eprintln!("[zenbench] error saving results: {e}");
+                }
+            }
+        }
+    };
+}

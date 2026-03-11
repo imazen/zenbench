@@ -28,4 +28,8 @@ sysinfo = "0.38"
 fs4 = { version = "0.13", features = ["sync"] }
 clap = { version = "4", features = ["derive"], optional = true }
 
+[[bench]]
+name = "sorting"
+harness = false
+
 [dev-dependencies]
