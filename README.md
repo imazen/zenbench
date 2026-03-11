@@ -22,7 +22,9 @@ far more power to detect real differences.
 - **Robust metrics** — median, MAD (scaled), and mean/variance for both parametric and non-parametric analysis
 - **Anti-aliasing jitter** — varies iteration count ±20% per round to prevent timer synchronization artifacts
 - **Cache firewall** — spoils CPU cache between samples to reduce cache-state bias
+- **Self-compare** — build and benchmark old vs new code via git worktrees
 - **Fire-and-forget** — spawn detached benchmark processes, query progress, auto-kill stale runs
+- **MCP server** — JSON-RPC 2.0 interface for AI/editor integration
 - **CI-aware** — auto-detects GitHub Actions, GitLab CI, etc. and adjusts gate thresholds
 - **Cross-platform** — Linux, macOS, Windows (x64 and ARM)
 - **`#![forbid(unsafe_code)]`** — no unsafe anywhere
@@ -83,6 +85,18 @@ zenbench::run(|suite| {
 $ cargo bench --bench my_bench
 ```
 
+## Self-compare
+
+Compare your current code against a previous version:
+
+```console
+$ zenbench self-compare --bench sorting --ref v0.1.0
+```
+
+This creates a git worktree at the specified ref, builds and runs the benchmark there,
+then builds and runs it on current code, and prints a side-by-side comparison. If `--ref`
+is omitted, it uses the most recent version tag (`v*`).
+
 ## Resource gating
 
 Before each measurement round, zenbench checks:
@@ -120,14 +134,41 @@ Zenbench provides multiple layers of statistical analysis:
 ## CLI
 
 ```console
-$ zenbench list                    # List all benchmark runs
-$ zenbench status <run-id>         # Check a specific run
-$ zenbench kill <run-id>           # Kill a running benchmark
-$ zenbench kill stale              # Kill runs from old git commits
-$ zenbench results latest          # Show most recent results
-$ zenbench results latest --json   # Machine-readable output
-$ zenbench compare a.json b.json   # Compare two result files
+$ zenbench list                                  # List all benchmark runs
+$ zenbench status <run-id>                       # Check a specific run
+$ zenbench kill <run-id>                         # Kill a running benchmark
+$ zenbench kill stale                            # Kill runs from old git commits
+$ zenbench results latest                        # Show most recent results
+$ zenbench results latest --json                 # Machine-readable output
+$ zenbench compare a.json b.json                 # Compare two result files
+$ zenbench self-compare --bench my_bench         # Compare vs last version tag
+$ zenbench self-compare --bench my_bench --ref HEAD~5
 $ zenbench clean --max-age-hours 48
+```
+
+## MCP server
+
+Zenbench includes an MCP (Model Context Protocol) server for AI assistant and editor integration:
+
+```console
+$ zenbench-mcp                    # Start MCP server (stdio)
+$ zenbench-mcp --project /path    # Specify project root
+```
+
+Available tools: `list_runs`, `run_status`, `kill_run`, `spawn_bench`, `get_results`,
+`compare_results`, `clean_runs`.
+
+Configure in your MCP client (e.g., Claude Code `settings.json`):
+
+```json
+{
+  "mcpServers": {
+    "zenbench": {
+      "command": "zenbench-mcp",
+      "args": ["--project", "/path/to/your/project"]
+    }
+  }
+}
 ```
 
 ## Design principles
