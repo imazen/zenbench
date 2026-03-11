@@ -21,6 +21,10 @@ name = "zenbench"
 path = "src/bin/zenbench.rs"
 required-features = ["cli"]
 
+[[bin]]
+name = "zenbench-mcp"
+path = "src/bin/zenbench-mcp.rs"
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -12,6 +12,7 @@ mod ci;
 pub mod daemon;
 mod engine;
 mod gate;
+pub mod mcp;
 pub mod platform;
 mod results;
 mod stats;
