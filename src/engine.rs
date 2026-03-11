@@ -168,6 +168,8 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
 
     // Storage: samples[bench_idx] = vec of raw elapsed_ns per round
     let mut samples: Vec<Vec<u64>> = vec![Vec::with_capacity(config.rounds); n_benchmarks];
+    // CPU time samples (parallel to wall time samples)
+    let mut cpu_samples: Vec<Vec<u64>> = vec![Vec::with_capacity(config.rounds); n_benchmarks];
     let mut iters_per_round: Vec<usize> = Vec::with_capacity(config.rounds);
     let mut rng = Xoshiro256SS::seed(0xBE0C_0BAD_0000_0001);
 
@@ -218,6 +220,7 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
             bench.func.call(&mut bencher);
 
             samples[bench_idx].push(bencher.elapsed_ns);
+            cpu_samples[bench_idx].push(bencher.cpu_ns);
         }
 
         completed_rounds += 1;
@@ -258,6 +261,7 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
     }
 
     // Compute individual summaries
+    let has_cpu_time = cpu_samples.iter().any(|s| s.iter().any(|&v| v > 0));
     let mut individual_results = Vec::new();
     for (i, bench) in group.benchmarks.iter().enumerate() {
         let per_iter: Vec<f64> = samples[i]
@@ -266,9 +270,22 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
             .map(|(&elapsed, &iters)| elapsed as f64 / iters as f64)
             .collect();
         let summary = Summary::from_slice(&per_iter);
+
+        let cpu_summary = if has_cpu_time {
+            let cpu_per_iter: Vec<f64> = cpu_samples[i]
+                .iter()
+                .zip(iters_per_round.iter())
+                .map(|(&elapsed, &iters)| elapsed as f64 / iters as f64)
+                .collect();
+            Some(Summary::from_slice(&cpu_per_iter))
+        } else {
+            None
+        };
+
         individual_results.push(BenchmarkResult {
             name: bench.name.clone(),
             summary,
+            cpu_summary,
             tags: bench.tags.clone(),
         });
     }
@@ -292,6 +309,7 @@ fn run_standalone(
 
     let iterations = estimate_iterations(&mut bench.func, config);
     let mut samples = Vec::with_capacity(config.rounds);
+    let mut cpu_samples_vec = Vec::with_capacity(config.rounds);
 
     let start = Instant::now();
     for _ in 0..config.rounds {
@@ -303,12 +321,20 @@ fn run_standalone(
         let mut bencher = Bencher::new(iterations);
         bench.func.call(&mut bencher);
         samples.push(bencher.elapsed_ns as f64 / iterations as f64);
+        cpu_samples_vec.push(bencher.cpu_ns as f64 / iterations as f64);
     }
 
     let summary = Summary::from_slice(&samples);
+    let cpu_summary = if cpu_samples_vec.iter().any(|&v| v > 0.0) {
+        Some(Summary::from_slice(&cpu_samples_vec))
+    } else {
+        None
+    };
+
     BenchmarkResult {
         name: bench.name.clone(),
         summary,
+        cpu_summary,
         tags: bench.tags.clone(),
     }
 }

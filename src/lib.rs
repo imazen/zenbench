@@ -21,7 +21,7 @@ pub use bench::{BenchFn, BenchGroup, Bencher, Benchmark, GroupConfig, Suite, Thr
 pub use ci::CiEnvironment;
 pub use engine::Engine;
 pub use gate::{GateConfig, ResourceGate};
-pub use results::{format_ns, BenchmarkResult, ComparisonResult, RunId, SuiteResult};
+pub use results::{BenchmarkResult, ComparisonResult, RunId, SuiteResult, format_ns};
 pub use stats::{PairedAnalysis, Summary};
 
 /// Re-export `black_box` from std for convenience.

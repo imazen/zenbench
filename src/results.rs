@@ -31,6 +31,9 @@ impl std::fmt::Display for RunId {
 pub struct BenchmarkResult {
     pub name: String,
     pub summary: Summary,
+    /// CPU time summary (user time). Present when `cpu-time` feature is enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_summary: Option<Summary>,
     /// Key-value tags for multi-dimensional reporting.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<(String, String)>,
@@ -117,14 +120,27 @@ impl SuiteResult {
                     .as_ref()
                     .map(|t| format!("  {}", t.format(bench.summary.mean)))
                     .unwrap_or_default();
+                let cpu_str = bench
+                    .cpu_summary
+                    .as_ref()
+                    .map(|cpu| {
+                        let efficiency = if bench.summary.mean > 0.0 {
+                            cpu.mean / bench.summary.mean * 100.0
+                        } else {
+                            0.0
+                        };
+                        format!("  cpu:{} ({efficiency:.0}%)", format_ns(cpu.mean))
+                    })
+                    .unwrap_or_default();
                 eprintln!(
-                    "    {:<30}  {:>10}  ±{:>10}  (med {:>10}  mad {:>10}){}",
+                    "    {:<30}  {:>10}  ±{:>10}  (med {:>10}  mad {:>10}){}{}",
                     bench.name,
                     format_ns(bench.summary.mean),
                     format_ns(bench.summary.std_dev()),
                     format_ns(bench.summary.median),
                     format_ns(bench.summary.mad),
                     throughput_str,
+                    cpu_str,
                 );
             }
 
@@ -168,14 +184,27 @@ impl SuiteResult {
 
         // Standalone results
         for bench in &self.standalones {
+            let cpu_str = bench
+                .cpu_summary
+                .as_ref()
+                .map(|cpu| {
+                    let efficiency = if bench.summary.mean > 0.0 {
+                        cpu.mean / bench.summary.mean * 100.0
+                    } else {
+                        0.0
+                    };
+                    format!("  cpu:{} ({efficiency:.0}%)", format_ns(cpu.mean))
+                })
+                .unwrap_or_default();
             eprintln!();
             eprintln!(
-                "  {:<30}  {:>10}  ±{:>10}  (med {:>10}  n={})",
+                "  {:<30}  {:>10}  ±{:>10}  (med {:>10}  n={}){}",
                 bench.name,
                 format_ns(bench.summary.mean),
                 format_ns(bench.summary.std_dev()),
                 format_ns(bench.summary.median),
                 bench.summary.n,
+                cpu_str,
             );
         }
 
@@ -216,16 +245,54 @@ impl SuiteResult {
 
             // Build table columns
             let has_throughput = comp.throughput.is_some();
-            if has_throughput {
+            let has_cpu = comp.benchmarks.iter().any(|b| b.cpu_summary.is_some());
+            if has_throughput && has_cpu {
+                out.push_str("| Benchmark | Mean | CPU | Eff% | Throughput |\n");
+                out.push_str("|-----------|------|-----|------|------------|\n");
+            } else if has_throughput {
                 out.push_str("| Benchmark | Mean | Median | Throughput |\n");
                 out.push_str("|-----------|------|--------|------------|\n");
+            } else if has_cpu {
+                out.push_str("| Benchmark | Mean | CPU | Eff% | StdDev |\n");
+                out.push_str("|-----------|------|-----|------|--------|\n");
             } else {
                 out.push_str("| Benchmark | Mean | Median | StdDev |\n");
                 out.push_str("|-----------|------|--------|--------|\n");
             }
 
             for bench in &comp.benchmarks {
-                if has_throughput {
+                let cpu_mean = bench
+                    .cpu_summary
+                    .as_ref()
+                    .map(|c| format_ns(c.mean))
+                    .unwrap_or_default();
+                let efficiency = bench
+                    .cpu_summary
+                    .as_ref()
+                    .map(|c| {
+                        if bench.summary.mean > 0.0 {
+                            format!("{:.0}%", c.mean / bench.summary.mean * 100.0)
+                        } else {
+                            String::new()
+                        }
+                    })
+                    .unwrap_or_default();
+
+                if has_throughput && has_cpu {
+                    let tp = comp
+                        .throughput
+                        .as_ref()
+                        .map(|t| t.format(bench.summary.mean))
+                        .unwrap_or_default();
+                    out.push_str(&format!(
+                        "| {} | {} | {} | {} | {} |\n",
+                        bench.name,
+                        format_ns(bench.summary.mean),
+                        cpu_mean,
+                        efficiency,
+                        tp,
+                    ));
+                } else if has_throughput {
                     let tp = comp
                         .throughput
                         .as_ref()
@@ -237,6 +304,15 @@ impl SuiteResult {
                         format_ns(bench.summary.mean),
                         format_ns(bench.summary.median),
                         tp,
+                    ));
+                } else if has_cpu {
+                    out.push_str(&format!(
+                        "| {} | {} | {} | {} | ±{} |\n",
+                        bench.name,
+                        format_ns(bench.summary.mean),
+                        cpu_mean,
+                        efficiency,
+                        format_ns(bench.summary.std_dev()),
                     ));
                 } else {
                     out.push_str(&format!(
@@ -298,7 +374,7 @@ impl SuiteResult {
 
         // Header
         out.push_str(
-            "group,benchmark,mean_ns,std_dev_ns,median_ns,mad_ns,min_ns,max_ns,n,cv,throughput_value,throughput_unit\n",
+            "group,benchmark,mean_ns,std_dev_ns,median_ns,mad_ns,min_ns,max_ns,n,cv,cpu_mean_ns,cpu_efficiency,throughput_value,throughput_unit\n",
         );
 
         // Comparison groups
@@ -313,8 +389,21 @@ impl SuiteResult {
                     })
                     .unwrap_or_else(|| (String::new(), String::new()));
 
+                let (cpu_mean, cpu_eff) = bench
+                    .cpu_summary
+                    .as_ref()
+                    .map(|c| {
+                        let eff = if bench.summary.mean > 0.0 {
+                            c.mean / bench.summary.mean
+                        } else {
+                            0.0
+                        };
+                        (format!("{:.2}", c.mean), format!("{eff:.4}"))
+                    })
+                    .unwrap_or_else(|| (String::new(), String::new()));
+
                 out.push_str(&format!(
-                    "{},{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{},{:.4},{},{}\n",
+                    "{},{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{},{:.4},{},{},{},{}\n",
                     csv_escape(&comp.group_name),
                     csv_escape(&bench.name),
                     bench.summary.mean,
@@ -325,6 +414,8 @@ impl SuiteResult {
                     bench.summary.max,
                     bench.summary.n,
                     bench.summary.cv(),
+                    cpu_mean,
+                    cpu_eff,
                     tp_val,
                     tp_unit,
                 ));
@@ -333,8 +424,21 @@ impl SuiteResult {
 
         // Standalone benchmarks
         for bench in &self.standalones {
+            let (cpu_mean, cpu_eff) = bench
+                .cpu_summary
+                .as_ref()
+                .map(|c| {
+                    let eff = if bench.summary.mean > 0.0 {
+                        c.mean / bench.summary.mean
+                    } else {
+                        0.0
+                    };
+                    (format!("{:.2}", c.mean), format!("{eff:.4}"))
+                })
+                .unwrap_or_else(|| (String::new(), String::new()));
+
             out.push_str(&format!(
-                ",{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{},{:.4},,\n",
+                ",{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{},{:.4},{},{},,\n",
                 csv_escape(&bench.name),
                 bench.summary.mean,
                 bench.summary.std_dev(),
@@ -344,6 +448,8 @@ impl SuiteResult {
                 bench.summary.max,
                 bench.summary.n,
                 bench.summary.cv(),
+                cpu_mean,
+                cpu_eff,
             ));
         }
 
@@ -353,7 +459,10 @@ impl SuiteResult {
     /// Group benchmarks across all comparison results by a tag key.
     ///
     /// Returns a map from tag value to list of (group_name, benchmark_result) pairs.
-    pub fn group_by_tag(&self, tag_key: &str) -> std::collections::BTreeMap<String, Vec<(&str, &BenchmarkResult)>> {
+    pub fn group_by_tag(
+        &self,
+        tag_key: &str,
+    ) -> std::collections::BTreeMap<String, Vec<(&str, &BenchmarkResult)>> {
         let mut groups = std::collections::BTreeMap::new();
         for comp in &self.comparisons {
             for bench in &comp.benchmarks {
@@ -520,6 +629,7 @@ mod tests {
         let br = BenchmarkResult {
             name: "test".to_string(),
             summary: make_summary(100.0),
+            cpu_summary: None,
             tags: vec![
                 ("library".to_string(), "zenflate".to_string()),
                 ("level".to_string(), "L6".to_string()),
@@ -542,11 +652,13 @@ mod tests {
                     BenchmarkResult {
                         name: "zenflate".to_string(),
                         summary: make_summary(5_000_000.0), // 5ms
+                        cpu_summary: None,
                         tags: vec![("library".to_string(), "zenflate".to_string())],
                     },
                     BenchmarkResult {
                         name: "libdeflate".to_string(),
                         summary: make_summary(10_000_000.0), // 10ms
+                        cpu_summary: None,
                         tags: vec![("library".to_string(), "libdeflate".to_string())],
                     },
                 ],

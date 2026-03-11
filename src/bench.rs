@@ -140,12 +140,8 @@ impl BenchGroup {
     ///
     /// Tags enable grouping and pivoting in reports. Common tags:
     /// `("library", "zenflate")`, `("level", "L6")`, `("data", "mixed")`.
-    pub fn bench_tagged<F>(
-        &mut self,
-        name: impl Into<String>,
-        tags: &[(&str, &str)],
-        f: F,
-    ) where
+    pub fn bench_tagged<F>(&mut self, name: impl Into<String>, tags: &[(&str, &str)], f: F)
+    where
         F: FnMut(&mut Bencher) + Send + 'static,
     {
         self.benchmarks.push(Benchmark {
@@ -278,6 +274,8 @@ pub struct Bencher {
     pub(crate) iterations: usize,
     /// Total elapsed wall-clock nanoseconds for this sample.
     pub(crate) elapsed_ns: u64,
+    /// Total CPU (user) nanoseconds for this sample. 0 when `cpu-time` feature disabled.
+    pub(crate) cpu_ns: u64,
 }
 
 impl Bencher {
@@ -285,6 +283,7 @@ impl Bencher {
         Self {
             iterations,
             elapsed_ns: 0,
+            cpu_ns: 0,
         }
     }
 
@@ -297,11 +296,19 @@ impl Bencher {
     /// type has expensive drop (e.g., large `Vec`), use `with_input().run()` instead.
     #[inline(never)]
     pub fn iter<O, F: FnMut() -> O>(&mut self, mut f: F) {
+        #[cfg(feature = "cpu-time")]
+        let cpu_start = cpu_time::ThreadTime::now();
+
         let start = std::time::Instant::now();
         for _ in 0..self.iterations {
             std::hint::black_box(f());
         }
         self.elapsed_ns = start.elapsed().as_nanos() as u64;
+
+        #[cfg(feature = "cpu-time")]
+        {
+            self.cpu_ns = cpu_start.elapsed().as_nanos() as u64;
+        }
     }
 
     /// Create a builder that provides fresh input for each iteration.
@@ -332,15 +339,31 @@ impl<I, S: FnMut() -> I> InputBencher<'_, I, S> {
         let iterations = self.bencher.iterations;
         let mut setup = self.setup;
         let mut total_ns: u64 = 0;
+        #[cfg(feature = "cpu-time")]
+        let mut total_cpu_ns: u64 = 0;
 
         for _ in 0..iterations {
             let input = std::hint::black_box(setup());
+
+            #[cfg(feature = "cpu-time")]
+            let cpu_start = cpu_time::ThreadTime::now();
+
             let start = std::time::Instant::now();
             let output = std::hint::black_box(f(input));
             let elapsed = start.elapsed().as_nanos() as u64;
             total_ns += elapsed;
+
+            #[cfg(feature = "cpu-time")]
+            {
+                total_cpu_ns += cpu_start.elapsed().as_nanos() as u64;
+            }
+
             drop(output); // teardown outside timing
         }
         self.bencher.elapsed_ns = total_ns;
+        #[cfg(feature = "cpu-time")]
+        {
+            self.bencher.cpu_ns = total_cpu_ns;
+        }
     }
 }
