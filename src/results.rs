@@ -123,7 +123,7 @@ impl SuiteResult {
                 let sig = if analysis.significant { "*" } else { " " };
 
                 eprintln!(
-                    "    {} vs {}:  {}{:+.2}%{}{}  (d={:.2}, CI [{}, {}])",
+                    "    {} vs {}:  {}{:+.2}%{}{}  (d={:.2}, p={:.4}, CI [{}, {}])",
                     base,
                     cand,
                     arrow,
@@ -131,6 +131,7 @@ impl SuiteResult {
                     reset,
                     sig,
                     analysis.cohens_d,
+                    analysis.wilcoxon_p,
                     format_ns(analysis.ci_lower),
                     format_ns(analysis.ci_upper),
                 );

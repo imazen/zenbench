@@ -147,6 +147,9 @@ pub struct PairedAnalysis {
     /// Drift correlation: Spearman rank correlation of measurement index vs time.
     /// Values near ±1 indicate systematic drift (thermal throttling, etc.).
     pub drift_correlation: f64,
+    /// Wilcoxon signed-rank test p-value (two-sided).
+    /// Non-parametric — valid even for non-normal benchmark distributions.
+    pub wilcoxon_p: f64,
 }
 
 impl PairedAnalysis {
@@ -231,6 +234,9 @@ impl PairedAnalysis {
         // Drift detection: Spearman correlation of index vs diff
         let drift_correlation = spearman_correlation(&clean_diffs);
 
+        // Wilcoxon signed-rank test (non-parametric)
+        let wilcoxon_p = wilcoxon_signed_rank(&clean_diffs);
+
         Some(PairedAnalysis {
             baseline: base_summary,
             candidate: cand_summary,
@@ -243,6 +249,7 @@ impl PairedAnalysis {
             ci_lower,
             ci_upper,
             drift_correlation,
+            wilcoxon_p,
         })
     }
 }
@@ -367,6 +374,91 @@ fn spearman_correlation(values: &[f64]) -> f64 {
 
     let n_f = n as f64;
     1.0 - (6.0 * sum_d2) / (n_f * (n_f * n_f - 1.0))
+}
+
+/// Wilcoxon signed-rank test (two-sided) on paired differences.
+///
+/// Tests H0: the median of the differences is zero.
+/// Uses normal approximation with continuity correction for n >= 10.
+/// Returns p-value. For small n (< 10), returns 1.0 (insufficient data).
+fn wilcoxon_signed_rank(diffs: &[f64]) -> f64 {
+    // Remove zeros (ties with zero)
+    let nonzero: Vec<f64> = diffs.iter().copied().filter(|&d| d.abs() > f64::EPSILON).collect();
+    let n = nonzero.len();
+
+    if n < 10 {
+        return 1.0; // Not enough data for normal approximation
+    }
+
+    // Rank by absolute value
+    let mut indexed: Vec<(usize, f64)> = nonzero.iter().copied().enumerate().collect();
+    indexed.sort_unstable_by(|a, b| a.1.abs().total_cmp(&b.1.abs()));
+
+    // Assign ranks (average ties)
+    let mut ranks = vec![0.0f64; n];
+    let mut i = 0;
+    while i < n {
+        let mut j = i;
+        while j < n && (indexed[j].1.abs() - indexed[i].1.abs()).abs() < f64::EPSILON {
+            j += 1;
+        }
+        // Average rank for tied group
+        let avg_rank = (i + j + 1) as f64 / 2.0; // 1-based
+        for item in &indexed[i..j] {
+            ranks[item.0] = avg_rank;
+        }
+        i = j;
+    }
+
+    // W+ = sum of ranks for positive differences
+    let w_plus: f64 = nonzero
+        .iter()
+        .zip(ranks.iter())
+        .filter(|&(&d, _)| d > 0.0)
+        .map(|(_, r)| *r)
+        .sum();
+
+    // Normal approximation
+    let n_f = n as f64;
+    let expected = n_f * (n_f + 1.0) / 4.0;
+    let variance = n_f * (n_f + 1.0) * (2.0 * n_f + 1.0) / 24.0;
+    let sd = variance.sqrt();
+
+    if sd < f64::EPSILON {
+        return 1.0;
+    }
+
+    // z with continuity correction
+    let z = (w_plus - expected).abs() - 0.5;
+    let z = z / sd;
+
+    // Two-sided p-value from normal distribution
+    // Use the complementary error function approximation
+    2.0 * normal_cdf_complement(z)
+}
+
+/// Approximation of 1 - Φ(x) for x >= 0 using Abramowitz & Stegun 26.2.17.
+/// Accurate to ~1.5e-7.
+fn normal_cdf_complement(x: f64) -> f64 {
+    if x < 0.0 {
+        return 1.0 - normal_cdf_complement(-x);
+    }
+
+    let p = 0.2316419;
+    let b1 = 0.319381530;
+    let b2 = -0.356563782;
+    let b3 = 1.781477937;
+    let b4 = -1.821255978;
+    let b5 = 1.330274429;
+
+    let t = 1.0 / (1.0 + p * x);
+    let t2 = t * t;
+    let t3 = t2 * t;
+    let t4 = t3 * t;
+    let t5 = t4 * t;
+
+    let pdf = (-0.5 * x * x).exp() / (2.0 * std::f64::consts::PI).sqrt();
+    pdf * (b1 * t + b2 * t2 + b3 * t3 + b4 * t4 + b5 * t5)
 }
 
 /// Minimal xoshiro256** PRNG. No external deps, deterministic, fast.
@@ -526,6 +618,24 @@ mod tests {
         assert!(result.significant);
         assert!(result.pct_change < -10.0);
         assert!(result.cohens_d < 0.0);
+    }
+
+    #[test]
+    fn wilcoxon_no_difference() {
+        // Symmetric around zero — should not be significant
+        let diffs: Vec<f64> = (0..50)
+            .map(|i| if i % 2 == 0 { 1.0 } else { -1.0 })
+            .collect();
+        let p = wilcoxon_signed_rank(&diffs);
+        assert!(p > 0.05, "p={p} should be non-significant");
+    }
+
+    #[test]
+    fn wilcoxon_clear_difference() {
+        // All positive — should be highly significant
+        let diffs: Vec<f64> = (1..=30).map(|i| i as f64).collect();
+        let p = wilcoxon_signed_rank(&diffs);
+        assert!(p < 0.01, "p={p} should be highly significant");
     }
 
     #[test]
