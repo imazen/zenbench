@@ -13,6 +13,31 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Run a benchmark as a background process.
+    ///
+    /// Spawns `cargo bench --bench <name>` in the background and tracks it.
+    /// Use --wait to block until the benchmark completes.
+    Run {
+        /// Benchmark target name (as in `cargo bench --bench <name>`).
+        bench: String,
+
+        /// Project root directory.
+        #[arg(short, long, default_value = ".")]
+        project: PathBuf,
+
+        /// Wait for the benchmark to complete and print results.
+        #[arg(long)]
+        wait: bool,
+
+        /// Timeout in seconds when using --wait (default: 600).
+        #[arg(long, default_value = "600")]
+        timeout: u64,
+
+        /// Extra arguments to pass to `cargo bench` (after --).
+        #[arg(long)]
+        cargo_args: Option<String>,
+    },
+
     /// List all benchmark runs (active and completed).
     List {
         /// Project root directory (default: current directory).
@@ -41,8 +66,11 @@ enum Commands {
     },
 
     /// Show results of a completed run.
+    ///
+    /// Use "latest" to find the most recent run with results.
+    /// You can also pass a path to a results JSON file directly.
     Results {
-        /// Run ID, or "latest" for most recent.
+        /// Run ID, "latest", or path to a results JSON file.
         run_id: String,
 
         /// Project root directory.
@@ -107,6 +135,13 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Run {
+            bench,
+            project,
+            wait,
+            timeout,
+            cargo_args,
+        } => cmd_run(&project, &bench, wait, timeout, cargo_args.as_deref()),
         Commands::List { project } => cmd_list(&project),
         Commands::Status { run_id, project } => cmd_status(&project, &run_id),
         Commands::Kill { target, project } => cmd_kill(&project, &target),
@@ -133,6 +168,94 @@ fn main() {
     }
 }
 
+fn cmd_run(
+    project: &Path,
+    bench_name: &str,
+    wait: bool,
+    timeout_secs: u64,
+    cargo_args: Option<&str>,
+) {
+    let mut args = vec!["bench", "--bench", bench_name];
+    let extra_args: Vec<&str>;
+    if let Some(extra) = cargo_args {
+        extra_args = extra.split_whitespace().collect();
+        args.extend(&extra_args);
+    }
+
+    let str_args: Vec<&str> = args.to_vec();
+
+    match daemon::spawn_detached(project, "cargo", &str_args) {
+        Ok((run_id, mut child)) => {
+            eprintln!("[zenbench] run {run_id} spawned");
+
+            if wait {
+                // Wait for the child to prevent zombie processes
+                let _exit_status = child.wait();
+                eprintln!("[zenbench] waiting for completion (timeout: {timeout_secs}s)...");
+                match daemon::wait_for_run(
+                    project,
+                    &run_id,
+                    std::time::Duration::from_secs(2),
+                    std::time::Duration::from_secs(timeout_secs),
+                ) {
+                    Ok(state) => match &state.status {
+                        daemon::RunStatus::Completed => {
+                            eprintln!("[zenbench] run {run_id} completed");
+                            if let Some(result_path) = &state.result_path {
+                                match zenbench::SuiteResult::load(result_path) {
+                                    Ok(result) => result.print_report(),
+                                    Err(e) => eprintln!("Error loading results: {e}"),
+                                }
+                            }
+                        }
+                        daemon::RunStatus::Failed(msg) => {
+                            eprintln!("[zenbench] run {run_id} failed: {msg}");
+                            // Print stderr log if available
+                            let stderr_path =
+                                daemon::runs_dir(project).join(format!("{run_id}.stderr.log"));
+                            if let Ok(log) = std::fs::read_to_string(&stderr_path) {
+                                let trimmed = log.trim();
+                                if !trimmed.is_empty() {
+                                    eprintln!("--- stderr ---");
+                                    // Print last 2000 chars
+                                    let start = trimmed.len().saturating_sub(2000);
+                                    eprintln!("{}", &trimmed[start..]);
+                                    eprintln!("--- end stderr ---");
+                                }
+                            }
+                            std::process::exit(1);
+                        }
+                        daemon::RunStatus::Killed => {
+                            eprintln!("[zenbench] run {run_id} was killed");
+                            std::process::exit(1);
+                        }
+                        _ => {
+                            eprintln!(
+                                "[zenbench] run {run_id} in unexpected state: {:?}",
+                                state.status
+                            );
+                            std::process::exit(1);
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("[zenbench] error: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                // Drop child without waiting — zombie will be reaped when this process exits
+                drop(child);
+                eprintln!("[zenbench] use `zenbench status {run_id}` to check progress");
+                eprintln!("[zenbench] use `zenbench results {run_id}` when complete");
+            }
+        }
+        Err(e) => {
+            eprintln!("[zenbench] error spawning benchmark: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
 fn cmd_list(project: &Path) {
     match daemon::list_runs(project) {
         Ok(runs) => {
@@ -141,15 +264,27 @@ fn cmd_list(project: &Path) {
                 return;
             }
             println!(
-                "{:<20} {:<10} {:<8} {:<12} COMMAND",
+                "{:<24} {:<12} {:<8} {:<10} COMMAND",
                 "ID", "STATUS", "PID", "GIT"
             );
             for run in runs {
-                let status = format!("{:?}", run.status);
+                let status = match &run.status {
+                    daemon::RunStatus::Queued => "queued".to_string(),
+                    daemon::RunStatus::Running => {
+                        if daemon::is_process_alive(run.pid) {
+                            "running".to_string()
+                        } else {
+                            "running?".to_string() // shouldn't happen with reconciliation
+                        }
+                    }
+                    daemon::RunStatus::Completed => "completed".to_string(),
+                    daemon::RunStatus::Failed(_) => "failed".to_string(),
+                    daemon::RunStatus::Killed => "killed".to_string(),
+                };
                 let git = run.git_hash.as_deref().unwrap_or("-");
                 let git_short = if git.len() > 8 { &git[..8] } else { git };
                 println!(
-                    "{:<20} {:<10} {:<8} {:<12} {}",
+                    "{:<24} {:<12} {:<8} {:<10} {}",
                     run.id, status, run.pid, git_short, run.command
                 );
             }
@@ -172,7 +307,24 @@ fn cmd_status(project: &Path, run_id: &str) {
             println!("Git: {}", state.git_hash.as_deref().unwrap_or("unknown"));
             println!("Command: {}", state.command);
             if let Some(path) = &state.result_path {
-                println!("Results: {}", path.display());
+                let exists = path.exists();
+                println!(
+                    "Results: {} ({})",
+                    path.display(),
+                    if exists { "exists" } else { "pending" }
+                );
+            }
+            // Show elapsed time
+            let now = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let elapsed = now.saturating_sub(state.started_at);
+            if let Some(finished) = state.finished_at {
+                let duration = finished.saturating_sub(state.started_at);
+                println!("Duration: {duration}s");
+            } else {
+                println!("Elapsed: {elapsed}s");
             }
         }
         Err(e) => eprintln!("Error loading run {run_id}: {e}"),
@@ -200,15 +352,28 @@ fn cmd_kill(project: &Path, target: &str) {
 }
 
 fn cmd_results(project: &Path, run_id: &str, json: bool, markdown: bool, csv: bool) {
+    // Check if it's a direct file path first
+    let file_path = PathBuf::from(run_id);
+    if file_path.exists() && file_path.extension().is_some_and(|e| e == "json") {
+        match zenbench::SuiteResult::load(&file_path) {
+            Ok(result) => {
+                output_result(&result, json, markdown, csv);
+                return;
+            }
+            Err(e) => {
+                eprintln!("Error loading results from {}: {e}", file_path.display());
+                return;
+            }
+        }
+    }
+
+    // Resolve "latest" to the most recent completed run
     let actual_id = if run_id == "latest" {
-        match daemon::list_runs(project) {
-            Ok(runs) => {
-                if let Some(last) = runs.last() {
-                    last.id.clone()
-                } else {
-                    eprintln!("No runs found.");
-                    return;
-                }
+        match daemon::find_latest_with_results(project) {
+            Ok(Some(state)) => state.id,
+            Ok(None) => {
+                eprintln!("No completed runs with results found.");
+                return;
             }
             Err(e) => {
                 eprintln!("Error: {e}");
@@ -223,27 +388,37 @@ fn cmd_results(project: &Path, run_id: &str, json: bool, markdown: bool, csv: bo
         Ok(state) => {
             if let Some(result_path) = &state.result_path {
                 match zenbench::SuiteResult::load(result_path) {
-                    Ok(result) => {
-                        if json {
-                            println!("{}", serde_json::to_string_pretty(&result).unwrap());
-                        } else if markdown {
-                            print!("{}", result.to_markdown());
-                        } else if csv {
-                            print!("{}", result.to_csv());
-                        } else {
-                            result.print_report();
+                    Ok(result) => output_result(&result, json, markdown, csv),
+                    Err(e) => {
+                        eprintln!("Error loading results from {}: {e}", result_path.display());
+                        if !result_path.exists() {
+                            eprintln!(
+                                "Run {} status: {:?}. Results file does not exist.",
+                                actual_id, state.status
+                            );
                         }
                     }
-                    Err(e) => eprintln!("Error loading results: {e}"),
                 }
             } else {
                 eprintln!(
-                    "Run {} has no results yet (status: {:?})",
+                    "Run {} has no results path (status: {:?})",
                     actual_id, state.status
                 );
             }
         }
         Err(e) => eprintln!("Error: {e}"),
+    }
+}
+
+fn output_result(result: &zenbench::SuiteResult, json: bool, markdown: bool, csv: bool) {
+    if json {
+        println!("{}", serde_json::to_string_pretty(result).unwrap());
+    } else if markdown {
+        print!("{}", result.to_markdown());
+    } else if csv {
+        print!("{}", result.to_csv());
+    } else {
+        result.print_report();
     }
 }
 
@@ -570,3 +745,5 @@ fn cmd_clean(project: &Path, max_age_hours: u64) {
         Err(e) => eprintln!("Error: {e}"),
     }
 }
+
+use std::time::SystemTime;

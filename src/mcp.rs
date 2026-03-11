@@ -99,7 +99,7 @@ fn handle_tools_list(request: &JsonRpcRequest) -> JsonRpcResponse {
         "tools": [
             {
                 "name": "list_runs",
-                "description": "List all benchmark runs (active and completed)",
+                "description": "List all benchmark runs (active and completed). Status is auto-reconciled: dead processes are detected as completed or failed.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {},
@@ -108,7 +108,7 @@ fn handle_tools_list(request: &JsonRpcRequest) -> JsonRpcResponse {
             },
             {
                 "name": "run_status",
-                "description": "Get detailed status of a specific benchmark run",
+                "description": "Get detailed status of a specific benchmark run, including whether the process is alive and if results exist.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -122,7 +122,7 @@ fn handle_tools_list(request: &JsonRpcRequest) -> JsonRpcResponse {
             },
             {
                 "name": "kill_run",
-                "description": "Kill a running benchmark by ID, or 'stale' to kill all stale runs",
+                "description": "Kill a running benchmark by ID, or 'stale' to kill all stale runs from previous git commits.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -136,32 +136,64 @@ fn handle_tools_list(request: &JsonRpcRequest) -> JsonRpcResponse {
             },
             {
                 "name": "spawn_bench",
-                "description": "Spawn a benchmark as a detached background process",
+                "description": "Spawn a benchmark as a detached background process. The process runs independently and results are saved to a JSON file. Use get_results or wait_for_results to retrieve them.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
+                        "bench_name": {
+                            "type": "string",
+                            "description": "Benchmark target name (as in `cargo bench --bench <name>`)"
+                        },
                         "command": {
                             "type": "string",
-                            "description": "Command to run (e.g., 'cargo')"
+                            "description": "Command to run (default: 'cargo')"
                         },
                         "args": {
                             "type": "array",
                             "items": { "type": "string" },
-                            "description": "Arguments (e.g., ['bench', '--bench', 'my_bench'])"
+                            "description": "Full argument list. If bench_name is provided, this is ignored and args are built automatically."
                         }
                     },
-                    "required": ["command", "args"]
+                    "required": []
                 }
             },
             {
                 "name": "get_results",
-                "description": "Get benchmark results for a completed run. Use run_id='latest' for most recent.",
+                "description": "Get benchmark results for a completed run. Use run_id='latest' for most recent completed run with results. Can also pass a path to a results JSON file.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "run_id": {
                             "type": "string",
-                            "description": "Run ID, or 'latest' for most recent"
+                            "description": "Run ID, 'latest' for most recent, or path to a results JSON file"
+                        },
+                        "format": {
+                            "type": "string",
+                            "enum": ["json", "markdown", "csv"],
+                            "description": "Output format (default: json)"
+                        }
+                    },
+                    "required": ["run_id"]
+                }
+            },
+            {
+                "name": "wait_for_results",
+                "description": "Wait for a benchmark run to complete and return its results. Polls every 2 seconds until complete or timeout.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "run_id": {
+                            "type": "string",
+                            "description": "Run ID to wait for"
+                        },
+                        "timeout_secs": {
+                            "type": "integer",
+                            "description": "Timeout in seconds (default: 600)"
+                        },
+                        "format": {
+                            "type": "string",
+                            "enum": ["json", "markdown", "csv"],
+                            "description": "Output format (default: markdown)"
                         }
                     },
                     "required": ["run_id"]
@@ -169,7 +201,7 @@ fn handle_tools_list(request: &JsonRpcRequest) -> JsonRpcResponse {
             },
             {
                 "name": "compare_results",
-                "description": "Compare two benchmark result files and return the comparison",
+                "description": "Compare two benchmark result files and return the comparison with percentage changes.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -187,7 +219,7 @@ fn handle_tools_list(request: &JsonRpcRequest) -> JsonRpcResponse {
             },
             {
                 "name": "clean_runs",
-                "description": "Clean up old run metadata",
+                "description": "Clean up old run metadata, stderr logs, and result files.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -229,6 +261,7 @@ fn handle_tools_call(request: &JsonRpcRequest, project_root: &Path) -> JsonRpcRe
         "kill_run" => tool_kill_run(project_root, &arguments),
         "spawn_bench" => tool_spawn_bench(project_root, &arguments),
         "get_results" => tool_get_results(project_root, &arguments),
+        "wait_for_results" => tool_wait_for_results(project_root, &arguments),
         "compare_results" => tool_compare_results(&arguments),
         "clean_runs" => tool_clean_runs(project_root, &arguments),
         _ => Err(format!("Unknown tool: {tool_name}")),
@@ -275,13 +308,14 @@ fn tool_list_runs(project_root: &Path) -> Result<String, String> {
         .map(|run| {
             serde_json::json!({
                 "id": run.id,
-                "status": format!("{:?}", run.status),
+                "status": format_status(&run.status),
                 "pid": run.pid,
                 "git_hash": run.git_hash,
                 "command": run.command,
                 "started_at": run.started_at,
                 "finished_at": run.finished_at,
                 "alive": daemon::is_process_alive(run.pid),
+                "has_results": run.result_path.as_ref().is_some_and(|p| p.exists()),
             })
         })
         .collect();
@@ -299,9 +333,10 @@ fn tool_run_status(project_root: &Path, args: &Value) -> Result<String, String> 
         .map_err(|e| format!("Error loading run {run_id}: {e}"))?;
 
     let alive = daemon::is_process_alive(state.pid);
+    let has_results = state.result_path.as_ref().is_some_and(|p| p.exists());
     let output = serde_json::json!({
         "id": state.id,
-        "status": format!("{:?}", state.status),
+        "status": format_status(&state.status),
         "pid": state.pid,
         "alive": alive,
         "git_hash": state.git_hash,
@@ -309,6 +344,7 @@ fn tool_run_status(project_root: &Path, args: &Value) -> Result<String, String> 
         "started_at": state.started_at,
         "finished_at": state.finished_at,
         "result_path": state.result_path,
+        "has_results": has_results,
     });
 
     serde_json::to_string_pretty(&output).map_err(|e| format!("Serialization error: {e}"))
@@ -339,22 +375,38 @@ fn tool_kill_run(project_root: &Path, args: &Value) -> Result<String, String> {
 }
 
 fn tool_spawn_bench(project_root: &Path, args: &Value) -> Result<String, String> {
+    // Support both bench_name (simple) and command+args (advanced)
+    if let Some(bench_name) = args.get("bench_name").and_then(|v| v.as_str()) {
+        let spawn_args = vec!["bench", "--bench", bench_name];
+        let run_id = daemon::spawn_fire_and_forget(project_root, "cargo", &spawn_args)
+            .map_err(|e| format!("Error spawning: {e}"))?;
+        return Ok(serde_json::to_string_pretty(&serde_json::json!({
+            "run_id": run_id,
+            "message": format!("Spawned benchmark '{bench_name}' as run {run_id}. Use wait_for_results or get_results to retrieve results."),
+        }))
+        .unwrap());
+    }
+
     let command = args
         .get("command")
         .and_then(|v| v.as_str())
-        .ok_or("Missing required argument: command")?;
+        .ok_or("Missing required argument: bench_name or command")?;
 
     let args_array = args
         .get("args")
         .and_then(|v| v.as_array())
-        .ok_or("Missing required argument: args")?;
+        .ok_or("Missing required argument: args (when using command)")?;
 
     let str_args: Vec<&str> = args_array.iter().filter_map(|v| v.as_str()).collect();
 
-    let run_id = daemon::spawn_detached(project_root, command, &str_args)
+    let run_id = daemon::spawn_fire_and_forget(project_root, command, &str_args)
         .map_err(|e| format!("Error spawning: {e}"))?;
 
-    Ok(format!("Spawned benchmark run: {run_id}"))
+    Ok(serde_json::to_string_pretty(&serde_json::json!({
+        "run_id": run_id,
+        "message": format!("Spawned run {run_id}. Use wait_for_results or get_results to retrieve results."),
+    }))
+    .unwrap())
 }
 
 fn tool_get_results(project_root: &Path, args: &Value) -> Result<String, String> {
@@ -363,9 +415,24 @@ fn tool_get_results(project_root: &Path, args: &Value) -> Result<String, String>
         .and_then(|v| v.as_str())
         .ok_or("Missing required argument: run_id")?;
 
+    let format = args
+        .get("format")
+        .and_then(|v| v.as_str())
+        .unwrap_or("json");
+
+    // Check if it's a direct file path
+    let file_path = std::path::PathBuf::from(run_id);
+    if file_path.exists() && file_path.extension().is_some_and(|e| e == "json") {
+        let result = crate::SuiteResult::load(&file_path)
+            .map_err(|e| format!("Error loading results: {e}"))?;
+        return format_result(&result, format);
+    }
+
     let actual_id = if run_id == "latest" {
-        let runs = daemon::list_runs(project_root).map_err(|e| format!("Error: {e}"))?;
-        runs.last().map(|r| r.id.clone()).ok_or("No runs found.")?
+        let state = daemon::find_latest_with_results(project_root)
+            .map_err(|e| format!("Error: {e}"))?
+            .ok_or("No completed runs with results found.")?;
+        state.id
     } else {
         run_id.to_string()
     };
@@ -374,14 +441,52 @@ fn tool_get_results(project_root: &Path, args: &Value) -> Result<String, String>
         daemon::load_run_state(project_root, &actual_id).map_err(|e| format!("Error: {e}"))?;
 
     let result_path = state.result_path.as_ref().ok_or(format!(
-        "Run {} has no results yet (status: {:?})",
-        actual_id, state.status
+        "Run {} has no results yet (status: {})",
+        actual_id,
+        format_status(&state.status)
     ))?;
 
     let result =
         crate::SuiteResult::load(result_path).map_err(|e| format!("Error loading results: {e}"))?;
 
-    serde_json::to_string_pretty(&result).map_err(|e| format!("Serialization error: {e}"))
+    format_result(&result, format)
+}
+
+fn tool_wait_for_results(project_root: &Path, args: &Value) -> Result<String, String> {
+    let run_id = args
+        .get("run_id")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing required argument: run_id")?;
+
+    let timeout_secs = args
+        .get("timeout_secs")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(600);
+
+    let format = args
+        .get("format")
+        .and_then(|v| v.as_str())
+        .unwrap_or("markdown");
+
+    let state = daemon::wait_for_run(
+        project_root,
+        run_id,
+        std::time::Duration::from_secs(2),
+        std::time::Duration::from_secs(timeout_secs),
+    )
+    .map_err(|e| format!("Error: {e}"))?;
+
+    match &state.status {
+        daemon::RunStatus::Completed => {
+            let result_path = state.result_path.as_ref().ok_or("No result path")?;
+            let result = crate::SuiteResult::load(result_path)
+                .map_err(|e| format!("Error loading results: {e}"))?;
+            format_result(&result, format)
+        }
+        daemon::RunStatus::Failed(msg) => Err(format!("Benchmark failed: {msg}")),
+        daemon::RunStatus::Killed => Err("Benchmark was killed.".to_string()),
+        other => Err(format!("Unexpected status: {}", format_status(other))),
+    }
 }
 
 fn tool_compare_results(args: &Value) -> Result<String, String> {
@@ -428,6 +533,8 @@ fn tool_compare_results(args: &Value) -> Result<String, String> {
                         "baseline_mean_ns": base_bench.summary.mean,
                         "candidate_mean_ns": cand_bench.summary.mean,
                         "pct_change": pct,
+                        "baseline_formatted": crate::format_ns(base_bench.summary.mean),
+                        "candidate_formatted": crate::format_ns(cand_bench.summary.mean),
                     }));
                 }
             }
@@ -452,6 +559,8 @@ fn tool_compare_results(args: &Value) -> Result<String, String> {
                 "baseline_mean_ns": base_bench.summary.mean,
                 "candidate_mean_ns": cand_bench.summary.mean,
                 "pct_change": pct,
+                "baseline_formatted": crate::format_ns(base_bench.summary.mean),
+                "candidate_formatted": crate::format_ns(cand_bench.summary.mean),
             }));
         }
     }
@@ -469,6 +578,26 @@ fn tool_clean_runs(project_root: &Path, args: &Value) -> Result<String, String> 
         .map_err(|e| format!("Error: {e}"))?;
 
     Ok(format!("Cleaned up {cleaned} old run(s)."))
+}
+
+// --- Helpers ---
+
+fn format_status(status: &daemon::RunStatus) -> String {
+    match status {
+        daemon::RunStatus::Queued => "queued".to_string(),
+        daemon::RunStatus::Running => "running".to_string(),
+        daemon::RunStatus::Completed => "completed".to_string(),
+        daemon::RunStatus::Failed(msg) => format!("failed: {msg}"),
+        daemon::RunStatus::Killed => "killed".to_string(),
+    }
+}
+
+fn format_result(result: &crate::SuiteResult, format: &str) -> Result<String, String> {
+    match format {
+        "markdown" => Ok(result.to_markdown()),
+        "csv" => Ok(result.to_csv()),
+        _ => serde_json::to_string_pretty(result).map_err(|e| format!("Serialization error: {e}")),
+    }
 }
 
 // --- JSON-RPC types ---

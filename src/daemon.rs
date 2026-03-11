@@ -72,7 +72,10 @@ pub fn lock_path(project_root: &Path) -> PathBuf {
     project_root.join(STATE_DIR).join(LOCK_FILE)
 }
 
-/// List all known runs.
+/// List all known runs, with automatic state reconciliation.
+///
+/// Dead processes with result files are marked Completed.
+/// Dead processes without result files are marked Failed.
 pub fn list_runs(project_root: &Path) -> std::io::Result<Vec<RunState>> {
     let dir = runs_dir(project_root);
     if !dir.exists() {
@@ -83,9 +86,18 @@ pub fn list_runs(project_root: &Path) -> std::io::Result<Vec<RunState>> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.extension().is_some_and(|e| e == "json") {
+        if path.extension().is_some_and(|e| e == "json")
+            && !path
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().contains(".results."))
+        {
             if let Ok(data) = std::fs::read_to_string(&path) {
-                if let Ok(state) = serde_json::from_str::<RunState>(&data) {
+                if let Ok(mut state) = serde_json::from_str::<RunState>(&data) {
+                    // Reconcile: detect processes that finished without updating state
+                    if reconcile_state(project_root, &mut state) {
+                        // Save the updated state back to disk
+                        let _ = save_run_state(project_root, &state);
+                    }
                     runs.push(state);
                 }
             }
@@ -106,11 +118,77 @@ pub fn save_run_state(project_root: &Path, state: &RunState) -> std::io::Result<
     std::fs::write(path, json)
 }
 
-/// Load a specific run state.
+/// Load a specific run state, with automatic reconciliation.
 pub fn load_run_state(project_root: &Path, run_id: &str) -> std::io::Result<RunState> {
     let path = runs_dir(project_root).join(format!("{run_id}.json"));
     let data = std::fs::read_to_string(path)?;
-    serde_json::from_str(&data).map_err(std::io::Error::other)
+    let mut state: RunState = serde_json::from_str(&data).map_err(std::io::Error::other)?;
+
+    if reconcile_state(project_root, &mut state) {
+        let _ = save_run_state(project_root, &state);
+    }
+
+    Ok(state)
+}
+
+/// Reconcile a run's status with reality.
+///
+/// If the run is marked Running/Queued but the process is dead,
+/// check if results exist to determine Completed vs Failed.
+/// Returns true if the state was modified.
+fn reconcile_state(project_root: &Path, state: &mut RunState) -> bool {
+    if state.status != RunStatus::Running && state.status != RunStatus::Queued {
+        return false;
+    }
+
+    if is_process_alive(state.pid) {
+        return false;
+    }
+
+    // Process is dead — figure out the outcome
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let has_results = state
+        .result_path
+        .as_ref()
+        .is_some_and(|p| p.exists() && std::fs::metadata(p).is_ok_and(|m| m.len() > 10));
+
+    if has_results {
+        state.status = RunStatus::Completed;
+    } else {
+        // Check if stderr log exists and has error info
+        let stderr_path = runs_dir(project_root).join(format!("{}.stderr.log", state.id));
+        let error_msg = if stderr_path.exists() {
+            // Read last 500 bytes for error context
+            std::fs::read_to_string(&stderr_path)
+                .ok()
+                .and_then(|s| {
+                    let trimmed = s.trim();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        let tail: String = trimmed
+                            .chars()
+                            .rev()
+                            .take(500)
+                            .collect::<String>()
+                            .chars()
+                            .rev()
+                            .collect();
+                        Some(tail)
+                    }
+                })
+                .unwrap_or_else(|| "process exited without results".to_string())
+        } else {
+            "process exited without results".to_string()
+        };
+        state.status = RunStatus::Failed(error_msg);
+    }
+    state.finished_at = Some(now);
+    true
 }
 
 /// Kill stale runs that were started with a different git hash.
@@ -192,15 +270,44 @@ fn kill_process(pid: u32) -> bool {
     }
 }
 
-/// Check if a process is still running.
+/// Check if a process is still running (not a zombie, not dead).
 pub fn is_process_alive(pid: u32) -> bool {
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
+    {
+        // On Linux, check /proc/<pid>/stat to detect zombies.
+        // kill -0 succeeds for zombies, so we can't rely on it alone.
+        let stat_path = format!("/proc/{pid}/stat");
+        match std::fs::read_to_string(&stat_path) {
+            Ok(stat) => {
+                // Format: "pid (comm) state ..."
+                // The state field is after the closing paren of comm
+                if let Some(pos) = stat.rfind(')') {
+                    let after = stat[pos + 1..].trim_start();
+                    // State 'Z' = zombie, 'X'/'x' = dead
+                    !after.starts_with('Z') && !after.starts_with('X') && !after.starts_with('x')
+                } else {
+                    false
+                }
+            }
+            Err(_) => false, // /proc/<pid> doesn't exist → process is gone
+        }
+    }
+
+    #[cfg(all(unix, not(target_os = "linux")))]
     {
         use std::process::Command;
-        Command::new("kill")
-            .args(["-0", &pid.to_string()])
-            .status()
-            .is_ok_and(|s| s.success())
+        // On macOS/BSD, use ps to check state. 'Z' = zombie.
+        let output = Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "state="])
+            .output();
+        match output {
+            Ok(o) if o.status.success() => {
+                let state = String::from_utf8_lossy(&o.stdout);
+                let state = state.trim();
+                !state.is_empty() && !state.starts_with('Z')
+            }
+            _ => false,
+        }
     }
 
     #[cfg(windows)]
@@ -233,10 +340,15 @@ pub fn cleanup_old_runs(project_root: &Path, max_age_secs: u64) -> std::io::Resu
             && run.status != RunStatus::Queued
             && now.saturating_sub(run.started_at) > max_age_secs
         {
-            let path = runs_dir(project_root).join(format!("{}.json", run.id));
-            if std::fs::remove_file(path).is_ok() {
-                cleaned += 1;
+            let state_path = runs_dir(project_root).join(format!("{}.json", run.id));
+            let stderr_path = runs_dir(project_root).join(format!("{}.stderr.log", run.id));
+            let _ = std::fs::remove_file(state_path);
+            let _ = std::fs::remove_file(stderr_path);
+            // Optionally remove the results file too
+            if let Some(ref result_path) = run.result_path {
+                let _ = std::fs::remove_file(result_path);
             }
+            cleaned += 1;
         }
     }
 
@@ -249,12 +361,14 @@ pub fn cleanup_old_runs(project_root: &Path, max_age_secs: u64) -> std::io::Resu
 /// that writes results to a JSON file. The daemon records the run state and
 /// auto-kills stale runs from previous git commits.
 ///
-/// Returns the run ID of the spawned process.
+/// Returns the run ID and the Child handle. The caller SHOULD call
+/// `child.wait()` to prevent zombie processes. If the caller exits
+/// without waiting, the OS will reparent and reap the zombie.
 pub fn spawn_detached(
     project_root: &Path,
     command: &str,
     args: &[&str],
-) -> std::io::Result<String> {
+) -> std::io::Result<(String, std::process::Child)> {
     let git_hash = crate::platform::git_commit_hash();
 
     // Auto-kill stale runs before spawning
@@ -274,19 +388,26 @@ pub fn spawn_detached(
         std::process::id()
     );
 
-    // Build the result path
-    let result_dir = runs_dir(project_root);
+    // Build absolute paths so they work regardless of cwd
+    let abs_project = std::fs::canonicalize(project_root)?;
+    let result_dir = runs_dir(&abs_project);
     std::fs::create_dir_all(&result_dir)?;
     let result_path = result_dir.join(format!("{run_id}.results.json"));
+    let stderr_path = result_dir.join(format!("{run_id}.stderr.log"));
 
-    // Spawn the process
+    // Open stderr log file for the child process
+    let stderr_file = std::fs::File::create(&stderr_path)?;
+
+    // Spawn the process with stderr going to a log file (not a pipe!)
+    // Piping stderr and not consuming it causes the child to hang when the buffer fills.
     let child = std::process::Command::new(command)
         .args(args)
+        .current_dir(&abs_project)
         .env("ZENBENCH_RUN_ID", &run_id)
         .env("ZENBENCH_RESULT_PATH", &result_path)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::from(stderr_file))
         .spawn()?;
 
     let mut state = RunState::new(
@@ -297,10 +418,63 @@ pub fn spawn_detached(
     state.pid = child.id();
     state.status = RunStatus::Running;
     state.result_path = Some(result_path);
-    save_run_state(project_root, &state)?;
+    save_run_state(&abs_project, &state)?;
 
     eprintln!("[zenbench] spawned run {run_id} (PID {})", child.id());
+    Ok((run_id, child))
+}
+
+/// Spawn a benchmark and discard the child handle (fire-and-forget).
+///
+/// Use this when you don't need to wait for the process.
+/// The zombie will be reaped when this process exits.
+pub fn spawn_fire_and_forget(
+    project_root: &Path,
+    command: &str,
+    args: &[&str],
+) -> std::io::Result<String> {
+    let (run_id, _child) = spawn_detached(project_root, command, args)?;
     Ok(run_id)
+}
+
+/// Wait for a specific run to complete.
+///
+/// Polls the process at the given interval. Returns the final RunState.
+/// Times out after `timeout` duration.
+pub fn wait_for_run(
+    project_root: &Path,
+    run_id: &str,
+    poll_interval: std::time::Duration,
+    timeout: std::time::Duration,
+) -> std::io::Result<RunState> {
+    let start = std::time::Instant::now();
+
+    loop {
+        let state = load_run_state(project_root, run_id)?;
+
+        match &state.status {
+            RunStatus::Completed | RunStatus::Killed => return Ok(state),
+            RunStatus::Failed(_) => return Ok(state),
+            RunStatus::Running | RunStatus::Queued => {
+                if start.elapsed() >= timeout {
+                    return Err(std::io::Error::other(format!(
+                        "timed out waiting for run {run_id} after {:.0}s",
+                        timeout.as_secs_f64()
+                    )));
+                }
+                std::thread::sleep(poll_interval);
+            }
+        }
+    }
+}
+
+/// Find the most recent run that has completed with results.
+pub fn find_latest_with_results(project_root: &Path) -> std::io::Result<Option<RunState>> {
+    let runs = list_runs(project_root)?;
+    Ok(runs
+        .into_iter()
+        .rev()
+        .find(|r| r.status == RunStatus::Completed && r.result_path.is_some()))
 }
 
 /// Check the environment for fire-and-forget mode.
