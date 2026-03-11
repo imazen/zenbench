@@ -118,6 +118,12 @@ impl Engine {
                     warnings.push(w);
                 }
             }
+            if let Some(w) = checks::check_multiple_comparisons(
+                &comp.group_name,
+                comp.benchmarks.len(),
+            ) {
+                warnings.push(w);
+            }
         }
         for bench in &result.standalones {
             warnings.extend(checks::check_benchmark(&bench.name, &bench.summary, bench.summary.n));
@@ -182,7 +188,12 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
         // Randomize benchmark order for this round
         let order = random_permutation(n_benchmarks, &mut rng);
 
-        let round_iters = iterations_per_sample;
+        // Anti-aliasing jitter: vary iteration count ±20% per round.
+        // Prevents synchronization with periodic system events (timer
+        // interrupts, scheduling quanta). Inspired by nanobench.
+        let jitter = (rng.next_u64() % 41) as i64 - 20; // -20..+20
+        let round_iters = ((iterations_per_sample as i64 + iterations_per_sample as i64 * jitter / 100)
+            .max(1)) as usize;
         iters_per_round.push(round_iters);
 
         for &bench_idx in &order {

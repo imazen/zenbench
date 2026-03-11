@@ -11,6 +11,11 @@ pub struct Summary {
     pub max: f64,
     pub mean: f64,
     pub variance: f64,
+    /// Median value (computed from stored samples).
+    pub median: f64,
+    /// Median Absolute Deviation — robust spread metric.
+    /// Scaled by 1.4826 to estimate sigma for normal distributions.
+    pub mad: f64,
     // Internal state for Welford's
     #[serde(skip)]
     m2: f64,
@@ -24,6 +29,8 @@ impl Summary {
             max: f64::NEG_INFINITY,
             mean: 0.0,
             variance: 0.0,
+            median: 0.0,
+            mad: 0.0,
             m2: 0.0,
         }
     }
@@ -72,11 +79,38 @@ impl Summary {
     }
 
     /// Build from a slice of values.
+    ///
+    /// Computes all statistics including median and MAD, which require
+    /// the full dataset (can't be computed incrementally).
     pub fn from_slice(values: &[f64]) -> Self {
         let mut s = Self::new();
         for &v in values {
             s.push(v);
         }
+
+        if !values.is_empty() {
+            let mut sorted = values.to_vec();
+            sorted.sort_unstable_by(|a, b| a.total_cmp(b));
+
+            // Median
+            let n = sorted.len();
+            s.median = if n % 2 == 0 {
+                (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0
+            } else {
+                sorted[n / 2]
+            };
+
+            // MAD: median of |x_i - median|, scaled by 1.4826
+            let mut deviations: Vec<f64> = sorted.iter().map(|&x| (x - s.median).abs()).collect();
+            deviations.sort_unstable_by(|a, b| a.total_cmp(b));
+            let raw_mad = if n % 2 == 0 {
+                (deviations[n / 2 - 1] + deviations[n / 2]) / 2.0
+            } else {
+                deviations[n / 2]
+            };
+            s.mad = raw_mad * 1.4826;
+        }
+
         s
     }
 }
@@ -382,6 +416,10 @@ mod tests {
         assert!((s.variance - 2.5).abs() < 1e-10);
         assert_eq!(s.min, 1.0);
         assert_eq!(s.max, 5.0);
+        assert!((s.median - 3.0).abs() < 1e-10);
+        // MAD of [1,2,3,4,5]: deviations from median 3 are [2,1,0,1,2]
+        // sorted: [0,1,1,2,2], median=1, scaled=1.4826
+        assert!((s.mad - 1.4826).abs() < 1e-10);
     }
 
     #[test]
@@ -396,6 +434,15 @@ mod tests {
         assert_eq!(s.n, 1);
         assert!((s.mean - 42.0).abs() < 1e-10);
         assert!((s.variance - 0.0).abs() < 1e-10);
+        assert!((s.median - 42.0).abs() < 1e-10);
+        assert!((s.mad - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn summary_median_even_count() {
+        let s = Summary::from_slice(&[1.0, 2.0, 3.0, 4.0]);
+        // Median of even count: average of middle two = (2+3)/2 = 2.5
+        assert!((s.median - 2.5).abs() < 1e-10);
     }
 
     #[test]

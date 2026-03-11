@@ -98,10 +98,12 @@ impl SuiteResult {
             // Individual results
             for bench in &comp.benchmarks {
                 eprintln!(
-                    "    {:<30}  {:>10}  ±{:>10}",
+                    "    {:<30}  {:>10}  ±{:>10}  (med {:>10}  mad {:>10})",
                     bench.name,
                     format_ns(bench.summary.mean),
                     format_ns(bench.summary.std_dev()),
+                    format_ns(bench.summary.median),
+                    format_ns(bench.summary.mad),
                 );
             }
 
@@ -146,10 +148,11 @@ impl SuiteResult {
         for bench in &self.standalones {
             eprintln!();
             eprintln!(
-                "  {:<30}  {:>10}  ±{:>10}  (n={})",
+                "  {:<30}  {:>10}  ±{:>10}  (med {:>10}  n={})",
                 bench.name,
                 format_ns(bench.summary.mean),
                 format_ns(bench.summary.std_dev()),
+                format_ns(bench.summary.median),
                 bench.summary.n,
             );
         }

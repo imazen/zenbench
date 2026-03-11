@@ -26,6 +26,8 @@ pub enum WarningKind {
     Drift,
     /// Too few rounds for reliable statistics.
     TooFewRounds,
+    /// Multiple comparisons inflate false-positive risk.
+    MultipleComparisons,
 }
 
 impl std::fmt::Display for BenchWarning {
@@ -102,6 +104,38 @@ pub fn check_benchmark(name: &str, summary: &Summary, n_rounds: usize) -> Vec<Be
     }
 
     warnings
+}
+
+/// Check for multiple-comparison inflation.
+///
+/// With k benchmarks in a group, there are k*(k-1)/2 pairwise comparisons.
+/// At 99% confidence per test, the family-wise error rate is roughly
+/// 1 - (1 - 0.01)^n_comparisons. Warn when this exceeds 10%.
+pub fn check_multiple_comparisons(
+    group_name: &str,
+    n_benchmarks: usize,
+) -> Option<BenchWarning> {
+    if n_benchmarks <= 2 {
+        return None;
+    }
+    let n_comparisons = n_benchmarks * (n_benchmarks - 1) / 2;
+    // Family-wise error rate at per-test alpha = 0.01
+    let fwer = 1.0 - (1.0 - 0.01f64).powi(n_comparisons as i32);
+    if fwer > 0.10 {
+        Some(BenchWarning {
+            benchmark: group_name.to_string(),
+            kind: WarningKind::MultipleComparisons,
+            message: format!(
+                "{n_comparisons} pairwise comparisons — family-wise error rate is ~{:.0}%. \
+                 Consider Bonferroni correction (alpha/{n_comparisons} = {:.4}) \
+                 or split into smaller groups.",
+                fwer * 100.0,
+                0.01 / n_comparisons as f64,
+            ),
+        })
+    } else {
+        None
+    }
 }
 
 /// Check paired analysis for drift.
