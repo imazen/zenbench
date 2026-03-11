@@ -207,8 +207,7 @@ impl PairedAnalysis {
             } else {
                 let z = diff_summary.mean / std_err;
                 // z >= 2.576 corresponds to 99% confidence
-                z.abs() >= 2.576
-                    && (diff_summary.mean / base_summary.mean).abs() > 0.005
+                z.abs() >= 2.576 && (diff_summary.mean / base_summary.mean).abs() > 0.005
             }
         } else {
             false
@@ -281,12 +280,7 @@ fn filter_outliers_paired(
             }
             (clean_b, clean_c, clean_d, outliers)
         }
-        None => (
-            baseline.to_vec(),
-            candidate.to_vec(),
-            diffs.to_vec(),
-            0,
-        ),
+        None => (baseline.to_vec(), candidate.to_vec(), diffs.to_vec(), 0),
     }
 }
 
@@ -383,7 +377,11 @@ fn spearman_correlation(values: &[f64]) -> f64 {
 /// Returns p-value. For small n (< 10), returns 1.0 (insufficient data).
 fn wilcoxon_signed_rank(diffs: &[f64]) -> f64 {
     // Remove zeros (ties with zero)
-    let nonzero: Vec<f64> = diffs.iter().copied().filter(|&d| d.abs() > f64::EPSILON).collect();
+    let nonzero: Vec<f64> = diffs
+        .iter()
+        .copied()
+        .filter(|&d| d.abs() > f64::EPSILON)
+        .collect();
     let n = nonzero.len();
 
     if n < 10 {

@@ -102,8 +102,7 @@ pub fn save_run_state(project_root: &Path, state: &RunState) -> std::io::Result<
     std::fs::create_dir_all(&dir)?;
 
     let path = dir.join(format!("{}.json", state.id));
-    let json = serde_json::to_string_pretty(state)
-        .map_err(std::io::Error::other)?;
+    let json = serde_json::to_string_pretty(state).map_err(std::io::Error::other)?;
     std::fs::write(path, json)
 }
 
@@ -123,10 +122,7 @@ pub fn kill_stale_runs(project_root: &Path, current_hash: &str) -> std::io::Resu
 
     for run in runs {
         if run.status == RunStatus::Running || run.status == RunStatus::Queued {
-            let is_stale = run
-                .git_hash
-                .as_deref()
-                .is_some_and(|h| h != current_hash);
+            let is_stale = run.git_hash.as_deref().is_some_and(|h| h != current_hash);
 
             if is_stale {
                 // Try to kill the process
@@ -213,9 +209,7 @@ pub fn is_process_alive(pid: u32) -> bool {
         let output = Command::new("tasklist")
             .args(["/FI", &format!("PID eq {pid}"), "/NH"])
             .output();
-        output.is_ok_and(|o| {
-            String::from_utf8_lossy(&o.stdout).contains(&pid.to_string())
-        })
+        output.is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
     }
 
     #[cfg(not(any(unix, windows)))]
@@ -235,7 +229,8 @@ pub fn cleanup_old_runs(project_root: &Path, max_age_secs: u64) -> std::io::Resu
 
     let mut cleaned = 0;
     for run in runs {
-        if run.status != RunStatus::Running && run.status != RunStatus::Queued
+        if run.status != RunStatus::Running
+            && run.status != RunStatus::Queued
             && now.saturating_sub(run.started_at) > max_age_secs
         {
             let path = runs_dir(project_root).join(format!("{}.json", run.id));
@@ -294,7 +289,11 @@ pub fn spawn_detached(
         .stderr(std::process::Stdio::piped())
         .spawn()?;
 
-    let mut state = RunState::new(run_id.clone(), format!("{command} {}", args.join(" ")), git_hash);
+    let mut state = RunState::new(
+        run_id.clone(),
+        format!("{command} {}", args.join(" ")),
+        git_hash,
+    );
     state.pid = child.id();
     state.status = RunStatus::Running;
     state.result_path = Some(result_path);
@@ -309,5 +308,7 @@ pub fn spawn_detached(
 /// If `ZENBENCH_RESULT_PATH` is set, the benchmark should save results
 /// to that path when complete. Returns the path if set.
 pub fn result_path_from_env() -> Option<PathBuf> {
-    std::env::var("ZENBENCH_RESULT_PATH").ok().map(PathBuf::from)
+    std::env::var("ZENBENCH_RESULT_PATH")
+        .ok()
+        .map(PathBuf::from)
 }

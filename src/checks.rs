@@ -111,10 +111,7 @@ pub fn check_benchmark(name: &str, summary: &Summary, n_rounds: usize) -> Vec<Be
 /// With k benchmarks in a group, there are k*(k-1)/2 pairwise comparisons.
 /// At 99% confidence per test, the family-wise error rate is roughly
 /// 1 - (1 - 0.01)^n_comparisons. Warn when this exceeds 10%.
-pub fn check_multiple_comparisons(
-    group_name: &str,
-    n_benchmarks: usize,
-) -> Option<BenchWarning> {
+pub fn check_multiple_comparisons(group_name: &str, n_benchmarks: usize) -> Option<BenchWarning> {
     if n_benchmarks <= 2 {
         return None;
     }

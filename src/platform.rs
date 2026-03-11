@@ -1,5 +1,5 @@
-use sysinfo::System;
 use std::sync::Mutex;
+use sysinfo::System;
 
 /// Cross-platform system state snapshot.
 #[derive(Debug, Clone)]

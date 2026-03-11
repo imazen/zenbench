@@ -204,10 +204,7 @@ impl Bencher {
     ///
     /// The `setup` closure is called before each iteration to produce input.
     /// Setup time is NOT included in the measurement.
-    pub fn with_input<I, S: FnMut() -> I + 'static>(
-        &mut self,
-        setup: S,
-    ) -> InputBencher<'_, I, S> {
+    pub fn with_input<I, S: FnMut() -> I + 'static>(&mut self, setup: S) -> InputBencher<'_, I, S> {
         InputBencher {
             bencher: self,
             setup,

@@ -167,8 +167,7 @@ impl ResourceGate {
         if state.available_ram_bytes < self.config.min_available_ram_bytes {
             return Some(GateReason::LowRam(state.available_ram_bytes));
         }
-        if let (Some(max_temp), Some(current_temp)) =
-            (self.config.max_cpu_temp_c, state.cpu_temp_c)
+        if let (Some(max_temp), Some(current_temp)) = (self.config.max_cpu_temp_c, state.cpu_temp_c)
         {
             if current_temp > max_temp {
                 return Some(GateReason::CpuTemp(current_temp));

@@ -56,15 +56,16 @@ impl Engine {
         let start = Instant::now();
 
         // Acquire cross-process lock if configured
-        let _lock = self.lock_dir.as_ref().and_then(|dir| {
-            match ProcessLock::acquire(dir) {
+        let _lock = self
+            .lock_dir
+            .as_ref()
+            .and_then(|dir| match ProcessLock::acquire(dir) {
                 Ok(lock) => Some(lock),
                 Err(e) => {
                     eprintln!("[zenbench] warning: could not acquire process lock: {e}");
                     None
                 }
-            }
-        });
+            });
 
         let mut comparisons = Vec::new();
         let mut standalones = Vec::new();
@@ -118,15 +119,18 @@ impl Engine {
                     warnings.push(w);
                 }
             }
-            if let Some(w) = checks::check_multiple_comparisons(
-                &comp.group_name,
-                comp.benchmarks.len(),
-            ) {
+            if let Some(w) =
+                checks::check_multiple_comparisons(&comp.group_name, comp.benchmarks.len())
+            {
                 warnings.push(w);
             }
         }
         for bench in &result.standalones {
-            warnings.extend(checks::check_benchmark(&bench.name, &bench.summary, bench.summary.n));
+            warnings.extend(checks::check_benchmark(
+                &bench.name,
+                &bench.summary,
+                bench.summary.n,
+            ));
         }
         if !warnings.is_empty() {
             eprintln!("  warnings:");
@@ -192,7 +196,8 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
         // Prevents synchronization with periodic system events (timer
         // interrupts, scheduling quanta). Inspired by nanobench.
         let jitter = (rng.next_u64() % 41) as i64 - 20; // -20..+20
-        let round_iters = ((iterations_per_sample as i64 + iterations_per_sample as i64 * jitter / 100)
+        let round_iters = ((iterations_per_sample as i64
+            + iterations_per_sample as i64 * jitter / 100)
             .max(1)) as usize;
         iters_per_round.push(round_iters);
 
@@ -230,8 +235,7 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
             let base_f64: Vec<f64> = baseline_samples.iter().map(|&v| v as f64).collect();
             let cand_f64: Vec<f64> = candidate_samples.iter().map(|&v| v as f64).collect();
 
-            if let Some(analysis) =
-                PairedAnalysis::compute(&base_f64, &cand_f64, &iters_per_round)
+            if let Some(analysis) = PairedAnalysis::compute(&base_f64, &cand_f64, &iters_per_round)
             {
                 analyses.push((names[0].clone(), names[i].clone(), analysis));
             }
@@ -321,8 +325,7 @@ fn estimate_iterations(func: &mut crate::bench::BenchFn, config: &GroupConfig) -
 
         if new_iters <= 2 * iters {
             // Converged
-            return new_iters
-                .clamp(config.min_iterations, config.max_iterations);
+            return new_iters.clamp(config.min_iterations, config.max_iterations);
         }
         iters = new_iters;
     }
@@ -468,4 +471,3 @@ impl Drop for ProcessLock {
         let _ = fs4::fs_std::FileExt::unlock(&self._file);
     }
 }
-

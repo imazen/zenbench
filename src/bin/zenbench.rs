@@ -105,7 +105,10 @@ fn cmd_list(project: &Path) {
                 eprintln!("No benchmark runs found.");
                 return;
             }
-            println!("{:<20} {:<10} {:<8} {:<12} COMMAND", "ID", "STATUS", "PID", "GIT");
+            println!(
+                "{:<20} {:<10} {:<8} {:<12} COMMAND",
+                "ID", "STATUS", "PID", "GIT"
+            );
             for run in runs {
                 let status = format!("{:?}", run.status);
                 let git = run.git_hash.as_deref().unwrap_or("-");
@@ -126,7 +129,11 @@ fn cmd_status(project: &Path, run_id: &str) {
             let alive = daemon::is_process_alive(state.pid);
             println!("Run: {}", state.id);
             println!("Status: {:?}", state.status);
-            println!("PID: {} ({})", state.pid, if alive { "alive" } else { "dead" });
+            println!(
+                "PID: {} ({})",
+                state.pid,
+                if alive { "alive" } else { "dead" }
+            );
             println!("Git: {}", state.git_hash.as_deref().unwrap_or("unknown"));
             println!("Command: {}", state.command);
             if let Some(path) = &state.result_path {
@@ -191,7 +198,10 @@ fn cmd_results(project: &Path, run_id: &str, json: bool) {
                     Err(e) => eprintln!("Error loading results: {e}"),
                 }
             } else {
-                eprintln!("Run {} has no results yet (status: {:?})", actual_id, state.status);
+                eprintln!(
+                    "Run {} has no results yet (status: {:?})",
+                    actual_id, state.status
+                );
             }
         }
         Err(e) => eprintln!("Error: {e}"),
@@ -226,8 +236,7 @@ fn cmd_compare(baseline_path: &Path, candidate_path: &Path) {
             .find(|b| b.name == cand_bench.name)
         {
             let pct = if base_bench.summary.mean.abs() > f64::EPSILON {
-                (cand_bench.summary.mean - base_bench.summary.mean)
-                    / base_bench.summary.mean
+                (cand_bench.summary.mean - base_bench.summary.mean) / base_bench.summary.mean
                     * 100.0
             } else {
                 0.0
@@ -242,10 +251,7 @@ fn cmd_compare(baseline_path: &Path, candidate_path: &Path) {
             };
             let reset = if arrow.is_empty() { "" } else { "\x1b[0m" };
 
-            println!(
-                "  {:<30}  {:+.2}%{}{}",
-                cand_bench.name, arrow, pct, reset
-            );
+            println!("  {:<30}  {}{:+.2}%{}", cand_bench.name, arrow, pct, reset);
         }
     }
 }
