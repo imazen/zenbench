@@ -304,8 +304,21 @@ impl SuiteResult {
                 .fold(0.0_f64, f64::max);
             let pct_dp: usize = if max_pct >= 100.0 { 0 } else { 1 };
 
-            // Pass 2: format all rows
-            let mut rows: Vec<Row> = Vec::with_capacity(display_indices.len());
+            // Pass 2a: compute raw formatted parts for each row
+            struct RawRow {
+                bench_idx: usize,
+                is_fastest: bool,
+                mean_str: String,
+                ci_str: String,
+                vs_vals: [String; 3],
+                vs_suffix: String,
+                vs_base_color: &'static str,
+                throughput: String,
+                cpu: String,
+                markers: String,
+            }
+
+            let mut raw_rows: Vec<RawRow> = Vec::with_capacity(display_indices.len());
             for &i in &display_indices {
                 let bench = &comp.benchmarks[i];
                 let is_fastest = (bench.summary.mean - fastest_mean).abs() < f64::EPSILON
@@ -328,29 +341,21 @@ impl SuiteResult {
                     })
                     .unwrap_or_default();
 
-                // Mean ±CI with column-wide unit/dp
+                // Raw mean and CI strings (no padding yet)
                 let m = bench.summary.mean / mean_divisor;
                 let c = (bench.summary.std_err() * 1.96) / mean_divisor;
-                let mean_ci = format!("{:.*} ±{:.*} {mean_unit}", mean_dp, m, mean_dp, c,);
+                let mean_str = format!("{:.*}", mean_dp, m);
+                let ci_str = format!("{:.*}", mean_dp, c);
 
-                // vs baseline column with column-wide dp
-                let (vs_base, vs_base_color) = if bench.name == baseline_name {
-                    // Baseline: show [lo mean hi] in same unit as mean column
+                // vs baseline: three raw value strings + suffix + color
+                let (vs_vals, vs_suffix, vs_base_color) = if bench.name == baseline_name {
                     let ci_half = bench.summary.std_err() * 1.96;
                     let lo = (bench.summary.mean - ci_half).max(0.0);
                     let hi = bench.summary.mean + ci_half;
-                    let vals: Vec<String> = [lo, bench.summary.mean, hi]
-                        .iter()
-                        .map(|&v| format!("{:.*}", mean_dp, v / mean_divisor))
-                        .collect();
-                    let w = vals.iter().map(|s| s.len()).max().unwrap_or(1);
-                    (
-                        format!(
-                            "[{:>w$}  {:>w$}  {:>w$}] {mean_unit}",
-                            vals[0], vals[1], vals[2],
-                        ),
-                        DIM,
-                    )
+                    let v0 = format!("{:.*}", mean_dp, lo / mean_divisor);
+                    let v1 = format!("{:.*}", mean_dp, bench.summary.mean / mean_divisor);
+                    let v2 = format!("{:.*}", mean_dp, hi / mean_divisor);
+                    ([v0, v1, v2], format!(" {mean_unit}"), DIM)
                 } else if let Some(analysis) = baseline_analyses.get(bench.name.as_str()) {
                     let base_mean = analysis.baseline.mean;
                     if base_mean.abs() > f64::EPSILON {
@@ -362,27 +367,29 @@ impl SuiteResult {
                         } else {
                             DIM
                         };
-                        // Use column-wide pct_dp
-                        let vals: Vec<String> = [lo_pct, mid_pct, hi_pct]
-                            .iter()
-                            .map(|&v| format!("{:+.*}", pct_dp, v))
-                            .collect();
-                        let w = vals.iter().map(|s| s.len()).max().unwrap_or(1);
-                        (
-                            format!("[{:>w$}  {:>w$}  {:>w$}]%", vals[0], vals[1], vals[2],),
-                            color,
-                        )
+                        let v0 = format!("{:+.*}", pct_dp, lo_pct);
+                        let v1 = format!("{:+.*}", pct_dp, mid_pct);
+                        let v2 = format!("{:+.*}", pct_dp, hi_pct);
+                        ([v0, v1, v2], "%".to_string(), color)
                     } else {
-                        (format!("{:+.*}%", pct_dp, analysis.pct_change), DIM)
+                        let v = format!("{:+.*}%", pct_dp, analysis.pct_change);
+                        (
+                            [v.clone(), String::new(), String::new()],
+                            String::new(),
+                            DIM,
+                        )
                     }
                 } else {
-                    (String::new(), DIM)
+                    (
+                        [String::new(), String::new(), String::new()],
+                        String::new(),
+                        DIM,
+                    )
                 };
 
-                // Per-benchmark + comparison footnotes
+                // Footnotes and markers (collected in this pass)
                 let mut markers = String::new();
 
-                // Comparison issues (attach to this benchmark's row)
                 if let Some(analysis) = baseline_analyses.get(bench.name.as_str()) {
                     if !analysis.significant {
                         let ci_lo_pct = if analysis.baseline.mean.abs() > f64::EPSILON {
@@ -438,15 +445,60 @@ impl SuiteResult {
                     markers.push_str(&format!("[{n}]"));
                 }
 
+                raw_rows.push(RawRow {
+                    bench_idx: i,
+                    is_fastest,
+                    mean_str,
+                    ci_str,
+                    vs_vals,
+                    vs_suffix,
+                    vs_base_color,
+                    throughput: tp_str,
+                    cpu: cpu_str,
+                    markers,
+                });
+            }
+
+            // Pass 2b: compute column-wide max widths
+            let mean_val_w = raw_rows.iter().map(|r| r.mean_str.len()).max().unwrap_or(1);
+            let ci_val_w = raw_rows.iter().map(|r| r.ci_str.len()).max().unwrap_or(1);
+            let vs_val_w = raw_rows
+                .iter()
+                .flat_map(|r| r.vs_vals.iter())
+                .map(|s| s.len())
+                .max()
+                .unwrap_or(1);
+
+            // Pass 2c: build final Row structs using uniform widths
+            let mut rows: Vec<Row> = Vec::with_capacity(raw_rows.len());
+            for raw in raw_rows {
+                let bench = &comp.benchmarks[raw.bench_idx];
+                let mean_ci = format!(
+                    "{:>mean_val_w$} ±{:>ci_val_w$} {mean_unit}",
+                    raw.mean_str, raw.ci_str,
+                );
+                // Only render the [v0  v1  v2] bracket form when all three slots are
+                // non-empty (baseline row and normal comparison rows).  The degenerate
+                // "base_mean ≈ 0" fallback already placed a ready-made string in vs_vals[0]
+                // with an empty suffix, so we just emit that directly.
+                let vs_base = if raw.vs_vals[1].is_empty() && raw.vs_vals[2].is_empty() {
+                    // Degenerate case: pre-formatted string sitting in slot 0
+                    format!("{}{}", raw.vs_vals[0], raw.vs_suffix)
+                } else {
+                    format!(
+                        "[{:>vs_val_w$}  {:>vs_val_w$}  {:>vs_val_w$}]{}",
+                        raw.vs_vals[0], raw.vs_vals[1], raw.vs_vals[2], raw.vs_suffix,
+                    )
+                };
                 rows.push(Row {
                     name: bench.name.clone(),
                     mean_ci,
-                    throughput: tp_str,
-                    cpu: cpu_str,
+                    throughput: raw.throughput,
+                    cpu: raw.cpu,
                     vs_base,
-                    vs_base_color,
-                    is_fastest,
-                    markers,
+                    vs_base_color: raw.vs_base_color,
+                    is_fastest: raw.is_fastest,
+                    markers: raw.markers,
                     subgroup: bench.subgroup.clone(),
                 });
             }
