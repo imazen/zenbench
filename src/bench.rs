@@ -204,7 +204,7 @@ impl Default for GroupConfig {
             min_iterations: 1,
             max_iterations: 10_000,
             cache_firewall: true,
-            cache_firewall_bytes: 256 * 1024, // 256 KB — enough to spoil L2
+            cache_firewall_bytes: 2 * 1024 * 1024, // 2 MiB — enough to spoil L2 on most modern CPUs
             yield_between_samples: false,
         }
     }

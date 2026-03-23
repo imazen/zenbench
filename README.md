@@ -40,8 +40,8 @@ your function runs when the CPU has been doing nothing but running your
 function.
 
 Zenbench's **cache firewall** (on by default for comparison groups) addresses
-the data cache part: between each benchmark in a round, it reads a 256 KB
-buffer to evict hot cache lines. This prevents benchmark A from leaving its
+the data cache part: between each benchmark in a round, it reads a 2 MiB
+buffer to evict hot cache lines (enough to spoil L2 on most modern cores). This prevents benchmark A from leaving its
 output in L2 where benchmark B's input scan picks it up for free. For
 relative comparisons between implementations, this is usually sufficient —
 branch prediction and i-cache warmth affect both sides equally.
