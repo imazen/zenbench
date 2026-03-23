@@ -390,6 +390,38 @@ impl SuiteResult {
             bot.push('┘');
             eprintln!("{DIM}{bot}{RESET}");
 
+            // Terminal bar chart
+            if rows.len() >= 2 {
+                let max_mean = comp
+                    .benchmarks
+                    .iter()
+                    .map(|b| b.summary.mean)
+                    .fold(0.0_f64, f64::max);
+
+                if max_mean > 0.0 {
+                    const BAR_MAX: usize = 40;
+                    eprintln!();
+                    for row in &rows {
+                        // Parse mean back to ns for bar scaling
+                        let bench = comp.benchmarks.iter().find(|b| b.name == row.name).unwrap();
+                        let frac = bench.summary.mean / max_mean;
+                        let bar_len = (frac * BAR_MAX as f64).round() as usize;
+                        let bar_len = bar_len.max(1); // at least one block
+
+                        let bar: String = "█".repeat(bar_len);
+
+                        let name_color = if row.is_fastest { GREEN } else { "" };
+                        let name_reset = if row.is_fastest { RESET } else { "" };
+                        let bar_color = if row.is_fastest { GREEN } else { CYAN };
+
+                        eprintln!(
+                            "  {name_color}{:<name_w$}{name_reset}  {bar_color}{bar}{RESET} {DIM}{}{RESET}",
+                            row.name, row.mean,
+                        );
+                    }
+                }
+            }
+
             // Detailed paired comparisons (below the table)
             for (base, cand, analysis) in &comp.analyses {
                 let (color, arrow) = if analysis.pct_change < -1.0 {
