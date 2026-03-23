@@ -75,6 +75,9 @@ pub struct ComparisonResult {
     /// Whether benchmarks are sorted by speed in report output.
     #[serde(default)]
     pub sort_by_speed: bool,
+    /// Base iterations per sample (before jitter). 0 if unknown.
+    #[serde(default)]
+    pub iterations_per_sample: usize,
 }
 
 /// Complete results of a benchmark suite run.
@@ -134,19 +137,39 @@ impl SuiteResult {
             "{BOLD_WHITE}═══════════════════════════════════════════════════════════════{RESET}"
         );
 
-        for (group_idx, comp) in self.comparisons.iter().enumerate() {
+        for comp in &self.comparisons {
             eprintln!();
 
-            // Group header with config info
-            let mut meta_parts = vec![format!("{} rounds", comp.completed_rounds)];
+            // Group header
+            eprintln!("  {BOLD}{}{RESET}", comp.group_name);
+
+            // Methodology summary
+            let iters = comp.iterations_per_sample;
+            let iters_str = if iters >= 1_000_000 {
+                format!("{}M", iters / 1_000_000)
+            } else if iters >= 1_000 {
+                format!("{}K", iters / 1_000)
+            } else {
+                format!("{iters}")
+            };
+            eprint!(
+                "  {DIM}{} rounds × {iters_str} calls/sample",
+                comp.completed_rounds,
+            );
             if comp.cache_firewall {
-                meta_parts.push(format!(
-                    "cache_firewall: {}",
+                eprint!(
+                    ", cache_firewall {}",
                     format_bytes(comp.cache_firewall_bytes),
-                ));
+                );
             }
-            let meta = meta_parts.join(", ");
-            eprintln!("  {BOLD}{}{RESET}  {DIM}({meta}){RESET}", comp.group_name);
+            eprintln!("{RESET}");
+
+            // Caveats line
+            if iters > 1 {
+                eprintln!(
+                    "  {DIM}{iters_str} calls/sample → hot cache + warm branch predictor (best-case){RESET}",
+                );
+            }
 
             // Row order: definition order by default, speed sort when configured
             let mut display_indices: Vec<usize> = (0..comp.benchmarks.len()).collect();
@@ -701,7 +724,7 @@ impl SuiteResult {
 
         eprintln!();
         eprintln!(
-            "  {DIM}total: {:.1}s  waits: {} ({:.1}s){RESET}",
+            "  {DIM}total: {:.1}s  gate waits: {} ({:.1}s){RESET}",
             self.total_time.as_secs_f64(),
             self.gate_waits,
             self.gate_wait_time.as_secs_f64(),
@@ -709,6 +732,10 @@ impl SuiteResult {
         if self.unreliable {
             eprintln!("  {RED}{BOLD}⚠ UNRELIABLE: too many resource gate waits{RESET}");
         }
+        eprintln!("  {DIM}gate checks: CPU load, free RAM, CPU temp, heavy processes{RESET}",);
+        eprintln!(
+            "  {DIM}not checked: disk I/O, network, frequency scaling, VM/container noise{RESET}",
+        );
         eprintln!(
             "{BOLD_WHITE}═══════════════════════════════════════════════════════════════{RESET}"
         );
@@ -1198,6 +1225,7 @@ mod tests {
                 baseline_only: false,
                 throughput_unit: None,
                 sort_by_speed: false,
+                iterations_per_sample: 1000,
             }],
             standalones: vec![],
             total_time: Duration::from_secs(5),

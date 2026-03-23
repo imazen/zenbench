@@ -299,6 +299,7 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
         baseline_only,
         throughput_unit: group.throughput_unit.clone(),
         sort_by_speed: config.sort_by_speed,
+        iterations_per_sample,
     }
 }
 
