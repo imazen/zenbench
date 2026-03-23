@@ -277,20 +277,19 @@ impl SuiteResult {
                     })
                     .unwrap_or_default();
 
-                // vs baseline column
+                // vs baseline column — color tells the story, no * needed
                 let (vs_base, vs_base_color) = if bench.name == baseline_name {
                     ("baseline".to_string(), DIM)
                 } else if let Some(analysis) = baseline_analyses.get(bench.name.as_str()) {
                     let pct = analysis.pct_change;
-                    let color = if pct < -1.0 {
+                    let color = if pct < -1.0 && analysis.significant {
                         GREEN
-                    } else if pct > 1.0 {
+                    } else if pct > 1.0 && analysis.significant {
                         RED
                     } else {
-                        DIM
+                        DIM // not significant or < 1% — don't color it
                     };
-                    let sig = if analysis.significant { "*" } else { "" };
-                    (format!("{pct:+.1}%{sig}"), color)
+                    (format!("{pct:+.1}%"), color)
                 } else {
                     (String::new(), DIM)
                 };
@@ -590,10 +589,50 @@ impl SuiteResult {
                 } else {
                     (DIM, "same")
                 };
-                let sig_marker = if analysis.significant {
-                    format!(" {BOLD}*{RESET}")
-                } else {
+                // Collect issue footnotes for this comparison
+                let mut cmp_markers = String::new();
+
+                // Not statistically significant
+                if !analysis.significant && analysis.pct_change.abs() > 1.0 {
+                    let n = add_footnote(format!(
+                        "{base} vs {cand}: not significant (p={:.3}) — \
+                         difference may be noise",
+                        analysis.wilcoxon_p,
+                    ));
+                    cmp_markers.push_str(&format!("[{n}]"));
+                }
+
+                // CI crosses zero — direction uncertain
+                if analysis.ci_lower < 0.0 && analysis.ci_upper > 0.0 {
+                    let n = add_footnote(format!(
+                        "{base} vs {cand}: CI crosses zero — \
+                         cannot determine direction",
+                    ));
+                    cmp_markers.push_str(&format!("[{n}]"));
+                }
+
+                // Tiny effect despite significance — practically meaningless
+                if analysis.significant
+                    && analysis.cohens_d.abs() < 0.2
+                    && analysis.pct_change.abs() > 1.0
+                {
+                    let n = add_footnote(format!(
+                        "{base} vs {cand}: statistically significant but \
+                         tiny effect (d={:.2}) — practically negligible",
+                        analysis.cohens_d,
+                    ));
+                    cmp_markers.push_str(&format!("[{n}]"));
+                }
+
+                // Drift
+                if let Some(dm) = comparison_markers.get(&(base.as_str(), cand.as_str())) {
+                    cmp_markers.push_str(dm);
+                }
+
+                let marker_str = if cmp_markers.is_empty() {
                     String::new()
+                } else {
+                    format!(" {YELLOW}{cmp_markers}{RESET}")
                 };
 
                 let throughput_delta = if has_throughput {
@@ -614,21 +653,13 @@ impl SuiteResult {
                     String::new()
                 };
 
-                let drift_marker = comparison_markers
-                    .get(&(base.as_str(), cand.as_str()))
-                    .map(|m| format!(" {YELLOW}{m}{RESET}"))
-                    .unwrap_or_default();
-
                 eprintln!(
                     "  {DIM}{base} vs {cand}:{RESET}  \
-                     {color}{:+.2}% ({arrow}){RESET}{sig_marker}  \
-                     {DIM}[{} .. {}]  \
-                     effect={:.2}  p={:.4}{RESET}{throughput_delta}{drift_marker}",
+                     {color}{:+.2}% ({arrow}){RESET}  \
+                     {DIM}[{} .. {}]{RESET}{throughput_delta}{marker_str}",
                     analysis.pct_change,
                     format_ns(analysis.ci_lower),
                     format_ns(analysis.ci_upper),
-                    analysis.cohens_d,
-                    analysis.wilcoxon_p,
                 );
             }
 
