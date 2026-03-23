@@ -143,10 +143,7 @@ impl SuiteResult {
         for comp in &self.comparisons {
             eprintln!();
 
-            // Group header
-            eprintln!("  {BOLD}{}{RESET}", comp.group_name);
-
-            // Methodology summary
+            // Group header with separator line
             let iters = comp.iterations_per_sample;
             let iters_str = if iters >= 1_000_000 {
                 format!("{}M", iters / 1_000_000)
@@ -155,24 +152,23 @@ impl SuiteResult {
             } else {
                 format!("{iters}")
             };
-            eprint!(
-                "  {DIM}{} rounds × {iters_str} calls/sample",
-                comp.completed_rounds,
-            );
+            let mut meta = format!("{} rounds × {iters_str} calls", comp.completed_rounds,);
+            if iters > 1 {
+                meta.push_str(", hot loop");
+            }
             if comp.cache_firewall {
-                eprint!(
+                meta.push_str(&format!(
                     ", cache_firewall {}",
                     format_bytes(comp.cache_firewall_bytes),
-                );
+                ));
             }
-            eprintln!("{RESET}");
-
-            // Caveats line
-            if iters > 1 {
-                eprintln!(
-                    "  {DIM}{iters_str} calls/sample → hot cache + warm branch predictor (best-case){RESET}",
-                );
-            }
+            let header_text = format!("{} ", comp.group_name);
+            let separator_len = 63usize.saturating_sub(header_text.len() + 2);
+            eprintln!(
+                "  {BOLD}{header_text}{RESET}{DIM}{}{RESET}",
+                "─".repeat(separator_len),
+            );
+            eprintln!("  {DIM}{meta}{RESET}");
 
             // Row order: definition order by default, speed sort when configured
             let mut display_indices: Vec<usize> = (0..comp.benchmarks.len()).collect();
@@ -232,6 +228,27 @@ impl SuiteResult {
                 footnotes.len()
             };
 
+            // Pre-compute drift markers (need footnote numbers before rows)
+            let mut comparison_markers: std::collections::HashMap<(&str, &str), String> =
+                std::collections::HashMap::new();
+            for (base, cand, analysis) in &comp.analyses {
+                if analysis.drift_correlation.abs() > 0.5 {
+                    let direction = if analysis.drift_correlation > 0.0 {
+                        "later rounds slower (thermal?)"
+                    } else {
+                        "later rounds faster (warmup?)"
+                    };
+                    let n = add_footnote(format!(
+                        "drift r={:.2} — {direction}",
+                        analysis.drift_correlation,
+                    ));
+                    comparison_markers
+                        .entry((base.as_str(), cand.as_str()))
+                        .or_default()
+                        .push_str(&format!("[{n}]"));
+                }
+            }
+
             // Pre-format all cells to measure widths
             struct Row {
                 name: String,
@@ -277,28 +294,62 @@ impl SuiteResult {
                     })
                     .unwrap_or_default();
 
-                // vs baseline column
-                // significant = 95% CI excludes zero (direction is certain)
-                // Color: green/red when significant, dim when uncertain
-                // Text: "?" suffix when CI crosses zero
+                // vs baseline column + comparison footnotes
                 let (vs_base, vs_base_color) = if bench.name == baseline_name {
                     ("baseline".to_string(), DIM)
                 } else if let Some(analysis) = baseline_analyses.get(bench.name.as_str()) {
                     let pct = analysis.pct_change;
                     if analysis.significant {
-                        // CI excludes zero — we're confident in the direction
                         let color = if pct < 0.0 { GREEN } else { RED };
                         (format!("{pct:+.1}%"), color)
                     } else {
-                        // CI crosses zero — direction uncertain
                         (format!("{pct:+.1}%?"), DIM)
                     }
                 } else {
                     (String::new(), DIM)
                 };
 
-                // Per-benchmark footnotes
+                // Per-benchmark + comparison footnotes
                 let mut markers = String::new();
+
+                // Comparison issues (attach to this benchmark's row)
+                if let Some(analysis) = baseline_analyses.get(bench.name.as_str()) {
+                    if !analysis.significant {
+                        let ci_lo_pct = if analysis.baseline.mean.abs() > f64::EPSILON {
+                            format!(
+                                "{:+.1}%",
+                                analysis.ci_lower / analysis.baseline.mean * 100.0
+                            )
+                        } else {
+                            format_ns(analysis.ci_lower)
+                        };
+                        let ci_hi_pct = if analysis.baseline.mean.abs() > f64::EPSILON {
+                            format!(
+                                "{:+.1}%",
+                                analysis.ci_upper / analysis.baseline.mean * 100.0
+                            )
+                        } else {
+                            format_ns(analysis.ci_upper)
+                        };
+                        let n = add_footnote(format!(
+                            "CI [{ci_lo_pct} .. {ci_hi_pct}] crosses zero — \
+                             cannot confirm a difference",
+                        ));
+                        markers.push_str(&format!("[{n}]"));
+                    }
+                    if analysis.significant && analysis.cohens_d.abs() < 0.2 {
+                        let n = add_footnote(format!(
+                            "real but tiny (effect {:.2}) — unlikely to matter",
+                            analysis.cohens_d,
+                        ));
+                        markers.push_str(&format!("[{n}]"));
+                    }
+                    // Drift marker
+                    if let Some(dm) = comparison_markers.get(&(baseline_name, bench.name.as_str()))
+                    {
+                        markers.push_str(dm);
+                    }
+                }
                 let cv = bench.summary.cv();
                 if cv > 0.20 && bench.summary.n > 10 {
                     let n = add_footnote(format!(
@@ -329,27 +380,6 @@ impl SuiteResult {
                     markers,
                     subgroup: bench.subgroup.clone(),
                 });
-            }
-
-            // Per-comparison footnotes (drift)
-            let mut comparison_markers: std::collections::HashMap<(&str, &str), String> =
-                std::collections::HashMap::new();
-            for (base, cand, analysis) in &comp.analyses {
-                if analysis.drift_correlation.abs() > 0.5 {
-                    let direction = if analysis.drift_correlation > 0.0 {
-                        "later rounds slower (thermal?)"
-                    } else {
-                        "later rounds faster (warmup?)"
-                    };
-                    let n = add_footnote(format!(
-                        "drift r={:.2} — {direction}",
-                        analysis.drift_correlation,
-                    ));
-                    comparison_markers
-                        .entry((base.as_str(), cand.as_str()))
-                        .or_default()
-                        .push_str(&format!("[{n}]"));
-                }
             }
 
             let mean_w = rows.iter().map(|r| r.mean.len()).max().unwrap_or(4).max(4);
@@ -581,92 +611,6 @@ impl SuiteResult {
                         );
                     }
                 }
-            }
-
-            // Detailed paired comparisons (below the table)
-            for (base, cand, analysis) in &comp.analyses {
-                // Label based on CI: if entire CI is on one side of zero,
-                // we're confident in the direction. Otherwise uncertain.
-                let (color, arrow) = if analysis.ci_upper < 0.0 {
-                    (GREEN, "faster")
-                } else if analysis.ci_lower > 0.0 {
-                    (RED, "slower")
-                } else {
-                    (DIM, "uncertain")
-                };
-                // Collect issue footnotes for this comparison
-                let mut cmp_markers = String::new();
-
-                // CI crosses zero — can't determine direction
-                if !analysis.significant {
-                    let n = add_footnote(format!(
-                        "{base} vs {cand}: 95% CI crosses zero [{} .. {}] — \
-                         cannot confirm a difference",
-                        format_ns(analysis.ci_lower),
-                        format_ns(analysis.ci_upper),
-                    ));
-                    cmp_markers.push_str(&format!("[{n}]"));
-                }
-
-                // Direction is clear but effect is negligible
-                if analysis.significant && analysis.cohens_d.abs() < 0.2 {
-                    let n = add_footnote(format!(
-                        "{base} vs {cand}: difference is real but tiny \
-                         (effect size {:.2}) — unlikely to matter in practice",
-                        analysis.cohens_d,
-                    ));
-                    cmp_markers.push_str(&format!("[{n}]"));
-                }
-
-                // Drift
-                if let Some(dm) = comparison_markers.get(&(base.as_str(), cand.as_str())) {
-                    cmp_markers.push_str(dm);
-                }
-
-                let marker_str = if cmp_markers.is_empty() {
-                    String::new()
-                } else {
-                    format!(" {YELLOW}{cmp_markers}{RESET}")
-                };
-
-                let throughput_delta = if has_throughput {
-                    let tp_pct = if analysis.pct_change > -100.0 {
-                        -analysis.pct_change / (1.0 + analysis.pct_change / 100.0)
-                    } else {
-                        f64::INFINITY
-                    };
-                    // Throughput color mirrors time direction (CI-based)
-                    let tp_color = if analysis.ci_upper < 0.0 {
-                        GREEN // faster → higher throughput
-                    } else if analysis.ci_lower > 0.0 {
-                        RED // slower → lower throughput
-                    } else {
-                        DIM
-                    };
-                    format!("  {tp_color}throughput {:+.1}%{RESET}", tp_pct)
-                } else {
-                    String::new()
-                };
-
-                // CI as percentage of baseline for readability
-                let ci_str = if analysis.baseline.mean.abs() > f64::EPSILON {
-                    let ci_lo_pct = analysis.ci_lower / analysis.baseline.mean * 100.0;
-                    let ci_hi_pct = analysis.ci_upper / analysis.baseline.mean * 100.0;
-                    format!("[{ci_lo_pct:+.1}% .. {ci_hi_pct:+.1}%]")
-                } else {
-                    format!(
-                        "[{} .. {}]",
-                        format_ns(analysis.ci_lower),
-                        format_ns(analysis.ci_upper),
-                    )
-                };
-
-                eprintln!(
-                    "  {DIM}{base} vs {cand}:{RESET}  \
-                     {color}{:+.2}% ({arrow}){RESET}  \
-                     {DIM}{ci_str}{RESET}{throughput_delta}{marker_str}",
-                    analysis.pct_change,
-                );
             }
 
             // Print footnotes for this group
