@@ -260,13 +260,16 @@ impl SuiteResult {
                 }
             }
 
-            // Pre-format all cells to measure widths
+            // Two-pass row construction:
+            // 1. Collect raw numeric data and determine column-wide formatting
+            // 2. Format all cells with consistent dp/alignment
+
             struct Row {
                 name: String,
-                mean_ci: String, // "259 ±0.9 ns"
+                mean_ci: String,
                 throughput: String,
                 cpu: String,
-                vs_base: String, // [lo  pct  hi]% range or "baseline"
+                vs_base: String,
                 vs_base_color: &'static str,
                 is_fastest: bool,
                 markers: String,
@@ -281,6 +284,27 @@ impl SuiteResult {
                 ));
             }
 
+            // Pass 1: determine column-wide formatting params
+            // Mean column: unit/dp based on the baseline (or fastest) mean
+            let reference_mean = comp
+                .benchmarks
+                .iter()
+                .find(|b| b.name == baseline_name)
+                .unwrap_or(&comp.benchmarks[0])
+                .summary
+                .mean;
+            let (mean_divisor, mean_unit, mean_dp) = ns_unit(reference_mean.abs());
+
+            // vs-base percentage column: dp based on max percentage magnitude
+            let max_pct = comp
+                .analyses
+                .iter()
+                .filter(|(base, _, _)| base == baseline_name)
+                .map(|(_, _, a)| a.pct_change.abs())
+                .fold(0.0_f64, f64::max);
+            let pct_dp: usize = if max_pct >= 100.0 { 0 } else { 1 };
+
+            // Pass 2: format all rows
             let mut rows: Vec<Row> = Vec::with_capacity(display_indices.len());
             for &i in &display_indices {
                 let bench = &comp.benchmarks[i];
@@ -304,19 +328,29 @@ impl SuiteResult {
                     })
                     .unwrap_or_default();
 
-                // vs baseline column:
-                // - baseline row: show its own [lo mean hi] absolute range
-                // - other rows: show [lo pct hi]% relative to baseline mean
-                //
-                // The percentages use baseline.mean as denominator. This is
-                // valid because the paired analysis cancels correlated noise:
-                // each round computes (candidate - baseline) before aggregation,
-                // so baseline variance doesn't inflate the difference CI.
+                // Mean ±CI with column-wide unit/dp
+                let m = bench.summary.mean / mean_divisor;
+                let c = (bench.summary.std_err() * 1.96) / mean_divisor;
+                let mean_ci = format!("{:.*} ±{:.*} {mean_unit}", mean_dp, m, mean_dp, c,);
+
+                // vs baseline column with column-wide dp
                 let (vs_base, vs_base_color) = if bench.name == baseline_name {
+                    // Baseline: show [lo mean hi] in same unit as mean column
                     let ci_half = bench.summary.std_err() * 1.96;
                     let lo = (bench.summary.mean - ci_half).max(0.0);
                     let hi = bench.summary.mean + ci_half;
-                    (format_ns_range(lo, bench.summary.mean, hi), DIM)
+                    let vals: Vec<String> = [lo, bench.summary.mean, hi]
+                        .iter()
+                        .map(|&v| format!("{:.*}", mean_dp, v / mean_divisor))
+                        .collect();
+                    let w = vals.iter().map(|s| s.len()).max().unwrap_or(1);
+                    (
+                        format!(
+                            "[{:>w$}  {:>w$}  {:>w$}] {mean_unit}",
+                            vals[0], vals[1], vals[2],
+                        ),
+                        DIM,
+                    )
                 } else if let Some(analysis) = baseline_analyses.get(bench.name.as_str()) {
                     let base_mean = analysis.baseline.mean;
                     if base_mean.abs() > f64::EPSILON {
@@ -328,9 +362,18 @@ impl SuiteResult {
                         } else {
                             DIM
                         };
-                        (format_pct_range(lo_pct, mid_pct, hi_pct), color)
+                        // Use column-wide pct_dp
+                        let vals: Vec<String> = [lo_pct, mid_pct, hi_pct]
+                            .iter()
+                            .map(|&v| format!("{:+.*}", pct_dp, v))
+                            .collect();
+                        let w = vals.iter().map(|s| s.len()).max().unwrap_or(1);
+                        (
+                            format!("[{:>w$}  {:>w$}  {:>w$}]%", vals[0], vals[1], vals[2],),
+                            color,
+                        )
                     } else {
-                        (format!("{:+.1}%", analysis.pct_change), DIM)
+                        (format!("{:+.*}%", pct_dp, analysis.pct_change), DIM)
                     }
                 } else {
                     (String::new(), DIM)
@@ -397,7 +440,7 @@ impl SuiteResult {
 
                 rows.push(Row {
                     name: bench.name.clone(),
-                    mean_ci: format_ns_mean_ci(bench.summary.mean, bench.summary.std_err() * 1.96),
+                    mean_ci,
                     throughput: tp_str,
                     cpu: cpu_str,
                     vs_base,
@@ -1086,26 +1129,6 @@ fn format_ns_range(lo: f64, mean: f64, hi: f64) -> String {
         .collect();
     let w = vals.iter().map(|s| s.len()).max().unwrap_or(1);
     format!("[{:>w$}  {:>w$}  {:>w$}] {unit}", vals[0], vals[1], vals[2],)
-}
-
-/// Format "mean ±ci unit" with shared unit and consistent decimals.
-fn format_ns_mean_ci(mean: f64, ci_half: f64) -> String {
-    let (divisor, unit, dp) = ns_unit(mean.abs());
-    let m = format!("{:.*}", dp, mean / divisor);
-    let c = format!("{:.*}", dp, ci_half / divisor);
-    format!("{m} ±{c} {unit}")
-}
-
-/// Format a [lo mid hi] percentage range with aligned columns.
-fn format_pct_range(lo: f64, mid: f64, hi: f64) -> String {
-    // Use consistent decimal places based on the magnitude of the middle value
-    let dp = if mid.abs() >= 100.0 { 0 } else { 1 };
-    let vals: Vec<String> = [lo, mid, hi]
-        .iter()
-        .map(|&v| format!("{:+.*}", dp, v))
-        .collect();
-    let w = vals.iter().map(|s| s.len()).max().unwrap_or(1);
-    format!("[{:>w$}  {:>w$}  {:>w$}]%", vals[0], vals[1], vals[2],)
 }
 
 /// Generate a text-based bar chart for a group of benchmarks.
