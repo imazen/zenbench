@@ -190,7 +190,7 @@ impl ResourceGate {
         self.wait_for_clear_with_deadline(None)
     }
 
-    /// Like [`wait_for_clear`], but with an explicit deadline.
+    /// Like [`ResourceGate::wait_for_clear`], but with an explicit deadline.
     ///
     /// The gate will wait at most `min(max_wait, deadline)`.
     pub fn wait_for_clear_with_deadline(&mut self, deadline: Option<Duration>) -> bool {

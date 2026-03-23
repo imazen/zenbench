@@ -29,6 +29,63 @@ far more power to detect real differences.
 - **Cross-platform** — Linux, macOS, Windows (x64 and ARM)
 - **`#![forbid(unsafe_code)]`** — no unsafe anywhere
 
+## Measurement realism and the cache firewall
+
+Every benchmark harness runs your code in a tight loop. That loop warms up
+microarchitectural state that your code won't have in production: the branch
+predictor learns your function's patterns, the instruction cache and TLB fill
+with its pages, and (without intervention) the data cache fills with its
+working set. The number you get back is a best-case scenario — how fast
+your function runs when the CPU has been doing nothing but running your
+function.
+
+Zenbench's **cache firewall** (on by default for comparison groups) addresses
+the data cache part: between each benchmark in a round, it reads a 256 KB
+buffer to evict hot cache lines. This prevents benchmark A from leaving its
+output in L2 where benchmark B's input scan picks it up for free. For
+relative comparisons between implementations, this is usually sufficient —
+branch prediction and i-cache warmth affect both sides equally.
+
+But if your benchmark results will drive architectural decisions ("is this
+fast enough to call per-request?"), you need numbers closer to reality.
+Two strategies:
+
+**Make each iteration large enough to be self-contained.** If each call takes
+microseconds or more, branch predictor warmth from the measurement loop is
+negligible relative to the actual work. The cache firewall handles data
+cache; the function's own memory access pattern dominates.
+
+```rust
+group.bench("encode_1mp", |b| {
+    b.with_input(|| generate_test_image(1024, 1024))
+        .run(|img| encoder.encode(&img))
+});
+```
+
+**Build a realistic caller.** For fast operations (nanoseconds), wrap your
+function in a workload that reflects how it's actually called — with branch
+predictor pollution and cache pressure from surrounding code:
+
+```rust
+group.bench("lookup_realistic", |b| {
+    b.with_input(|| prepare_batch(1000))
+        .run(|batch| {
+            for item in &batch {
+                simulate_request_overhead(item);
+                black_box(table.lookup(&item.key));
+            }
+        })
+});
+```
+
+This is noisier than a tight loop, but the noise is real — it's what
+callers experience. If your function is only fast in a tight loop, you
+want to know that before shipping.
+
+You can disable the cache firewall per-group with
+`group.config().cache_firewall(false)` when comparing implementations
+that share a working set and you specifically want hot-cache behavior.
+
 ## Quick start
 
 Add to `Cargo.toml`:
