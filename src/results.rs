@@ -263,7 +263,7 @@ impl SuiteResult {
             // Pre-format all cells to measure widths
             struct Row {
                 name: String,
-                mean: String, // point estimate only
+                mean_ci: String, // "259 ±0.9 ns"
                 throughput: String,
                 cpu: String,
                 vs_base: String, // [lo  pct  hi]% range or "baseline"
@@ -397,7 +397,7 @@ impl SuiteResult {
 
                 rows.push(Row {
                     name: bench.name.clone(),
-                    mean: format_ns(bench.summary.mean),
+                    mean_ci: format_ns_mean_ci(bench.summary.mean, bench.summary.std_err() * 1.96),
                     throughput: tp_str,
                     cpu: cpu_str,
                     vs_base,
@@ -408,7 +408,12 @@ impl SuiteResult {
                 });
             }
 
-            let mean_w = rows.iter().map(|r| r.mean.len()).max().unwrap_or(4).max(4);
+            let mean_w = rows
+                .iter()
+                .map(|r| r.mean_ci.len())
+                .max()
+                .unwrap_or(8)
+                .max(8);
             let tp_w = if has_throughput {
                 rows.iter()
                     .map(|r| r.throughput.len())
@@ -428,7 +433,7 @@ impl SuiteResult {
                     .map(|r| r.vs_base.len())
                     .max()
                     .unwrap_or(8)
-                    .max(8) // "vs base"
+                    .max(15) // "95% CI vs base"
             } else {
                 0
             };
@@ -448,17 +453,17 @@ impl SuiteResult {
             hdr.push_str(&format!("│ {:<name_w$}", "benchmark"));
             add_col(&mut mid, name_w, '├');
 
-            // vs base column (first data column for quick scanning)
+            // Mean ±CI column
+            add_col(&mut top, mean_w, '┬');
+            hdr.push_str(&format!(" │ {:>mean_w$}", "mean ±95ci"));
+            add_col(&mut mid, mean_w, '┼');
+
+            // vs base column
             if has_comparisons {
                 add_col(&mut top, vs_w, '┬');
-                hdr.push_str(&format!(" │ {:>vs_w$}", "vs base"));
+                hdr.push_str(&format!(" │ {:>vs_w$}", "95% CI vs base"));
                 add_col(&mut mid, vs_w, '┼');
             }
-
-            // Mean column
-            add_col(&mut top, mean_w, '┬');
-            hdr.push_str(&format!(" │ {:>mean_w$}", "mean"));
-            add_col(&mut mid, mean_w, '┼');
 
             if has_throughput {
                 add_col(&mut top, tp_w, '┬');
@@ -512,13 +517,13 @@ impl SuiteResult {
                     row.name,
                 );
 
+                line.push_str(&format!(" {DIM}│{RESET} {:>mean_w$}", row.mean_ci));
+
                 if has_comparisons {
                     let vc = row.vs_base_color;
                     let vr = if vc.is_empty() { "" } else { RESET };
                     line.push_str(&format!(" {DIM}│{RESET} {vc}{:>vs_w$}{vr}", row.vs_base));
                 }
-
-                line.push_str(&format!(" {DIM}│{RESET} {:>mean_w$}", row.mean));
 
                 if has_throughput {
                     line.push_str(&format!(
@@ -541,10 +546,10 @@ impl SuiteResult {
             // Bottom border
             let mut bot = String::from("  └");
             bot.push_str(&"─".repeat(name_w + 2));
+            bot.push_str(&format!("┴{}", "─".repeat(mean_w + 2)));
             if has_comparisons {
                 bot.push_str(&format!("┴{}", "─".repeat(vs_w + 2)));
             }
-            bot.push_str(&format!("┴{}", "─".repeat(mean_w + 2)));
             if has_throughput {
                 bot.push_str(&format!("┴{}", "─".repeat(tp_w + 2)));
             }
@@ -1077,6 +1082,34 @@ fn format_ns_range(lo: f64, mean: f64, hi: f64) -> String {
         }
     };
     format!("[{}  {}  {}] {unit}", fmt(lo), fmt(mean), fmt(hi))
+}
+
+/// Format "mean ±ci_half unit" with shared unit based on mean magnitude.
+fn format_ns_mean_ci(mean: f64, ci_half: f64) -> String {
+    let abs = mean.abs();
+    let (divisor, unit) = if abs >= 1_000_000_000.0 {
+        (1_000_000_000.0, "s")
+    } else if abs >= 1_000_000.0 {
+        (1_000_000.0, "ms")
+    } else if abs >= 1_000.0 {
+        (1_000.0, "µs")
+    } else {
+        (1.0, "ns")
+    };
+    let m = mean / divisor;
+    let c = ci_half / divisor;
+    let fmt_val = |v: f64| -> String {
+        if v.abs() >= 100.0 {
+            format!("{v:.0}")
+        } else if v.abs() >= 10.0 {
+            format!("{v:.1}")
+        } else if v.abs() >= 1.0 {
+            format!("{v:.2}")
+        } else {
+            format!("{v:.2}")
+        }
+    };
+    format!("{} ±{} {unit}", fmt_val(m), fmt_val(c))
 }
 
 /// Format a [lo mid hi] percentage range.
