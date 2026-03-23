@@ -68,6 +68,7 @@ impl Engine {
             });
 
         let mut comparisons = Vec::new();
+        let mut group_configs = Vec::new();
         let mut standalones = Vec::new();
 
         // Run comparison groups (interleaved)
@@ -75,6 +76,7 @@ impl Engine {
             if group.benchmarks.is_empty() {
                 continue;
             }
+            group_configs.push(group.config.clone());
             let result = run_comparison_group(group, &mut self.gate);
             comparisons.push(result);
         }
@@ -106,12 +108,14 @@ impl Engine {
 
         // Run diagnostic checks and print warnings
         let mut warnings = Vec::new();
-        for comp in &result.comparisons {
+        for (i, comp) in result.comparisons.iter().enumerate() {
+            let expect_sub_ns = group_configs.get(i).is_some_and(|c| c.expect_sub_ns);
             for bench in &comp.benchmarks {
                 warnings.extend(checks::check_benchmark(
                     &bench.name,
                     &bench.summary,
                     comp.completed_rounds,
+                    expect_sub_ns,
                 ));
             }
             for (base, cand, analysis) in &comp.analyses {
@@ -119,8 +123,9 @@ impl Engine {
                     warnings.push(w);
                 }
             }
-            if let Some(w) =
-                checks::check_multiple_comparisons(&comp.group_name, comp.benchmarks.len())
+            if !comp.baseline_only
+                && let Some(w) =
+                    checks::check_multiple_comparisons(&comp.group_name, comp.benchmarks.len())
             {
                 warnings.push(w);
             }
@@ -130,6 +135,7 @@ impl Engine {
                 &bench.name,
                 &bench.summary,
                 bench.summary.n,
+                false,
             ));
         }
         if !warnings.is_empty() {
@@ -245,28 +251,46 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
         completed_rounds += 1;
     }
 
-    // Phase 3: Compute paired statistics for all pairs
+    // Phase 3: Compute paired statistics
     let mut analyses = Vec::new();
     let names: Vec<String> = group.benchmarks.iter().map(|b| b.name.clone()).collect();
 
-    // Use first benchmark as baseline, compare all others against it
+    // Determine baseline index
+    let baseline_idx = group
+        .baseline_name
+        .as_ref()
+        .and_then(|name| names.iter().position(|n| n == name))
+        .unwrap_or(0);
+
+    // Auto-detect baseline_only: default to true when > 3 benchmarks
+    let baseline_only = config
+        .baseline_only
+        .unwrap_or(n_benchmarks > 3);
+
     if n_benchmarks >= 2 {
-        let baseline_samples = &samples[0];
-        for i in 1..n_benchmarks {
+        // Compare all benchmarks against the baseline
+        let baseline_samples = &samples[baseline_idx];
+        for i in 0..n_benchmarks {
+            if i == baseline_idx {
+                continue;
+            }
             let candidate_samples = &samples[i];
             let base_f64: Vec<f64> = baseline_samples.iter().map(|&v| v as f64).collect();
             let cand_f64: Vec<f64> = candidate_samples.iter().map(|&v| v as f64).collect();
 
             if let Some(analysis) = PairedAnalysis::compute(&base_f64, &cand_f64, &iters_per_round)
             {
-                analyses.push((names[0].clone(), names[i].clone(), analysis));
+                analyses.push((names[baseline_idx].clone(), names[i].clone(), analysis));
             }
         }
 
-        // Also compute all-pairs if there are more than 2 benchmarks
-        if n_benchmarks > 2 {
-            for i in 1..n_benchmarks {
+        // Also compute non-baseline pairs (always stored for JSON; filtered in report)
+        if !baseline_only && n_benchmarks > 2 {
+            for i in 0..n_benchmarks {
                 for j in (i + 1)..n_benchmarks {
+                    if i == baseline_idx || j == baseline_idx {
+                        continue; // already computed above
+                    }
                     let base_f64: Vec<f64> = samples[i].iter().map(|&v| v as f64).collect();
                     let cand_f64: Vec<f64> = samples[j].iter().map(|&v| v as f64).collect();
                     if let Some(analysis) =
@@ -315,6 +339,9 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
         analyses,
         completed_rounds,
         throughput: group.throughput.clone(),
+        cache_firewall: config.cache_firewall,
+        cache_firewall_bytes: config.cache_firewall_bytes,
+        baseline_only,
     }
 }
 

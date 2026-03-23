@@ -37,43 +37,48 @@ impl std::fmt::Display for BenchWarning {
 }
 
 /// Check a benchmark result for common issues.
-pub fn check_benchmark(name: &str, summary: &Summary, n_rounds: usize) -> Vec<BenchWarning> {
+///
+/// `expect_sub_ns`: if true, suppresses the "likely optimized away" warning
+/// for sub-nanosecond measurements.
+pub fn check_benchmark(
+    name: &str,
+    summary: &Summary,
+    n_rounds: usize,
+    expect_sub_ns: bool,
+) -> Vec<BenchWarning> {
     let mut warnings = Vec::new();
 
     // Check for sub-nanosecond measurements (likely optimized away)
-    if summary.mean < 1.0 && summary.n > 0 {
-        warnings.push(BenchWarning {
-            benchmark: name.to_string(),
-            kind: WarningKind::LikelyOptimizedAway,
-            message: format!(
-                "mean time {:.3}ns is below 1ns — the benchmark is likely optimized away. \
-                 Use zenbench::black_box() on inputs and outputs.",
-                summary.mean
-            ),
-        });
+    // Only warn if: not expected sub-ns AND (zero variance OR mean is suspiciously low)
+    if summary.mean < 1.0 && summary.n > 0 && !expect_sub_ns {
+        // Better heuristic: only warn if variance is near-zero relative to mean,
+        // which suggests the function was const-folded. Genuine sub-ns operations
+        // (like a branch-predicted check) still show measurable variance from
+        // timer jitter and system noise.
+        let cv = summary.cv();
+        if cv < 0.01 || summary.variance < f64::EPSILON {
+            warnings.push(BenchWarning {
+                benchmark: name.to_string(),
+                kind: WarningKind::LikelyOptimizedAway,
+                message: format!(
+                    "mean time {:.3}ns with near-zero variance (CV={:.1}%) — \
+                     likely optimized away. Use zenbench::black_box() on inputs and outputs, \
+                     or set expect_sub_ns(true) if this is genuine.",
+                    summary.mean,
+                    cv * 100.0,
+                ),
+            });
+        }
     }
 
     // Check for near-zero variance (all identical measurements)
-    if summary.variance < f64::EPSILON && summary.n > 5 {
+    if summary.variance < f64::EPSILON && summary.n > 5 && summary.mean >= 1.0 {
         warnings.push(BenchWarning {
             benchmark: name.to_string(),
             kind: WarningKind::ZeroVariance,
             message: "all measurements are identical — this may indicate the benchmark \
                      is being const-folded or the function is not actually being called."
                 .to_string(),
-        });
-    }
-
-    // Check timer resolution (~15-100ns on most systems)
-    if summary.mean > 0.0 && summary.mean < 50.0 && summary.n > 0 {
-        warnings.push(BenchWarning {
-            benchmark: name.to_string(),
-            kind: WarningKind::BelowTimerResolution,
-            message: format!(
-                "mean time {:.1}ns is near typical timer resolution (15-100ns). \
-                 Results may be dominated by timer overhead. Consider increasing iterations.",
-                summary.mean
-            ),
         });
     }
 

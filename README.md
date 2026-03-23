@@ -21,7 +21,7 @@ far more power to detect real differences.
 - **Paired statistics** — Welford streaming, bootstrap CI, Cohen's d, Wilcoxon signed-rank test, drift detection
 - **Robust metrics** — median, MAD (scaled), and mean/variance for both parametric and non-parametric analysis
 - **Anti-aliasing jitter** — varies iteration count ±20% per round to prevent timer synchronization artifacts
-- **Cache firewall** — spoils CPU cache between samples to reduce cache-state bias
+- **Cache firewall** — optional L2 cache spoiling between samples for cold-cache measurement
 - **Self-compare** — build and benchmark old vs new code via git worktrees
 - **Fire-and-forget** — spawn detached benchmark processes, query progress, auto-kill stale runs
 - **MCP server** — JSON-RPC 2.0 interface for AI/editor integration
@@ -29,62 +29,39 @@ far more power to detect real differences.
 - **Cross-platform** — Linux, macOS, Windows (x64 and ARM)
 - **`#![forbid(unsafe_code)]`** — no unsafe anywhere
 
-## Measurement realism and the cache firewall
+## Cache firewall
 
-Every benchmark harness runs your code in a tight loop. That loop warms up
-microarchitectural state that your code won't have in production: the branch
-predictor learns your function's patterns, the instruction cache and TLB fill
-with its pages, and (without intervention) the data cache fills with its
-working set. The number you get back is a best-case scenario — how fast
-your function runs when the CPU has been doing nothing but running your
-function.
+Every benchmark harness runs your code in a tight loop that warms up the
+branch predictor, instruction cache, TLB, and data cache. The number you
+get is a best-case: how fast your function runs when the CPU has been
+doing nothing else.
 
-Zenbench's **cache firewall** (on by default for comparison groups) addresses
-the data cache part: between each benchmark in a round, it reads a 2 MiB
-buffer to evict hot cache lines (enough to spoil L2 on most modern cores). This prevents benchmark A from leaving its
-output in L2 where benchmark B's input scan picks it up for free. For
-relative comparisons between implementations, this is usually sufficient —
-branch prediction and i-cache warmth affect both sides equally.
+Zenbench's **cache firewall** (off by default) reads a 2 MiB buffer between
+benchmarks in each round to evict L2-resident data. Enable it when you want
+cold-cache numbers or when benchmarks touch different memory regions and
+you don't want cross-contamination.
 
-But if your benchmark results will drive architectural decisions ("is this
-fast enough to call per-request?"), you need numbers closer to reality.
-Two strategies:
+```rust,ignore
+// Cold-cache measurement
+group.config().cache_firewall(true);
+```
 
-**Make each iteration large enough to be self-contained.** If each call takes
-microseconds or more, branch predictor warmth from the measurement loop is
-negligible relative to the actual work. The cache firewall handles data
-cache; the function's own memory access pattern dominates.
+**The firewall is off by default** because most microbenchmarks measure
+hot-path code. Pointer-chasing operations (Box, Arc, vtable dispatch) stay
+in L1/L2 during a real hot loop — the firewall would penalize them
+unrealistically. When the firewall is active, it's reported in the output
+header so you can see its effect.
 
-```rust
+For architectural decisions ("is this fast enough per-request?"), consider
+making each iteration large enough that the measurement loop's
+microarchitectural warmth is negligible:
+
+```rust,ignore
 group.bench("encode_1mp", |b| {
     b.with_input(|| generate_test_image(1024, 1024))
         .run(|img| encoder.encode(&img))
 });
 ```
-
-**Build a realistic caller.** For fast operations (nanoseconds), wrap your
-function in a workload that reflects how it's actually called — with branch
-predictor pollution and cache pressure from surrounding code:
-
-```rust
-group.bench("lookup_realistic", |b| {
-    b.with_input(|| prepare_batch(1000))
-        .run(|batch| {
-            for item in &batch {
-                simulate_request_overhead(item);
-                black_box(table.lookup(&item.key));
-            }
-        })
-});
-```
-
-This is noisier than a tight loop, but the noise is real — it's what
-callers experience. If your function is only fast in a tight loop, you
-want to know that before shipping.
-
-You can disable the cache firewall per-group with
-`group.config().cache_firewall(false)` when comparing implementations
-that share a working set and you specifically want hot-cache behavior.
 
 ## Quick start
 
@@ -141,6 +118,31 @@ zenbench::run(|suite| {
 ```console
 $ cargo bench --bench my_bench
 ```
+
+## Group configuration
+
+```rust,ignore
+suite.compare("my_group", |group| {
+    // Set the baseline benchmark (default: first added)
+    group.baseline("reference_impl");
+
+    group.config()
+        .cache_firewall(true)             // enable L2 cache spoiling between benchmarks
+        .cache_firewall_bytes(4 * 1024 * 1024) // 4 MiB for larger L2 caches
+        .baseline_only(true)              // only compare against baseline (auto for >3 benchmarks)
+        .expect_sub_ns(true)              // suppress "optimized away" warnings for sub-ns benchmarks
+        .rounds(200)                      // target measurement rounds
+        .min_rounds(5)                    // minimum rounds before max_time applies
+        .max_time(Duration::from_secs(10)); // max measurement time (excludes gate waits)
+
+    group.bench("reference_impl", |b| { /* ... */ });
+    group.bench("new_impl", |b| { /* ... */ });
+});
+```
+
+Comparison groups with more than 3 benchmarks automatically switch to
+baseline-only comparisons to keep output readable. The full pairwise matrix
+is always available in JSON output.
 
 ## Self-compare
 
@@ -237,7 +239,7 @@ Wrong Data" paper:
 2. **Gate, don't hope.** Check system state before measuring, not after.
 3. **Pair, don't pool.** Paired statistical tests have more power than independent tests.
 4. **Detect drift.** Spearman correlation flags thermal throttling or load changes.
-5. **Spoil caches.** Cache firewall prevents one benchmark from warming caches for the next.
+5. **Cache firewall (opt-in).** When enabled, prevents one benchmark from warming caches for the next.
 6. **Jitter iterations.** Anti-aliasing prevents synchronization with periodic system events.
 7. **Coordinate.** File lock prevents concurrent benchmark processes from fighting.
 

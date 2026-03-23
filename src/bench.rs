@@ -112,6 +112,7 @@ pub struct BenchGroup {
     pub(crate) benchmarks: Vec<Benchmark>,
     pub(crate) config: GroupConfig,
     pub(crate) throughput: Option<Throughput>,
+    pub(crate) baseline_name: Option<String>,
 }
 
 impl BenchGroup {
@@ -121,6 +122,7 @@ impl BenchGroup {
             benchmarks: Vec::new(),
             config: GroupConfig::default(),
             throughput: None,
+            baseline_name: None,
         }
     }
 
@@ -163,6 +165,15 @@ impl BenchGroup {
         self
     }
 
+    /// Set which benchmark is the baseline for comparisons.
+    ///
+    /// By default, the first benchmark added is the baseline. Use this
+    /// to compare against a different benchmark by name.
+    pub fn baseline(&mut self, name: impl Into<String>) -> &mut Self {
+        self.baseline_name = Some(name.into());
+        self
+    }
+
     /// Configure this group's execution parameters.
     pub fn config(&mut self) -> &mut GroupConfig {
         &mut self.config
@@ -184,14 +195,36 @@ pub struct GroupConfig {
     pub max_time: Duration,
     /// Minimum iterations per sample.
     pub min_iterations: usize,
-    /// Maximum iterations per sample.
+    /// Maximum iterations per sample (default: 10M, high enough for sub-ns operations).
     pub max_iterations: usize,
     /// Whether to spoil CPU cache between samples.
+    ///
+    /// When `true`, reads a large buffer between benchmarks in each round
+    /// to evict hot cache lines. This prevents one benchmark's output from
+    /// remaining in L1/L2 where the next benchmark picks it up for free.
+    ///
+    /// **Default: `false`.** Most microbenchmarks measure hot-path code where
+    /// pointer-chasing (Box, Arc, vtable dispatch) stays in cache. The firewall
+    /// penalizes these unfairly. Enable it when benchmarks touch different memory
+    /// regions and you want cold-cache behavior.
     pub cache_firewall: bool,
-    /// Cache firewall size in bytes.
+    /// Cache firewall size in bytes (default: 2 MiB, enough to spoil L2).
     pub cache_firewall_bytes: usize,
     /// Whether to yield to OS scheduler between samples.
     pub yield_between_samples: bool,
+    /// Only compare against the baseline (first benchmark) in reports.
+    ///
+    /// When `false` (default for <= 3 benchmarks), shows all pairwise comparisons.
+    /// When `true` (default for > 3 benchmarks), only compares each benchmark
+    /// against the first. Full pairwise data is always available in JSON output.
+    ///
+    /// Set explicitly to override the auto-detection.
+    pub baseline_only: Option<bool>,
+    /// Suppress "likely optimized away" warnings for sub-nanosecond benchmarks.
+    ///
+    /// Set to `true` when you know your benchmark genuinely runs in sub-ns time
+    /// (e.g., a constant return or a single branch-predicted check).
+    pub expect_sub_ns: bool,
 }
 
 impl Default for GroupConfig {
@@ -202,10 +235,12 @@ impl Default for GroupConfig {
             warmup_time: Duration::from_millis(500),
             max_time: Duration::from_secs(10),
             min_iterations: 1,
-            max_iterations: 10_000,
-            cache_firewall: true,
+            max_iterations: 10_000_000,
+            cache_firewall: false,
             cache_firewall_bytes: 2 * 1024 * 1024, // 2 MiB — enough to spoil L2 on most modern CPUs
             yield_between_samples: false,
+            baseline_only: None, // auto: true when > 3 benchmarks
+            expect_sub_ns: false,
         }
     }
 }
@@ -238,6 +273,16 @@ impl GroupConfig {
 
     pub fn cache_firewall_bytes(&mut self, bytes: usize) -> &mut Self {
         self.cache_firewall_bytes = bytes;
+        self
+    }
+
+    pub fn baseline_only(&mut self, enabled: bool) -> &mut Self {
+        self.baseline_only = Some(enabled);
+        self
+    }
+
+    pub fn expect_sub_ns(&mut self, enabled: bool) -> &mut Self {
+        self.expect_sub_ns = enabled;
         self
     }
 

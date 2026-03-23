@@ -60,6 +60,15 @@ pub struct ComparisonResult {
     /// Throughput declaration for this group (if set).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub throughput: Option<Throughput>,
+    /// Whether cache firewall was enabled for this group.
+    #[serde(default)]
+    pub cache_firewall: bool,
+    /// Cache firewall size in bytes (when enabled).
+    #[serde(default)]
+    pub cache_firewall_bytes: usize,
+    /// Whether only baseline comparisons are shown in reports.
+    #[serde(default)]
+    pub baseline_only: bool,
 }
 
 /// Complete results of a benchmark suite run.
@@ -94,54 +103,105 @@ impl SuiteResult {
 
     /// Print a human-readable report to stderr (with ANSI colors).
     pub fn print_report(&self) {
+        // ANSI color codes
+        const RESET: &str = "\x1b[0m";
+        const BOLD: &str = "\x1b[1m";
+        const DIM: &str = "\x1b[2m";
+        const GREEN: &str = "\x1b[32m";
+        const RED: &str = "\x1b[31m";
+        const YELLOW: &str = "\x1b[33m";
+        const CYAN: &str = "\x1b[36m";
+        const BOLD_WHITE: &str = "\x1b[1;37m";
+
         eprintln!();
-        eprintln!("═══════════════════════════════════════════════════════════════");
-        eprintln!("  zenbench results  ({})", self.run_id);
+        eprintln!("{BOLD_WHITE}═══════════════════════════════════════════════════════════════{RESET}");
+        eprintln!("{BOLD_WHITE}  zenbench{RESET}  {DIM}{}{RESET}", self.run_id);
         if let Some(hash) = &self.git_hash {
-            eprintln!("  git: {}", hash);
+            eprintln!("  {DIM}git:{RESET} {hash}");
         }
         if let Some(ci) = &self.ci_environment {
-            eprintln!("  ci: {}", ci);
+            eprintln!("  {DIM}ci:{RESET}  {ci}");
         }
-        eprintln!("═══════════════════════════════════════════════════════════════");
+        eprintln!("{BOLD_WHITE}═══════════════════════════════════════════════════════════════{RESET}");
 
         for comp in &self.comparisons {
             eprintln!();
+
+            // Group header with config info
+            let firewall_str = if comp.cache_firewall {
+                format!(
+                    "  {CYAN}cache_firewall: {}{}",
+                    format_bytes(comp.cache_firewall_bytes),
+                    RESET,
+                )
+            } else {
+                String::new()
+            };
             eprintln!(
-                "  group: {}  ({} rounds)",
-                comp.group_name, comp.completed_rounds
+                "  {BOLD}{}{RESET}  {DIM}({} rounds){RESET}{firewall_str}",
+                comp.group_name, comp.completed_rounds,
             );
-            eprintln!("  ───────────────────────────────────────────────────────────");
+            eprintln!("  {DIM}───────────────────────────────────────────────────────────{RESET}");
+
+            // Determine column widths from benchmark names
+            let name_width = comp
+                .benchmarks
+                .iter()
+                .map(|b| b.name.len())
+                .max()
+                .unwrap_or(10)
+                .max(10);
+
+            // Find fastest benchmark for highlighting
+            let fastest_mean = comp
+                .benchmarks
+                .iter()
+                .map(|b| b.summary.mean)
+                .fold(f64::INFINITY, f64::min);
+
+            let has_throughput = comp.throughput.is_some();
 
             // Individual results
             for bench in &comp.benchmarks {
-                let throughput_str = comp
-                    .throughput
-                    .as_ref()
-                    .map(|t| format!("  {}", t.format(bench.summary.mean)))
-                    .unwrap_or_default();
-                let cpu_str = bench
-                    .cpu_summary
-                    .as_ref()
-                    .map(|cpu| {
-                        let efficiency = if bench.summary.mean > 0.0 {
-                            cpu.mean / bench.summary.mean * 100.0
-                        } else {
-                            0.0
-                        };
-                        format!("  cpu:{} ({efficiency:.0}%)", format_ns(cpu.mean))
-                    })
-                    .unwrap_or_default();
-                eprintln!(
-                    "    {:<30}  {:>10}  ±{:>10}  (med {:>10}  mad {:>10}){}{}",
+                let is_fastest = (bench.summary.mean - fastest_mean).abs() < f64::EPSILON;
+                let name_color = if is_fastest && comp.benchmarks.len() > 1 {
+                    GREEN
+                } else {
+                    ""
+                };
+                let name_reset = if name_color.is_empty() { "" } else { RESET };
+
+                let mean_str = format_ns(bench.summary.mean);
+                let stddev_str = format_ns(bench.summary.std_dev());
+                let median_str = format_ns(bench.summary.median);
+
+                let mut line = format!(
+                    "    {name_color}{:<width$}{name_reset}  {:>10}  {DIM}±{:>10}{RESET}  {DIM}med {:>10}{RESET}",
                     bench.name,
-                    format_ns(bench.summary.mean),
-                    format_ns(bench.summary.std_dev()),
-                    format_ns(bench.summary.median),
-                    format_ns(bench.summary.mad),
-                    throughput_str,
-                    cpu_str,
+                    mean_str,
+                    stddev_str,
+                    median_str,
+                    width = name_width,
                 );
+
+                if let Some(tp) = &comp.throughput {
+                    let tp_str = tp.format(bench.summary.mean);
+                    line.push_str(&format!("  {CYAN}{tp_str}{RESET}"));
+                }
+
+                if let Some(cpu) = &bench.cpu_summary {
+                    let efficiency = if bench.summary.mean > 0.0 {
+                        cpu.mean / bench.summary.mean * 100.0
+                    } else {
+                        0.0
+                    };
+                    line.push_str(&format!(
+                        "  {DIM}cpu:{} ({efficiency:.0}%){RESET}",
+                        format_ns(cpu.mean),
+                    ));
+                }
+
+                eprintln!("{line}");
             }
 
             // Paired comparisons
@@ -149,24 +209,46 @@ impl SuiteResult {
                 eprintln!();
             }
             for (base, cand, analysis) in &comp.analyses {
-                let arrow = if analysis.pct_change < 0.0 {
-                    "\x1b[32m" // green
-                } else if analysis.pct_change > 0.0 {
-                    "\x1b[31m" // red
+                // For timing: negative pct_change = faster = green
+                // For throughput: we still report pct_change on timing, so same logic
+                let (color, arrow) = if analysis.pct_change < -1.0 {
+                    (GREEN, "faster")
+                } else if analysis.pct_change > 1.0 {
+                    (RED, "slower")
                 } else {
-                    ""
+                    (DIM, "same")
                 };
-                let reset = if arrow.is_empty() { "" } else { "\x1b[0m" };
-                let sig = if analysis.significant { "*" } else { " " };
+                let sig_marker = if analysis.significant {
+                    format!(" {BOLD}*{RESET}")
+                } else {
+                    String::new()
+                };
+
+                // Show throughput change if available
+                let throughput_delta = if has_throughput {
+                    // Throughput is inverse of time: if time goes down X%, throughput goes up
+                    let tp_pct = if analysis.pct_change > -100.0 {
+                        -analysis.pct_change / (1.0 + analysis.pct_change / 100.0)
+                    } else {
+                        f64::INFINITY
+                    };
+                    let tp_color = if tp_pct > 1.0 {
+                        GREEN
+                    } else if tp_pct < -1.0 {
+                        RED
+                    } else {
+                        DIM
+                    };
+                    format!("  {tp_color}throughput {:+.1}%{RESET}", tp_pct)
+                } else {
+                    String::new()
+                };
 
                 eprintln!(
-                    "    {} vs {}:  {}{:+.2}%{}{}  (d={:.2}, p={:.4}, CI [{}, {}])",
-                    base,
-                    cand,
-                    arrow,
+                    "    {DIM}{base} vs {cand}:{RESET}  \
+                     {color}{:+.2}% ({arrow}){RESET}{sig_marker}  \
+                     {DIM}d={:.2}  p={:.4}  CI [{}, {}]{RESET}{throughput_delta}",
                     analysis.pct_change,
-                    reset,
-                    sig,
                     analysis.cohens_d,
                     analysis.wilcoxon_p,
                     format_ns(analysis.ci_lower),
@@ -175,48 +257,65 @@ impl SuiteResult {
 
                 if analysis.drift_correlation.abs() > 0.5 {
                     eprintln!(
-                        "    \x1b[33m⚠ drift detected (r={:.2})\x1b[0m",
-                        analysis.drift_correlation
+                        "      {YELLOW}⚠ drift r={:.2}{RESET}",
+                        analysis.drift_correlation,
                     );
                 }
             }
         }
 
         // Standalone results
-        for bench in &self.standalones {
-            let cpu_str = bench
-                .cpu_summary
-                .as_ref()
-                .map(|cpu| {
+        if !self.standalones.is_empty() {
+            eprintln!();
+            eprintln!("  {BOLD}standalone{RESET}");
+            eprintln!("  {DIM}───────────────────────────────────────────────────────────{RESET}");
+
+            let name_width = self
+                .standalones
+                .iter()
+                .map(|b| b.name.len())
+                .max()
+                .unwrap_or(10)
+                .max(10);
+
+            for bench in &self.standalones {
+                let mut line = format!(
+                    "    {:<width$}  {:>10}  {DIM}±{:>10}  med {:>10}  n={}{RESET}",
+                    bench.name,
+                    format_ns(bench.summary.mean),
+                    format_ns(bench.summary.std_dev()),
+                    format_ns(bench.summary.median),
+                    bench.summary.n,
+                    width = name_width,
+                );
+
+                if let Some(cpu) = &bench.cpu_summary {
                     let efficiency = if bench.summary.mean > 0.0 {
                         cpu.mean / bench.summary.mean * 100.0
                     } else {
                         0.0
                     };
-                    format!("  cpu:{} ({efficiency:.0}%)", format_ns(cpu.mean))
-                })
-                .unwrap_or_default();
-            eprintln!();
-            eprintln!(
-                "  {:<30}  {:>10}  ±{:>10}  (med {:>10}  n={}){}",
-                bench.name,
-                format_ns(bench.summary.mean),
-                format_ns(bench.summary.std_dev()),
-                format_ns(bench.summary.median),
-                bench.summary.n,
-                cpu_str,
-            );
+                    line.push_str(&format!(
+                        "  {DIM}cpu:{} ({efficiency:.0}%){RESET}",
+                        format_ns(cpu.mean),
+                    ));
+                }
+
+                eprintln!("{line}");
+            }
         }
 
         eprintln!();
         eprintln!(
-            "  total: {:?}  waits: {} ({:?})",
-            self.total_time, self.gate_waits, self.gate_wait_time
+            "  {DIM}total: {:.1}s  waits: {} ({:.1}s){RESET}",
+            self.total_time.as_secs_f64(),
+            self.gate_waits,
+            self.gate_wait_time.as_secs_f64(),
         );
         if self.unreliable {
-            eprintln!("  \x1b[31m⚠ UNRELIABLE: too many resource gate waits\x1b[0m");
+            eprintln!("  {RED}{BOLD}⚠ UNRELIABLE: too many resource gate waits{RESET}");
         }
-        eprintln!("═══════════════════════════════════════════════════════════════");
+        eprintln!("{BOLD_WHITE}═══════════════════════════════════════════════════════════════{RESET}");
         eprintln!();
     }
 
@@ -478,6 +577,17 @@ impl SuiteResult {
     }
 }
 
+/// Format bytes as human-readable size.
+fn format_bytes(bytes: usize) -> String {
+    if bytes >= 1024 * 1024 {
+        format!("{} MiB", bytes / (1024 * 1024))
+    } else if bytes >= 1024 {
+        format!("{} KiB", bytes / 1024)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
 /// Format nanoseconds as human-readable time.
 pub fn format_ns(ns: f64) -> String {
     let abs = ns.abs();
@@ -665,6 +775,9 @@ mod tests {
                 analyses: vec![],
                 completed_rounds: 100,
                 throughput: Some(Throughput::Bytes(1_048_576)), // 1 MiB
+                cache_firewall: false,
+                cache_firewall_bytes: 0,
+                baseline_only: false,
             }],
             standalones: vec![],
             total_time: Duration::from_secs(5),
