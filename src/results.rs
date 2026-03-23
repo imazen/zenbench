@@ -431,18 +431,10 @@ impl SuiteResult {
             eprintln!("{DIM}{hdr}{RESET}");
             eprintln!("{DIM}{mid}{RESET}");
 
-            // Compute total inner width for subgroup separator
             let has_subgroups = rows.iter().any(|r| r.subgroup.is_some());
-            let table_inner_w = name_w
-                + 2
-                + if has_comparisons { vs_w + 3 } else { 0 }
-                + mean_w
-                + 3
-                + sd_w
-                + 3
-                + if has_throughput { tp_w + 3 } else { 0 }
-                + if has_cpu { cpu_w + 3 } else { 0 }
-                - 1; // last column has no trailing separator
+            // Inner width = top line chars minus "  ┌" prefix and "┐" suffix
+            // top is like "  ┌───┬───┐" — inner is everything between ┌ and ┐
+            let table_inner_w = top.chars().count().saturating_sub(4); // "  ┌" + "┐"
 
             // Data rows
             let mut current_subgroup: Option<&str> = None;
@@ -453,16 +445,14 @@ impl SuiteResult {
                     if row_sg != current_subgroup {
                         current_subgroup = row_sg;
                         if let Some(label) = row_sg {
-                            // Draw a mid-table separator with the subgroup name
-                            let label_len = label.len();
-                            let pad = if table_inner_w > label_len + 4 {
-                                table_inner_w - label_len - 3
-                            } else {
-                                1
-                            };
+                            // ├─ label ─────────┤  must span table_inner_w chars
+                            // "─ " + label + " " + dashes = table_inner_w
+                            let label_len = label.chars().count();
+                            let used = 2 + label_len + 1; // "─ " + label + " "
+                            let pad = table_inner_w.saturating_sub(used);
                             eprintln!(
-                                "  {DIM}├─ {RESET}{BOLD}{label}{RESET}{DIM} {}{RESET}",
-                                "─".repeat(pad) + "┤",
+                                "  {DIM}├─ {RESET}{BOLD}{label}{RESET}{DIM} {}┤{RESET}",
+                                "─".repeat(pad),
                             );
                         }
                     }
@@ -632,12 +622,13 @@ impl SuiteResult {
                 eprintln!(
                     "  {DIM}{base} vs {cand}:{RESET}  \
                      {color}{:+.2}% ({arrow}){RESET}{sig_marker}  \
-                     {DIM}d={:.2}  p={:.4}  CI [{}, {}]{RESET}{throughput_delta}{drift_marker}",
+                     {DIM}[{} .. {}]  \
+                     effect={:.2}  p={:.4}{RESET}{throughput_delta}{drift_marker}",
                     analysis.pct_change,
-                    analysis.cohens_d,
-                    analysis.wilcoxon_p,
                     format_ns(analysis.ci_lower),
                     format_ns(analysis.ci_upper),
+                    analysis.cohens_d,
+                    analysis.wilcoxon_p,
                 );
             }
 
