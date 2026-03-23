@@ -198,20 +198,10 @@ impl PairedAnalysis {
         let cand_summary = Summary::from_slice(&clean_cand);
         let diff_summary = Summary::from_slice(&clean_diffs);
 
-        // Significance: z-test on paired diffs
-        let std_err = diff_summary.std_err();
-        let significant = if diff_summary.n > 1 {
-            if std_err < f64::EPSILON {
-                // Zero variance: if mean diff is non-zero, it's perfectly significant
-                diff_summary.mean.abs() > f64::EPSILON
-            } else {
-                let z = diff_summary.mean / std_err;
-                // z >= 2.576 corresponds to 99% confidence
-                z.abs() >= 2.576 && (diff_summary.mean / base_summary.mean).abs() > 0.005
-            }
-        } else {
-            false
-        };
+        // Significance: based on whether the 95% bootstrap CI excludes zero.
+        // This is more robust than a z-test (no normality assumption) and
+        // doesn't mix in arbitrary practical-significance thresholds.
+        // The CI is computed below; we set `significant` after.
 
         let pct_change = if base_summary.mean.abs() > f64::EPSILON {
             diff_summary.mean / base_summary.mean * 100.0
@@ -235,6 +225,11 @@ impl PairedAnalysis {
 
         // Wilcoxon signed-rank test (non-parametric)
         let wilcoxon_p = wilcoxon_signed_rank(&clean_diffs);
+
+        // Significant = 95% CI excludes zero (direction is clear).
+        // This is the CI-based criterion: if the entire confidence interval
+        // is on one side of zero, we're 95% confident the difference is real.
+        let significant = ci_lower > 0.0 || ci_upper < 0.0;
 
         Some(PairedAnalysis {
             baseline: base_summary,
