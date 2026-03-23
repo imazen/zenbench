@@ -78,6 +78,9 @@ pub struct ComparisonResult {
     /// Whether benchmarks are sorted by speed in report output.
     #[serde(default)]
     pub sort_by_speed: bool,
+    /// Whether sub-ns warnings are suppressed.
+    #[serde(default)]
+    pub expect_sub_ns: bool,
     /// Base iterations per sample (before jitter). 0 if unknown.
     #[serde(default)]
     pub iterations_per_sample: usize,
@@ -152,14 +155,22 @@ impl SuiteResult {
             } else {
                 format!("{iters}")
             };
-            let mut meta = format!("{} rounds × {iters_str} calls", comp.completed_rounds,);
-            if iters > 1 {
-                meta.push_str(", hot loop");
-            }
+            let calls_str = if iters == 1 {
+                "1 call (cold start)".to_string()
+            } else {
+                format!("{iters_str} calls")
+            };
+            let mut meta = format!("{} rounds × {calls_str}", comp.completed_rounds);
             if comp.cache_firewall {
+                meta.push_str(", clear-L2");
+            }
+            if comp.expect_sub_ns {
+                meta.push_str(", sub-ns mode");
+            }
+            if comp.baseline_only && comp.benchmarks.len() > 1 {
                 meta.push_str(&format!(
-                    ", cache_firewall {}",
-                    format_bytes(comp.cache_firewall_bytes),
+                    ", baseline-only ({} benchmarks)",
+                    comp.benchmarks.len(),
                 ));
             }
             let header_text = format!("{} ", comp.group_name);
@@ -1030,16 +1041,6 @@ fn terminal_width() -> Option<usize> {
     None
 }
 
-fn format_bytes(bytes: usize) -> String {
-    if bytes >= 1024 * 1024 {
-        format!("{} MiB", bytes / (1024 * 1024))
-    } else if bytes >= 1024 {
-        format!("{} KiB", bytes / 1024)
-    } else {
-        format!("{bytes} B")
-    }
-}
-
 /// Format nanoseconds as human-readable time.
 pub fn format_ns(ns: f64) -> String {
     let abs = ns.abs();
@@ -1239,6 +1240,7 @@ mod tests {
                 baseline_only: false,
                 throughput_unit: None,
                 sort_by_speed: false,
+                expect_sub_ns: false,
                 iterations_per_sample: 1000,
             }],
             standalones: vec![],
