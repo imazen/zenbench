@@ -69,6 +69,9 @@ pub struct ComparisonResult {
     /// Whether only baseline comparisons are shown in reports.
     #[serde(default)]
     pub baseline_only: bool,
+    /// Custom unit name for Elements throughput (e.g., "checks" → "Gchecks/s").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub throughput_unit: Option<String>,
 }
 
 /// Complete results of a benchmark suite run.
@@ -114,7 +117,9 @@ impl SuiteResult {
         const BOLD_WHITE: &str = "\x1b[1;37m";
 
         eprintln!();
-        eprintln!("{BOLD_WHITE}═══════════════════════════════════════════════════════════════{RESET}");
+        eprintln!(
+            "{BOLD_WHITE}═══════════════════════════════════════════════════════════════{RESET}"
+        );
         eprintln!("{BOLD_WHITE}  zenbench{RESET}  {DIM}{}{RESET}", self.run_id);
         if let Some(hash) = &self.git_hash {
             eprintln!("  {DIM}git:{RESET} {hash}");
@@ -122,95 +127,185 @@ impl SuiteResult {
         if let Some(ci) = &self.ci_environment {
             eprintln!("  {DIM}ci:{RESET}  {ci}");
         }
-        eprintln!("{BOLD_WHITE}═══════════════════════════════════════════════════════════════{RESET}");
+        eprintln!(
+            "{BOLD_WHITE}═══════════════════════════════════════════════════════════════{RESET}"
+        );
 
         for comp in &self.comparisons {
             eprintln!();
 
             // Group header with config info
-            let firewall_str = if comp.cache_firewall {
-                format!(
-                    "  {CYAN}cache_firewall: {}{}",
+            let mut meta_parts = vec![format!("{} rounds", comp.completed_rounds)];
+            if comp.cache_firewall {
+                meta_parts.push(format!(
+                    "cache_firewall: {}",
                     format_bytes(comp.cache_firewall_bytes),
-                    RESET,
-                )
-            } else {
-                String::new()
-            };
-            eprintln!(
-                "  {BOLD}{}{RESET}  {DIM}({} rounds){RESET}{firewall_str}",
-                comp.group_name, comp.completed_rounds,
-            );
-            eprintln!("  {DIM}───────────────────────────────────────────────────────────{RESET}");
+                ));
+            }
+            let meta = meta_parts.join(", ");
+            eprintln!("  {BOLD}{}{RESET}  {DIM}({meta}){RESET}", comp.group_name);
 
-            // Determine column widths from benchmark names
-            let name_width = comp
+            // Sort benchmarks by mean time (fastest first) for display
+            let mut sorted_indices: Vec<usize> = (0..comp.benchmarks.len()).collect();
+            sorted_indices.sort_by(|&a, &b| {
+                comp.benchmarks[a]
+                    .summary
+                    .mean
+                    .total_cmp(&comp.benchmarks[b].summary.mean)
+            });
+
+            let fastest_mean = sorted_indices
+                .first()
+                .map(|&i| comp.benchmarks[i].summary.mean)
+                .unwrap_or(0.0);
+
+            let has_throughput = comp.throughput.is_some();
+            let tp_unit = comp.throughput_unit.as_deref();
+            let has_cpu = comp.benchmarks.iter().any(|b| b.cpu_summary.is_some());
+
+            // Compute column widths
+            let name_w = comp
                 .benchmarks
                 .iter()
                 .map(|b| b.name.len())
                 .max()
-                .unwrap_or(10)
-                .max(10);
+                .unwrap_or(4)
+                .max(9); // "benchmark"
 
-            // Find fastest benchmark for highlighting
-            let fastest_mean = comp
-                .benchmarks
+            // Pre-format all cells to measure widths
+            struct Row {
+                name: String,
+                mean: String,
+                stddev: String,
+                throughput: String,
+                cpu: String,
+                is_fastest: bool,
+            }
+
+            let rows: Vec<Row> = sorted_indices
                 .iter()
-                .map(|b| b.summary.mean)
-                .fold(f64::INFINITY, f64::min);
+                .map(|&i| {
+                    let bench = &comp.benchmarks[i];
+                    let is_fastest = (bench.summary.mean - fastest_mean).abs() < f64::EPSILON
+                        && comp.benchmarks.len() > 1;
+                    let tp_str = comp
+                        .throughput
+                        .as_ref()
+                        .map(|tp| tp.format_named(bench.summary.mean, tp_unit))
+                        .unwrap_or_default();
+                    let cpu_str = bench
+                        .cpu_summary
+                        .as_ref()
+                        .map(|cpu| {
+                            let eff = if bench.summary.mean > 0.0 {
+                                cpu.mean / bench.summary.mean * 100.0
+                            } else {
+                                0.0
+                            };
+                            format!("{} ({eff:.0}%)", format_ns(cpu.mean))
+                        })
+                        .unwrap_or_default();
+                    Row {
+                        name: bench.name.clone(),
+                        mean: format_ns(bench.summary.mean),
+                        stddev: format!("±{}", format_ns(bench.summary.std_dev())),
+                        throughput: tp_str,
+                        cpu: cpu_str,
+                        is_fastest,
+                    }
+                })
+                .collect();
 
-            let has_throughput = comp.throughput.is_some();
+            let mean_w = rows.iter().map(|r| r.mean.len()).max().unwrap_or(4).max(4);
+            let sd_w = rows
+                .iter()
+                .map(|r| r.stddev.len())
+                .max()
+                .unwrap_or(6)
+                .max(6);
+            let tp_w = if has_throughput {
+                rows.iter()
+                    .map(|r| r.throughput.len())
+                    .max()
+                    .unwrap_or(10)
+                    .max(10)
+            } else {
+                0
+            };
+            let cpu_w = if has_cpu {
+                rows.iter().map(|r| r.cpu.len()).max().unwrap_or(3).max(3)
+            } else {
+                0
+            };
 
-            // Individual results
-            for bench in &comp.benchmarks {
-                let is_fastest = (bench.summary.mean - fastest_mean).abs() < f64::EPSILON;
-                let name_color = if is_fastest && comp.benchmarks.len() > 1 {
-                    GREEN
-                } else {
-                    ""
-                };
-                let name_reset = if name_color.is_empty() { "" } else { RESET };
+            // Build table
+            // Top border
+            let mut top = format!("  ┌{}", "─".repeat(name_w + 2));
+            let mut hdr = format!("  │ {:<name_w$}", "benchmark");
+            let mut mid = format!("  ├{}", "─".repeat(name_w + 2));
+            top.push_str(&format!("┬{}", "─".repeat(mean_w + 2)));
+            hdr.push_str(&format!(" │ {:>mean_w$}", "mean"));
+            mid.push_str(&format!("┼{}", "─".repeat(mean_w + 2)));
+            top.push_str(&format!("┬{}", "─".repeat(sd_w + 2)));
+            hdr.push_str(&format!(" │ {:>sd_w$}", "stddev"));
+            mid.push_str(&format!("┼{}", "─".repeat(sd_w + 2)));
+            if has_throughput {
+                top.push_str(&format!("┬{}", "─".repeat(tp_w + 2)));
+                hdr.push_str(&format!(" │ {:>tp_w$}", "throughput"));
+                mid.push_str(&format!("┼{}", "─".repeat(tp_w + 2)));
+            }
+            if has_cpu {
+                top.push_str(&format!("┬{}", "─".repeat(cpu_w + 2)));
+                hdr.push_str(&format!(" │ {:>cpu_w$}", "cpu"));
+                mid.push_str(&format!("┼{}", "─".repeat(cpu_w + 2)));
+            }
+            top.push('┐');
+            hdr.push_str(" │");
+            mid.push('┤');
 
-                let mean_str = format_ns(bench.summary.mean);
-                let stddev_str = format_ns(bench.summary.std_dev());
-                let median_str = format_ns(bench.summary.median);
+            eprintln!("{DIM}{top}{RESET}");
+            eprintln!("{DIM}{hdr}{RESET}");
+            eprintln!("{DIM}{mid}{RESET}");
+
+            // Data rows
+            for row in &rows {
+                let name_color = if row.is_fastest { GREEN } else { "" };
+                let name_reset = if row.is_fastest { RESET } else { "" };
 
                 let mut line = format!(
-                    "    {name_color}{:<width$}{name_reset}  {:>10}  {DIM}±{:>10}{RESET}  {DIM}med {:>10}{RESET}",
-                    bench.name,
-                    mean_str,
-                    stddev_str,
-                    median_str,
-                    width = name_width,
+                    "  {DIM}│{RESET} {name_color}{:<name_w$}{name_reset} {DIM}│{RESET} {:>mean_w$} {DIM}│{RESET} {DIM}{:>sd_w$}{RESET}",
+                    row.name, row.mean, row.stddev,
                 );
 
-                if let Some(tp) = &comp.throughput {
-                    let tp_str = tp.format(bench.summary.mean);
-                    line.push_str(&format!("  {CYAN}{tp_str}{RESET}"));
-                }
-
-                if let Some(cpu) = &bench.cpu_summary {
-                    let efficiency = if bench.summary.mean > 0.0 {
-                        cpu.mean / bench.summary.mean * 100.0
-                    } else {
-                        0.0
-                    };
+                if has_throughput {
                     line.push_str(&format!(
-                        "  {DIM}cpu:{} ({efficiency:.0}%){RESET}",
-                        format_ns(cpu.mean),
+                        " {DIM}│{RESET} {CYAN}{:>tp_w$}{RESET}",
+                        row.throughput,
                     ));
                 }
+                if has_cpu {
+                    line.push_str(&format!(" {DIM}│{RESET} {DIM}{:>cpu_w$}{RESET}", row.cpu,));
+                }
+                line.push_str(&format!(" {DIM}│{RESET}"));
 
                 eprintln!("{line}");
             }
 
-            // Paired comparisons
-            if !comp.analyses.is_empty() {
-                eprintln!();
+            // Bottom border
+            let mut bot = format!("  └{}", "─".repeat(name_w + 2));
+            bot.push_str(&format!("┴{}", "─".repeat(mean_w + 2)));
+            bot.push_str(&format!("┴{}", "─".repeat(sd_w + 2)));
+            if has_throughput {
+                bot.push_str(&format!("┴{}", "─".repeat(tp_w + 2)));
             }
+            if has_cpu {
+                bot.push_str(&format!("┴{}", "─".repeat(cpu_w + 2)));
+            }
+            bot.push('┘');
+            eprintln!("{DIM}{bot}{RESET}");
+
+            // Paired comparisons
             for (base, cand, analysis) in &comp.analyses {
-                // For timing: negative pct_change = faster = green
-                // For throughput: we still report pct_change on timing, so same logic
                 let (color, arrow) = if analysis.pct_change < -1.0 {
                     (GREEN, "faster")
                 } else if analysis.pct_change > 1.0 {
@@ -224,9 +319,7 @@ impl SuiteResult {
                     String::new()
                 };
 
-                // Show throughput change if available
                 let throughput_delta = if has_throughput {
-                    // Throughput is inverse of time: if time goes down X%, throughput goes up
                     let tp_pct = if analysis.pct_change > -100.0 {
                         -analysis.pct_change / (1.0 + analysis.pct_change / 100.0)
                     } else {
@@ -245,7 +338,7 @@ impl SuiteResult {
                 };
 
                 eprintln!(
-                    "    {DIM}{base} vs {cand}:{RESET}  \
+                    "  {DIM}{base} vs {cand}:{RESET}  \
                      {color}{:+.2}% ({arrow}){RESET}{sig_marker}  \
                      {DIM}d={:.2}  p={:.4}  CI [{}, {}]{RESET}{throughput_delta}",
                     analysis.pct_change,
@@ -257,7 +350,7 @@ impl SuiteResult {
 
                 if analysis.drift_correlation.abs() > 0.5 {
                     eprintln!(
-                        "      {YELLOW}⚠ drift r={:.2}{RESET}",
+                        "    {YELLOW}⚠ drift r={:.2}{RESET}",
                         analysis.drift_correlation,
                     );
                 }
@@ -268,41 +361,111 @@ impl SuiteResult {
         if !self.standalones.is_empty() {
             eprintln!();
             eprintln!("  {BOLD}standalone{RESET}");
-            eprintln!("  {DIM}───────────────────────────────────────────────────────────{RESET}");
 
-            let name_width = self
+            let name_w = self
                 .standalones
                 .iter()
                 .map(|b| b.name.len())
                 .max()
-                .unwrap_or(10)
-                .max(10);
+                .unwrap_or(9)
+                .max(9);
 
-            for bench in &self.standalones {
+            let has_cpu = self.standalones.iter().any(|b| b.cpu_summary.is_some());
+
+            // Pre-format
+            struct StandaloneRow {
+                name: String,
+                mean: String,
+                stddev: String,
+                n: String,
+                cpu: String,
+            }
+            let rows: Vec<StandaloneRow> = self
+                .standalones
+                .iter()
+                .map(|bench| {
+                    let cpu_str = bench
+                        .cpu_summary
+                        .as_ref()
+                        .map(|cpu| {
+                            let eff = if bench.summary.mean > 0.0 {
+                                cpu.mean / bench.summary.mean * 100.0
+                            } else {
+                                0.0
+                            };
+                            format!("{} ({eff:.0}%)", format_ns(cpu.mean))
+                        })
+                        .unwrap_or_default();
+                    StandaloneRow {
+                        name: bench.name.clone(),
+                        mean: format_ns(bench.summary.mean),
+                        stddev: format!("±{}", format_ns(bench.summary.std_dev())),
+                        n: format!("{}", bench.summary.n),
+                        cpu: cpu_str,
+                    }
+                })
+                .collect();
+
+            let mean_w = rows.iter().map(|r| r.mean.len()).max().unwrap_or(4).max(4);
+            let sd_w = rows
+                .iter()
+                .map(|r| r.stddev.len())
+                .max()
+                .unwrap_or(6)
+                .max(6);
+            let n_w = rows.iter().map(|r| r.n.len()).max().unwrap_or(1).max(1);
+            let cpu_w = if has_cpu {
+                rows.iter().map(|r| r.cpu.len()).max().unwrap_or(3).max(3)
+            } else {
+                0
+            };
+
+            let mut top = format!("  ┌{}", "─".repeat(name_w + 2));
+            let mut mid = format!("  ├{}", "─".repeat(name_w + 2));
+            let mut hdr = format!("  │ {:<name_w$}", "benchmark");
+            top.push_str(&format!("┬{}", "─".repeat(mean_w + 2)));
+            hdr.push_str(&format!(" │ {:>mean_w$}", "mean"));
+            mid.push_str(&format!("┼{}", "─".repeat(mean_w + 2)));
+            top.push_str(&format!("┬{}", "─".repeat(sd_w + 2)));
+            hdr.push_str(&format!(" │ {:>sd_w$}", "stddev"));
+            mid.push_str(&format!("┼{}", "─".repeat(sd_w + 2)));
+            top.push_str(&format!("┬{}", "─".repeat(n_w + 2)));
+            hdr.push_str(&format!(" │ {:>n_w$}", "n"));
+            mid.push_str(&format!("┼{}", "─".repeat(n_w + 2)));
+            if has_cpu {
+                top.push_str(&format!("┬{}", "─".repeat(cpu_w + 2)));
+                hdr.push_str(&format!(" │ {:>cpu_w$}", "cpu"));
+                mid.push_str(&format!("┼{}", "─".repeat(cpu_w + 2)));
+            }
+            top.push('┐');
+            hdr.push_str(" │");
+            mid.push('┤');
+
+            eprintln!("{DIM}{top}{RESET}");
+            eprintln!("{DIM}{hdr}{RESET}");
+            eprintln!("{DIM}{mid}{RESET}");
+
+            for row in &rows {
                 let mut line = format!(
-                    "    {:<width$}  {:>10}  {DIM}±{:>10}  med {:>10}  n={}{RESET}",
-                    bench.name,
-                    format_ns(bench.summary.mean),
-                    format_ns(bench.summary.std_dev()),
-                    format_ns(bench.summary.median),
-                    bench.summary.n,
-                    width = name_width,
+                    "  {DIM}│{RESET} {:<name_w$} {DIM}│{RESET} {:>mean_w$} {DIM}│{RESET} {DIM}{:>sd_w$}{RESET} {DIM}│{RESET} {:>n_w$}",
+                    row.name, row.mean, row.stddev, row.n,
                 );
-
-                if let Some(cpu) = &bench.cpu_summary {
-                    let efficiency = if bench.summary.mean > 0.0 {
-                        cpu.mean / bench.summary.mean * 100.0
-                    } else {
-                        0.0
-                    };
-                    line.push_str(&format!(
-                        "  {DIM}cpu:{} ({efficiency:.0}%){RESET}",
-                        format_ns(cpu.mean),
-                    ));
+                if has_cpu {
+                    line.push_str(&format!(" {DIM}│{RESET} {DIM}{:>cpu_w$}{RESET}", row.cpu,));
                 }
-
+                line.push_str(&format!(" {DIM}│{RESET}"));
                 eprintln!("{line}");
             }
+
+            let mut bot = format!("  └{}", "─".repeat(name_w + 2));
+            bot.push_str(&format!("┴{}", "─".repeat(mean_w + 2)));
+            bot.push_str(&format!("┴{}", "─".repeat(sd_w + 2)));
+            bot.push_str(&format!("┴{}", "─".repeat(n_w + 2)));
+            if has_cpu {
+                bot.push_str(&format!("┴{}", "─".repeat(cpu_w + 2)));
+            }
+            bot.push('┘');
+            eprintln!("{DIM}{bot}{RESET}");
         }
 
         eprintln!();
@@ -315,7 +478,9 @@ impl SuiteResult {
         if self.unreliable {
             eprintln!("  {RED}{BOLD}⚠ UNRELIABLE: too many resource gate waits{RESET}");
         }
-        eprintln!("{BOLD_WHITE}═══════════════════════════════════════════════════════════════{RESET}");
+        eprintln!(
+            "{BOLD_WHITE}═══════════════════════════════════════════════════════════════{RESET}"
+        );
         eprintln!();
     }
 
@@ -381,7 +546,9 @@ impl SuiteResult {
                     let tp = comp
                         .throughput
                         .as_ref()
-                        .map(|t| t.format(bench.summary.mean))
+                        .map(|t| {
+                            t.format_named(bench.summary.mean, comp.throughput_unit.as_deref())
+                        })
                         .unwrap_or_default();
                     out.push_str(&format!(
                         "| {} | {} | {} | {} | {} |\n",
@@ -395,7 +562,9 @@ impl SuiteResult {
                     let tp = comp
                         .throughput
                         .as_ref()
-                        .map(|t| t.format(bench.summary.mean))
+                        .map(|t| {
+                            t.format_named(bench.summary.mean, comp.throughput_unit.as_deref())
+                        })
                         .unwrap_or_default();
                     out.push_str(&format!(
                         "| {} | {} | {} | {} |\n",
@@ -442,6 +611,7 @@ impl SuiteResult {
                 out.push_str(&format_bar_chart(
                     &comp.benchmarks,
                     comp.throughput.as_ref(),
+                    comp.throughput_unit.as_deref(),
                 ));
             }
 
@@ -483,8 +653,9 @@ impl SuiteResult {
                     .throughput
                     .as_ref()
                     .map(|t| {
-                        let (v, u) = t.compute(bench.summary.mean);
-                        (format!("{v:.4}"), u.to_string())
+                        let (v, u) =
+                            t.compute_named(bench.summary.mean, comp.throughput_unit.as_deref());
+                        (format!("{v:.4}"), u)
                     })
                     .unwrap_or_else(|| (String::new(), String::new()));
 
@@ -608,7 +779,11 @@ pub fn format_ns(ns: f64) -> String {
 /// Generate a text-based bar chart for a group of benchmarks.
 ///
 /// Returns a fenced code block that renders as monospace in markdown.
-fn format_bar_chart(benchmarks: &[BenchmarkResult], throughput: Option<&Throughput>) -> String {
+fn format_bar_chart(
+    benchmarks: &[BenchmarkResult],
+    throughput: Option<&Throughput>,
+    throughput_unit: Option<&str>,
+) -> String {
     const BAR_WIDTH: usize = 30;
     let blocks = ['█', '▉', '▊', '▋', '▌', '▍', '▎', '▏'];
 
@@ -622,7 +797,7 @@ fn format_bar_chart(benchmarks: &[BenchmarkResult], throughput: Option<&Throughp
         benchmarks
             .iter()
             .map(|b| {
-                let (val, unit) = tp.compute(b.summary.mean);
+                let (val, unit) = tp.compute_named(b.summary.mean, throughput_unit);
                 (val, format!("{val:.1} {unit}"))
             })
             .unzip()
@@ -778,6 +953,7 @@ mod tests {
                 cache_firewall: false,
                 cache_firewall_bytes: 0,
                 baseline_only: false,
+                throughput_unit: None,
             }],
             standalones: vec![],
             total_time: Duration::from_secs(5),

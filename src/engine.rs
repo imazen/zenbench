@@ -263,9 +263,7 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
         .unwrap_or(0);
 
     // Auto-detect baseline_only: default to true when > 3 benchmarks
-    let baseline_only = config
-        .baseline_only
-        .unwrap_or(n_benchmarks > 3);
+    let baseline_only = config.baseline_only.unwrap_or(n_benchmarks > 3);
 
     if n_benchmarks >= 2 {
         // Compare all benchmarks against the baseline
@@ -342,6 +340,7 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
         cache_firewall: config.cache_firewall,
         cache_firewall_bytes: config.cache_firewall_bytes,
         baseline_only,
+        throughput_unit: group.throughput_unit.clone(),
     }
 }
 

@@ -46,15 +46,63 @@ impl Throughput {
         }
     }
 
+    /// Compute throughput with a custom unit name for Elements.
+    ///
+    /// When `unit` is provided and this is `Elements`, the unit suffix
+    /// uses the custom name (e.g., "checks" → "Gchecks/s").
+    pub fn compute_named(&self, mean_ns: f64, unit: Option<&str>) -> (f64, String) {
+        if mean_ns <= 0.0 {
+            return (0.0, "?/s".to_string());
+        }
+        let seconds = mean_ns / 1e9;
+        match self {
+            Throughput::Bytes(n) => {
+                let bytes_per_sec = *n as f64 / seconds;
+                let gib = bytes_per_sec / (1024.0 * 1024.0 * 1024.0);
+                if gib >= 1.0 {
+                    (gib, "GiB/s".to_string())
+                } else {
+                    (bytes_per_sec / (1024.0 * 1024.0), "MiB/s".to_string())
+                }
+            }
+            Throughput::Elements(n) => {
+                let ops_per_sec = *n as f64 / seconds;
+                let u = unit.unwrap_or("ops");
+                if ops_per_sec >= 1e9 {
+                    (ops_per_sec / 1e9, format!("G{u}/s"))
+                } else if ops_per_sec >= 1e6 {
+                    (ops_per_sec / 1e6, format!("M{u}/s"))
+                } else if ops_per_sec >= 1e3 {
+                    (ops_per_sec / 1e3, format!("K{u}/s"))
+                } else {
+                    (ops_per_sec, format!("{u}/s"))
+                }
+            }
+        }
+    }
+
+    /// The element count for this throughput (if Elements).
+    pub fn element_count(&self) -> Option<u64> {
+        match self {
+            Throughput::Elements(n) => Some(*n),
+            Throughput::Bytes(_) => None,
+        }
+    }
+
     /// Format throughput from mean time in nanoseconds.
     pub fn format(&self, mean_ns: f64) -> String {
-        let (val, unit) = self.compute(mean_ns);
+        self.format_named(mean_ns, None)
+    }
+
+    /// Format throughput with an optional custom unit name.
+    pub fn format_named(&self, mean_ns: f64, unit: Option<&str>) -> String {
+        let (val, unit_str) = self.compute_named(mean_ns, unit);
         if val >= 100.0 {
-            format!("{val:.0} {unit}")
+            format!("{val:.0} {unit_str}")
         } else if val >= 10.0 {
-            format!("{val:.1} {unit}")
+            format!("{val:.1} {unit_str}")
         } else {
-            format!("{val:.2} {unit}")
+            format!("{val:.2} {unit_str}")
         }
     }
 }
@@ -112,6 +160,7 @@ pub struct BenchGroup {
     pub(crate) benchmarks: Vec<Benchmark>,
     pub(crate) config: GroupConfig,
     pub(crate) throughput: Option<Throughput>,
+    pub(crate) throughput_unit: Option<String>,
     pub(crate) baseline_name: Option<String>,
 }
 
@@ -122,6 +171,7 @@ impl BenchGroup {
             benchmarks: Vec::new(),
             config: GroupConfig::default(),
             throughput: None,
+            throughput_unit: None,
             baseline_name: None,
         }
     }
@@ -162,6 +212,14 @@ impl BenchGroup {
     /// so throughput is set at the group level.
     pub fn throughput(&mut self, throughput: Throughput) -> &mut Self {
         self.throughput = Some(throughput);
+        self
+    }
+
+    /// Set a custom unit name for `Throughput::Elements`.
+    ///
+    /// When set, reports show e.g. "5.0 Gchecks/s" instead of "5.0 Gops/s".
+    pub fn throughput_unit(&mut self, unit: impl Into<String>) -> &mut Self {
+        self.throughput_unit = Some(unit.into());
         self
     }
 
