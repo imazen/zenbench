@@ -181,11 +181,27 @@ impl ResourceGate {
 
     /// Wait until conditions are favorable, or timeout.
     ///
+    /// `deadline` optionally caps the maximum wait to the remaining time
+    /// in the caller's budget. This prevents a gate wait from consuming
+    /// more time than the measurement group has left.
+    ///
     /// Returns true if conditions became favorable, false if timed out.
     pub fn wait_for_clear(&mut self) -> bool {
+        self.wait_for_clear_with_deadline(None)
+    }
+
+    /// Like [`wait_for_clear`], but with an explicit deadline.
+    ///
+    /// The gate will wait at most `min(max_wait, deadline)`.
+    pub fn wait_for_clear_with_deadline(&mut self, deadline: Option<Duration>) -> bool {
         if !self.config.enabled {
             return true;
         }
+
+        let effective_max = match deadline {
+            Some(dl) => self.config.max_wait.min(dl),
+            None => self.config.max_wait,
+        };
 
         let start = Instant::now();
         loop {
@@ -193,10 +209,11 @@ impl ResourceGate {
             match self.check_state(&state) {
                 None => return true,
                 Some(reason) => {
-                    if start.elapsed() >= self.config.max_wait {
+                    if start.elapsed() >= effective_max {
                         eprintln!(
-                            "[zenbench] gate timeout after {:?}: {}",
-                            self.config.max_wait, reason
+                            "[zenbench] gate timeout after {:.1}s: {}",
+                            start.elapsed().as_secs_f64(),
+                            reason
                         );
                         return false;
                     }

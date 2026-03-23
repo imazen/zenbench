@@ -181,15 +181,30 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
     };
 
     let mut completed_rounds = 0;
+    let mut measurement_time = std::time::Duration::ZERO;
 
-    for _round in 0..config.rounds {
-        // Check time limit
-        if group_start.elapsed() >= config.max_time {
+    for round in 0..config.rounds {
+        // Check time limit against measurement time only (excludes gate waits).
+        // Only enforce after min_rounds so slow benchmarks still get enough data.
+        if round >= config.min_rounds && measurement_time >= config.max_time {
             break;
         }
 
-        // Resource gate: wait for clear
-        gate.wait_for_clear();
+        // Resource gate: cap the wait to remaining wall-clock budget so we
+        // don't burn 30s on a gate when max_time is 10s.
+        // After min_rounds, use 3x measurement budget as wall cap.
+        // During min_rounds, allow up to 10x to ensure we get enough data.
+        let wall_multiplier = if round < config.min_rounds { 10 } else { 3 };
+        let wall_remaining = config
+            .max_time
+            .saturating_mul(wall_multiplier)
+            .saturating_sub(group_start.elapsed());
+        if round >= config.min_rounds && wall_remaining.is_zero() {
+            break;
+        }
+        gate.wait_for_clear_with_deadline(Some(
+            wall_remaining.max(std::time::Duration::from_secs(1)),
+        ));
 
         // Randomize benchmark order for this round
         let order = random_permutation(n_benchmarks, &mut rng);
@@ -202,6 +217,8 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
             + iterations_per_sample as i64 * jitter / 100)
             .max(1)) as usize;
         iters_per_round.push(round_iters);
+
+        let round_start = Instant::now();
 
         for &bench_idx in &order {
             // Cache firewall between benchmarks
@@ -222,6 +239,8 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
             samples[bench_idx].push(bencher.elapsed_ns);
             cpu_samples[bench_idx].push(bencher.cpu_ns);
         }
+
+        measurement_time += round_start.elapsed();
 
         completed_rounds += 1;
     }
@@ -312,14 +331,27 @@ fn run_standalone(
     let mut cpu_samples_vec = Vec::with_capacity(config.rounds);
 
     let start = Instant::now();
-    for _ in 0..config.rounds {
-        if start.elapsed() >= config.max_time {
+    let mut measurement_time = std::time::Duration::ZERO;
+    for round in 0..config.rounds {
+        if round >= config.min_rounds && measurement_time >= config.max_time {
             break;
         }
-        gate.wait_for_clear();
+        let wall_multiplier = if round < config.min_rounds { 10 } else { 3 };
+        let wall_remaining = config
+            .max_time
+            .saturating_mul(wall_multiplier)
+            .saturating_sub(start.elapsed());
+        if round >= config.min_rounds && wall_remaining.is_zero() {
+            break;
+        }
+        gate.wait_for_clear_with_deadline(Some(
+            wall_remaining.max(std::time::Duration::from_secs(1)),
+        ));
 
+        let sample_start = Instant::now();
         let mut bencher = Bencher::new(iterations);
         bench.func.call(&mut bencher);
+        measurement_time += sample_start.elapsed();
         samples.push(bencher.elapsed_ns as f64 / iterations as f64);
         cpu_samples_vec.push(bencher.cpu_ns as f64 / iterations as f64);
     }
