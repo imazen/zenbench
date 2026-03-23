@@ -263,15 +263,14 @@ impl SuiteResult {
             // Pre-format all cells to measure widths
             struct Row {
                 name: String,
-                mean: String,
-                ci: String, // 95% CI half-width on the mean
+                mean_range: String, // "lo  mean  hi" with unit
                 throughput: String,
                 cpu: String,
-                vs_base: String, // formatted % change
+                vs_base: String, // "lo  pct  hi%" or "baseline"
                 vs_base_color: &'static str,
                 is_fastest: bool,
-                markers: String,          // e.g. "[1][2]"
-                subgroup: Option<String>, // visual label
+                markers: String,
+                subgroup: Option<String>,
             }
 
             // Check for group-level issues first
@@ -305,16 +304,34 @@ impl SuiteResult {
                     })
                     .unwrap_or_default();
 
-                // vs baseline column + comparison footnotes
+                // Mean as three-value range: [lo  mean  hi]
+                let ci_half = bench.summary.std_err() * 1.96;
+                let lo = bench.summary.mean - ci_half;
+                let hi = bench.summary.mean + ci_half;
+                let mean_range = format!(
+                    "{}  {}  {}",
+                    format_ns(lo.max(0.0)),
+                    format_ns(bench.summary.mean),
+                    format_ns(hi),
+                );
+
+                // vs baseline column as three-value range
                 let (vs_base, vs_base_color) = if bench.name == baseline_name {
                     ("baseline".to_string(), DIM)
                 } else if let Some(analysis) = baseline_analyses.get(bench.name.as_str()) {
-                    let pct = analysis.pct_change;
-                    if analysis.significant {
-                        let color = if pct < 0.0 { GREEN } else { RED };
-                        (format!("{pct:+.1}%"), color)
+                    let base_mean = analysis.baseline.mean;
+                    if base_mean.abs() > f64::EPSILON {
+                        let lo_pct = analysis.ci_lower / base_mean * 100.0;
+                        let mid_pct = analysis.pct_change;
+                        let hi_pct = analysis.ci_upper / base_mean * 100.0;
+                        let color = if analysis.significant {
+                            if mid_pct < 0.0 { GREEN } else { RED }
+                        } else {
+                            DIM
+                        };
+                        (format!("{lo_pct:+.1}  {mid_pct:+.1}  {hi_pct:+.1}%"), color)
                     } else {
-                        (format!("{pct:+.1}%?"), DIM)
+                        (format!("{:+.1}%", analysis.pct_change), DIM)
                     }
                 } else {
                     (String::new(), DIM)
@@ -381,8 +398,7 @@ impl SuiteResult {
 
                 rows.push(Row {
                     name: bench.name.clone(),
-                    mean: format_ns(bench.summary.mean),
-                    ci: format!("±{}", format_ns(bench.summary.std_err() * 1.96)),
+                    mean_range,
                     throughput: tp_str,
                     cpu: cpu_str,
                     vs_base,
@@ -393,8 +409,12 @@ impl SuiteResult {
                 });
             }
 
-            let mean_w = rows.iter().map(|r| r.mean.len()).max().unwrap_or(4).max(4);
-            let sd_w = rows.iter().map(|r| r.ci.len()).max().unwrap_or(6).max(6);
+            let mean_w = rows
+                .iter()
+                .map(|r| r.mean_range.len())
+                .max()
+                .unwrap_or(10)
+                .max(10);
             let tp_w = if has_throughput {
                 rows.iter()
                     .map(|r| r.throughput.len())
@@ -441,15 +461,10 @@ impl SuiteResult {
                 add_col(&mut mid, vs_w, '┼');
             }
 
-            // Mean column
+            // Mean column (includes 95% CI bounds)
             add_col(&mut top, mean_w, '┬');
-            hdr.push_str(&format!(" │ {:>mean_w$}", "mean"));
+            hdr.push_str(&format!(" │ {:^mean_w$}", "lo  mean  hi"));
             add_col(&mut mid, mean_w, '┼');
-
-            // StdDev column
-            add_col(&mut top, sd_w, '┬');
-            hdr.push_str(&format!(" │ {:>sd_w$}", "95% ci"));
-            add_col(&mut mid, sd_w, '┼');
 
             if has_throughput {
                 add_col(&mut top, tp_w, '┬');
@@ -509,10 +524,7 @@ impl SuiteResult {
                     line.push_str(&format!(" {DIM}│{RESET} {vc}{:>vs_w$}{vr}", row.vs_base));
                 }
 
-                line.push_str(&format!(
-                    " {DIM}│{RESET} {:>mean_w$} {DIM}│{RESET} {DIM}{:>sd_w$}{RESET}",
-                    row.mean, row.ci,
-                ));
+                line.push_str(&format!(" {DIM}│{RESET} {:>mean_w$}", row.mean_range,));
 
                 if has_throughput {
                     line.push_str(&format!(
@@ -539,7 +551,6 @@ impl SuiteResult {
                 bot.push_str(&format!("┴{}", "─".repeat(vs_w + 2)));
             }
             bot.push_str(&format!("┴{}", "─".repeat(mean_w + 2)));
-            bot.push_str(&format!("┴{}", "─".repeat(sd_w + 2)));
             if has_throughput {
                 bot.push_str(&format!("┴{}", "─".repeat(tp_w + 2)));
             }
@@ -646,8 +657,7 @@ impl SuiteResult {
             // Pre-format
             struct StandaloneRow {
                 name: String,
-                mean: String,
-                ci: String, // 95% CI half-width on the mean
+                mean_range: String,
                 n: String,
                 cpu: String,
             }
@@ -655,6 +665,9 @@ impl SuiteResult {
                 .standalones
                 .iter()
                 .map(|bench| {
+                    let ci_half = bench.summary.std_err() * 1.96;
+                    let lo = (bench.summary.mean - ci_half).max(0.0);
+                    let hi = bench.summary.mean + ci_half;
                     let cpu_str = bench
                         .cpu_summary
                         .as_ref()
@@ -669,16 +682,24 @@ impl SuiteResult {
                         .unwrap_or_default();
                     StandaloneRow {
                         name: bench.name.clone(),
-                        mean: format_ns(bench.summary.mean),
-                        ci: format!("±{}", format_ns(bench.summary.std_err() * 1.96)),
+                        mean_range: format!(
+                            "{}  {}  {}",
+                            format_ns(lo),
+                            format_ns(bench.summary.mean),
+                            format_ns(hi),
+                        ),
                         n: format!("{}", bench.summary.n),
                         cpu: cpu_str,
                     }
                 })
                 .collect();
 
-            let mean_w = rows.iter().map(|r| r.mean.len()).max().unwrap_or(4).max(4);
-            let sd_w = rows.iter().map(|r| r.ci.len()).max().unwrap_or(6).max(6);
+            let mean_w = rows
+                .iter()
+                .map(|r| r.mean_range.len())
+                .max()
+                .unwrap_or(10)
+                .max(10);
             let n_w = rows.iter().map(|r| r.n.len()).max().unwrap_or(1).max(1);
             let cpu_w = if has_cpu {
                 rows.iter().map(|r| r.cpu.len()).max().unwrap_or(3).max(3)
@@ -690,11 +711,8 @@ impl SuiteResult {
             let mut mid = format!("  ├{}", "─".repeat(name_w + 2));
             let mut hdr = format!("  │ {:<name_w$}", "benchmark");
             top.push_str(&format!("┬{}", "─".repeat(mean_w + 2)));
-            hdr.push_str(&format!(" │ {:>mean_w$}", "mean"));
+            hdr.push_str(&format!(" │ {:^mean_w$}", "lo  mean  hi"));
             mid.push_str(&format!("┼{}", "─".repeat(mean_w + 2)));
-            top.push_str(&format!("┬{}", "─".repeat(sd_w + 2)));
-            hdr.push_str(&format!(" │ {:>sd_w$}", "95% ci"));
-            mid.push_str(&format!("┼{}", "─".repeat(sd_w + 2)));
             top.push_str(&format!("┬{}", "─".repeat(n_w + 2)));
             hdr.push_str(&format!(" │ {:>n_w$}", "n"));
             mid.push_str(&format!("┼{}", "─".repeat(n_w + 2)));
@@ -713,8 +731,8 @@ impl SuiteResult {
 
             for row in &rows {
                 let mut line = format!(
-                    "  {DIM}│{RESET} {:<name_w$} {DIM}│{RESET} {:>mean_w$} {DIM}│{RESET} {DIM}{:>sd_w$}{RESET} {DIM}│{RESET} {:>n_w$}",
-                    row.name, row.mean, row.ci, row.n,
+                    "  {DIM}│{RESET} {:<name_w$} {DIM}│{RESET} {:>mean_w$} {DIM}│{RESET} {:>n_w$}",
+                    row.name, row.mean_range, row.n,
                 );
                 if has_cpu {
                     line.push_str(&format!(" {DIM}│{RESET} {DIM}{:>cpu_w$}{RESET}", row.cpu,));
@@ -725,7 +743,6 @@ impl SuiteResult {
 
             let mut bot = format!("  └{}", "─".repeat(name_w + 2));
             bot.push_str(&format!("┴{}", "─".repeat(mean_w + 2)));
-            bot.push_str(&format!("┴{}", "─".repeat(sd_w + 2)));
             bot.push_str(&format!("┴{}", "─".repeat(n_w + 2)));
             if has_cpu {
                 bot.push_str(&format!("┴{}", "─".repeat(cpu_w + 2)));
