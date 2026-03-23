@@ -135,12 +135,6 @@ impl SuiteResult {
         );
 
         for (group_idx, comp) in self.comparisons.iter().enumerate() {
-            if group_idx > 0 {
-                eprintln!();
-                eprintln!(
-                    "  {DIM}· · · · · · · · · · · · · · · · · · · · · · · · · · · · ·{RESET}"
-                );
-            }
             eprintln!();
 
             // Group header with config info

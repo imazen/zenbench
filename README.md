@@ -13,6 +13,40 @@ comparison group run in randomized order. Since round N of benchmark A and round
 benchmark B execute under near-identical system conditions, paired statistical tests have
 far more power to detect real differences.
 
+## How measurement works
+
+Three nested layers: **rounds**, **samples**, and **calls**.
+
+A **call** is one invocation of your function — the thing you're measuring.
+
+A **sample** is a timed batch of calls. Zenbench starts a timer, runs your
+function N times, stops the timer, and divides by N. This gives a
+per-call time with enough total duration to be above timer noise. N is
+auto-selected during warmup to target ~10ms per sample (1 call for slow
+functions, millions for sub-nanosecond operations).
+
+A **round** is one measurement of every benchmark in a comparison group.
+Each round, zenbench shuffles the order and takes one sample from each
+benchmark. Since all benchmarks in a round execute back-to-back under
+near-identical system conditions, the per-round measurements form
+natural pairs.
+
+The full flow:
+
+1. **Warmup** — Run each benchmark to estimate calls per sample.
+2. **Gate check** — Before each round, verify the system is quiet
+   (low CPU, enough RAM, cool temperature). If not, wait.
+3. **Measure** — For each round (default: up to 200), shuffle
+   benchmark order, take one sample from each.
+4. **Analyze** — Compute paired statistics on the per-call times.
+   Because round N of benchmark A and round N of benchmark B ran
+   under the same conditions, paired tests (Wilcoxon signed-rank,
+   bootstrap CI) detect differences that unpaired tests would miss.
+
+The iteration count varies ±20% per round (anti-aliasing jitter) to
+prevent synchronization with periodic system events like timer interrupts
+or scheduler quanta.
+
 ## Key features
 
 - **Interleaved execution** — randomized round-robin eliminates thermal, turbo, and load bias
