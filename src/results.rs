@@ -304,16 +304,11 @@ impl SuiteResult {
                     })
                     .unwrap_or_default();
 
-                // Mean as three-value range: [lo  mean  hi]
+                // Mean as [lo  mean  hi] with shared unit
                 let ci_half = bench.summary.std_err() * 1.96;
-                let lo = bench.summary.mean - ci_half;
+                let lo = (bench.summary.mean - ci_half).max(0.0);
                 let hi = bench.summary.mean + ci_half;
-                let mean_range = format!(
-                    "{}  {}  {}",
-                    format_ns(lo.max(0.0)),
-                    format_ns(bench.summary.mean),
-                    format_ns(hi),
-                );
+                let mean_range = format_ns_range(lo, bench.summary.mean, hi);
 
                 // vs baseline column as three-value range
                 let (vs_base, vs_base_color) = if bench.name == baseline_name {
@@ -329,7 +324,7 @@ impl SuiteResult {
                         } else {
                             DIM
                         };
-                        (format!("{lo_pct:+.1}  {mid_pct:+.1}  {hi_pct:+.1}%"), color)
+                        (format_pct_range(lo_pct, mid_pct, hi_pct), color)
                     } else {
                         (format!("{:+.1}%", analysis.pct_change), DIM)
                     }
@@ -682,12 +677,7 @@ impl SuiteResult {
                         .unwrap_or_default();
                     StandaloneRow {
                         name: bench.name.clone(),
-                        mean_range: format!(
-                            "{}  {}  {}",
-                            format_ns(lo),
-                            format_ns(bench.summary.mean),
-                            format_ns(hi),
-                        ),
+                        mean_range: format_ns_range(lo, bench.summary.mean, hi),
                         n: format!("{}", bench.summary.n),
                         cpu: cpu_str,
                     }
@@ -1063,6 +1053,43 @@ pub fn format_ns(ns: f64) -> String {
     } else {
         format!("{}{:.3}ns", sign, abs)
     }
+}
+
+/// Format a [lo mean hi] range with shared unit, based on the mean's magnitude.
+fn format_ns_range(lo: f64, mean: f64, hi: f64) -> String {
+    let abs = mean.abs();
+    let (divisor, unit) = if abs >= 1_000_000_000.0 {
+        (1_000_000_000.0, "s")
+    } else if abs >= 1_000_000.0 {
+        (1_000_000.0, "ms")
+    } else if abs >= 1_000.0 {
+        (1_000.0, "µs")
+    } else {
+        (1.0, "ns")
+    };
+    let fmt = |v: f64| -> String {
+        let scaled = v / divisor;
+        if scaled.abs() >= 100.0 {
+            format!("{scaled:.0}")
+        } else if scaled.abs() >= 10.0 {
+            format!("{scaled:.1}")
+        } else {
+            format!("{scaled:.2}")
+        }
+    };
+    format!("[{}  {}  {}] {unit}", fmt(lo), fmt(mean), fmt(hi))
+}
+
+/// Format a [lo mid hi] percentage range.
+fn format_pct_range(lo: f64, mid: f64, hi: f64) -> String {
+    let fmt = |v: f64| -> String {
+        if v.abs() >= 100.0 {
+            format!("{v:+.0}")
+        } else {
+            format!("{v:+.1}")
+        }
+    };
+    format!("[{}  {}  {}]%", fmt(lo), fmt(mid), fmt(hi))
 }
 
 /// Generate a text-based bar chart for a group of benchmarks.
