@@ -311,6 +311,19 @@ pub struct GroupConfig {
     /// Default: `false` (definition order). When `true`, the table rows
     /// are sorted by mean time ascending.
     pub sort_by_speed: bool,
+    /// Stop early when results are precise enough.
+    ///
+    /// When `true` (default), measurement stops before `rounds` if the
+    /// relative CI half-width drops below `target_precision` for all
+    /// benchmarks. This saves time on clean systems and uses more rounds
+    /// on noisy ones.
+    pub auto_rounds: bool,
+    /// Target relative precision for auto-rounds (default: 0.02 = 2%).
+    ///
+    /// Measurement stops when `1.96 * stddev / (sqrt(n) * mean)` drops
+    /// below this threshold — i.e., the 95% CI half-width is less than
+    /// this fraction of the mean.
+    pub target_precision: f64,
 }
 
 impl Default for GroupConfig {
@@ -328,6 +341,8 @@ impl Default for GroupConfig {
             baseline_only: None, // auto: true when > 3 benchmarks
             expect_sub_ns: false,
             sort_by_speed: false,
+            auto_rounds: true,
+            target_precision: 0.02,
         }
     }
 }
@@ -380,6 +395,16 @@ impl GroupConfig {
 
     pub fn yield_between_samples(&mut self, enabled: bool) -> &mut Self {
         self.yield_between_samples = enabled;
+        self
+    }
+
+    pub fn auto_rounds(&mut self, enabled: bool) -> &mut Self {
+        self.auto_rounds = enabled;
+        self
+    }
+
+    pub fn target_precision(&mut self, precision: f64) -> &mut Self {
+        self.target_precision = precision;
         self
     }
 }

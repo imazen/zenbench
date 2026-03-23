@@ -124,9 +124,25 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
     let iterations_per_sample = estimates.iter().copied().min().unwrap_or(1).max(1);
 
     // Phase 2: Interleaved measurement
+    // ETA: warmup gave us a rough per-sample time. Estimate total.
+    // Each round = n_benchmarks samples. Time = rounds × n_benchmarks × sample_time.
+    let warmup_elapsed = group_start.elapsed();
+    let sample_time_est = if n_benchmarks > 0 && !warmup_elapsed.is_zero() {
+        // Warmup ran each benchmark ~5 times for estimation.
+        // Rough per-sample = warmup_time / (n_benchmarks * warmup_iterations)
+        warmup_elapsed / (n_benchmarks as u32 * 5)
+    } else {
+        std::time::Duration::from_millis(10)
+    };
+    let eta_secs = sample_time_est.as_secs_f64() * config.rounds as f64 * n_benchmarks as f64;
+    let eta_str = if eta_secs >= 60.0 {
+        format!("{:.0}m{:.0}s", eta_secs / 60.0, eta_secs % 60.0)
+    } else {
+        format!("{:.0}s", eta_secs)
+    };
     eprintln!(
-        "[zenbench] measuring group '{}' ({} benchmarks, ~{} iters/sample)...",
-        group.name, n_benchmarks, iterations_per_sample
+        "[zenbench] measuring '{}' (~{} iters/sample, est. {eta_str})...",
+        group.name, iterations_per_sample,
     );
 
     // Storage: samples[bench_idx] = vec of raw elapsed_ns per round
@@ -204,8 +220,47 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
         }
 
         measurement_time += round_start.elapsed();
-
         completed_rounds += 1;
+
+        // Auto-rounds: check convergence every 10 rounds after min_rounds
+        if config.auto_rounds
+            && completed_rounds >= config.min_rounds.max(30)
+            && completed_rounds % 10 == 0
+        {
+            let all_precise = (0..n_benchmarks).all(|bench_idx| {
+                let n = samples[bench_idx].len();
+                if n < 10 {
+                    return false;
+                }
+                // Compute running mean and stddev from per-iter times
+                let mut sum = 0.0_f64;
+                let mut sum_sq = 0.0_f64;
+                for (j, &elapsed) in samples[bench_idx].iter().enumerate() {
+                    let per_iter = elapsed as f64 / iters_per_round[j] as f64;
+                    sum += per_iter;
+                    sum_sq += per_iter * per_iter;
+                }
+                let mean = sum / n as f64;
+                let variance = (sum_sq / n as f64) - (mean * mean);
+                let std_dev = variance.max(0.0).sqrt();
+                if mean.abs() < f64::EPSILON {
+                    return true; // zero mean = precise enough
+                }
+                // Relative CI half-width: 1.96 * stddev / (sqrt(n) * mean)
+                let rel_precision = 1.96 * std_dev / ((n as f64).sqrt() * mean.abs());
+                rel_precision < config.target_precision
+            });
+
+            if all_precise {
+                eprintln!(
+                    "[zenbench] '{}' converged after {} rounds (precision < {:.0}%)",
+                    group.name,
+                    completed_rounds,
+                    config.target_precision * 100.0,
+                );
+                break;
+            }
+        }
     }
 
     // Phase 3: Compute paired statistics
