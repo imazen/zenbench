@@ -1059,69 +1059,53 @@ pub fn format_ns(ns: f64) -> String {
     }
 }
 
-/// Format a [lo mean hi] range with shared unit, based on the mean's magnitude.
+/// Pick unit and decimal places for a nanosecond value.
+/// Returns (divisor, unit_str, decimal_places).
+fn ns_unit(mean_abs: f64) -> (f64, &'static str, usize) {
+    if mean_abs >= 1_000_000_000.0 {
+        (1_000_000_000.0, "s", 2)
+    } else if mean_abs >= 1_000_000.0 {
+        (1_000_000.0, "ms", 1)
+    } else if mean_abs >= 1_000.0 {
+        (1_000.0, "µs", 1)
+    } else if mean_abs >= 100.0 {
+        (1.0, "ns", 0)
+    } else if mean_abs >= 10.0 {
+        (1.0, "ns", 1)
+    } else {
+        (1.0, "ns", 2)
+    }
+}
+
+/// Format a [lo mean hi] range with shared unit and aligned columns.
 fn format_ns_range(lo: f64, mean: f64, hi: f64) -> String {
-    let abs = mean.abs();
-    let (divisor, unit) = if abs >= 1_000_000_000.0 {
-        (1_000_000_000.0, "s")
-    } else if abs >= 1_000_000.0 {
-        (1_000_000.0, "ms")
-    } else if abs >= 1_000.0 {
-        (1_000.0, "µs")
-    } else {
-        (1.0, "ns")
-    };
-    let fmt = |v: f64| -> String {
-        let scaled = v / divisor;
-        if scaled.abs() >= 100.0 {
-            format!("{scaled:.0}")
-        } else if scaled.abs() >= 10.0 {
-            format!("{scaled:.1}")
-        } else {
-            format!("{scaled:.2}")
-        }
-    };
-    format!("[{}  {}  {}] {unit}", fmt(lo), fmt(mean), fmt(hi))
+    let (divisor, unit, dp) = ns_unit(mean.abs());
+    let vals: Vec<String> = [lo, mean, hi]
+        .iter()
+        .map(|&v| format!("{:.*}", dp, v / divisor))
+        .collect();
+    let w = vals.iter().map(|s| s.len()).max().unwrap_or(1);
+    format!("[{:>w$}  {:>w$}  {:>w$}] {unit}", vals[0], vals[1], vals[2],)
 }
 
-/// Format "mean ±ci_half unit" with shared unit based on mean magnitude.
+/// Format "mean ±ci unit" with shared unit and consistent decimals.
 fn format_ns_mean_ci(mean: f64, ci_half: f64) -> String {
-    let abs = mean.abs();
-    let (divisor, unit) = if abs >= 1_000_000_000.0 {
-        (1_000_000_000.0, "s")
-    } else if abs >= 1_000_000.0 {
-        (1_000_000.0, "ms")
-    } else if abs >= 1_000.0 {
-        (1_000.0, "µs")
-    } else {
-        (1.0, "ns")
-    };
-    let m = mean / divisor;
-    let c = ci_half / divisor;
-    let fmt_val = |v: f64| -> String {
-        if v.abs() >= 100.0 {
-            format!("{v:.0}")
-        } else if v.abs() >= 10.0 {
-            format!("{v:.1}")
-        } else if v.abs() >= 1.0 {
-            format!("{v:.2}")
-        } else {
-            format!("{v:.2}")
-        }
-    };
-    format!("{} ±{} {unit}", fmt_val(m), fmt_val(c))
+    let (divisor, unit, dp) = ns_unit(mean.abs());
+    let m = format!("{:.*}", dp, mean / divisor);
+    let c = format!("{:.*}", dp, ci_half / divisor);
+    format!("{m} ±{c} {unit}")
 }
 
-/// Format a [lo mid hi] percentage range.
+/// Format a [lo mid hi] percentage range with aligned columns.
 fn format_pct_range(lo: f64, mid: f64, hi: f64) -> String {
-    let fmt = |v: f64| -> String {
-        if v.abs() >= 100.0 {
-            format!("{v:+.0}")
-        } else {
-            format!("{v:+.1}")
-        }
-    };
-    format!("[{}  {}  {}]%", fmt(lo), fmt(mid), fmt(hi))
+    // Use consistent decimal places based on the magnitude of the middle value
+    let dp = if mid.abs() >= 100.0 { 0 } else { 1 };
+    let vals: Vec<String> = [lo, mid, hi]
+        .iter()
+        .map(|&v| format!("{:+.*}", dp, v))
+        .collect();
+    let w = vals.iter().map(|s| s.len()).max().unwrap_or(1);
+    format!("[{:>w$}  {:>w$}  {:>w$}]%", vals[0], vals[1], vals[2],)
 }
 
 /// Generate a text-based bar chart for a group of benchmarks.
