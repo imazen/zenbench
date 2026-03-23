@@ -244,8 +244,24 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
                 .and_then(|name| group.benchmarks.iter().position(|b| b.name == *name))
                 .unwrap_or(0);
 
+            // Convergence requires TWO things for each pair:
+            //
+            // 1. RESOLVED: either direction is clear (CI excludes zero)
+            //    or equivalence is established (CI narrow, crosses zero).
+            //    This answers "which is faster?"
+            //
+            // 2. STABLE: the effect size estimate is precise enough to be
+            //    reproducible. CI half-width on the difference must be
+            //    small relative to BOTH the baseline mean (so the reported
+            //    percentage is stable) AND the difference itself when it's
+            //    large (so a "42% faster" claim won't become "38%" next run).
+            //
+            // Without (2), we'd stop as soon as we know the direction,
+            // but the magnitude would be noisy — humans remember "40% faster"
+            // and compare across runs.
+
             let converged = if n_benchmarks < 2 {
-                // Standalone: individual precision on the single benchmark
+                // Standalone: individual precision
                 let (mean, std_dev) = streaming_mean_stddev(&samples[0], &iters_per_round);
                 mean.abs() < f64::EPSILON
                     || (1.96 * std_dev / ((n as f64).sqrt() * mean.abs()) < config.target_precision)
@@ -253,9 +269,9 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
                 // Comparison: check each baseline pair
                 (0..n_benchmarks).all(|i| {
                     if i == baseline_idx {
-                        return true; // baseline doesn't compare against itself
+                        return true;
                     }
-                    // Compute paired differences per round
+                    // Streaming paired-difference stats
                     let mut diff_sum = 0.0_f64;
                     let mut diff_sum_sq = 0.0_f64;
                     for round in 0..n {
@@ -272,23 +288,43 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
                     let diff_stderr = diff_var.max(0.0).sqrt() / (n as f64).sqrt();
                     let ci_half = 1.96 * diff_stderr;
 
-                    // Baseline mean for relative threshold
                     let (base_mean, _) =
                         streaming_mean_stddev(&samples[baseline_idx], &iters_per_round);
 
-                    // Direction resolved: CI excludes zero
+                    // (1) RESOLVED?
                     let direction_clear =
                         (diff_mean - ci_half > 0.0) || (diff_mean + ci_half < 0.0);
 
-                    // Equivalence: CI width is small relative to baseline
-                    let ci_width_relative = if base_mean.abs() > f64::EPSILON {
+                    // CI width relative to baseline mean — controls precision
+                    // of the reported percentage (e.g., "-42% ± 2%")
+                    let ci_pct_of_baseline = if base_mean.abs() > f64::EPSILON {
                         2.0 * ci_half / base_mean.abs()
                     } else {
                         0.0
                     };
-                    let equivalent = ci_width_relative < config.target_precision;
 
-                    direction_clear || equivalent
+                    let equivalent = ci_pct_of_baseline < config.target_precision;
+
+                    let resolved = direction_clear || equivalent;
+
+                    // (2) STABLE? The effect size estimate won't shift much
+                    // between runs. For large differences, we want the CI
+                    // to be tight relative to the difference itself.
+                    // For small/zero differences, baseline-relative is enough.
+                    let stable = if diff_mean.abs() > f64::EPSILON && direction_clear {
+                        // Relative precision of the difference itself
+                        // e.g., diff = -42% ± 3% → ci_half/diff = 7% relative error
+                        let effect_precision = ci_half / diff_mean.abs();
+                        // Require < 10% relative error on the effect size,
+                        // AND < target_precision of baseline (absolute floor)
+                        effect_precision < 0.10 && ci_pct_of_baseline < config.target_precision
+                    } else {
+                        // No meaningful difference or equivalence case —
+                        // baseline-relative precision is sufficient
+                        ci_pct_of_baseline < config.target_precision
+                    };
+
+                    resolved && stable
                 })
             };
 
