@@ -296,17 +296,27 @@ impl SuiteResult {
             let (mean_divisor, mean_unit, mean_dp) = ns_unit(reference_mean.abs());
 
             // vs-base percentage column: dp based on max percentage magnitude
-            // Percentage dp is per-value based on magnitude, not column-wide.
-            // Alignment comes from width padding, not forced dp.
-            let pct_fmt = |v: f64| -> String {
-                if v.abs() >= 1000.0 {
-                    format!("{v:+.0}")
-                } else if v.abs() >= 100.0 {
-                    format!("{v:+.1}")
-                } else {
-                    format!("{v:+.1}")
-                }
-            };
+            // Percentage dp: use the most precise (smallest magnitude) value
+            // in the column to set dp for all values. No precision loss.
+            let min_pct_abs = comp
+                .analyses
+                .iter()
+                .filter(|(base, _, _)| base == baseline_name)
+                .flat_map(|(_, _, a)| {
+                    let bm = a.baseline.mean;
+                    if bm.abs() > f64::EPSILON {
+                        vec![
+                            (a.ci_lower / bm * 100.0).abs(),
+                            a.pct_change.abs(),
+                            (a.ci_upper / bm * 100.0).abs(),
+                        ]
+                    } else {
+                        vec![]
+                    }
+                })
+                .fold(f64::INFINITY, f64::min);
+            let pct_dp: usize = if min_pct_abs >= 1000.0 { 0 } else { 1 };
+            let pct_fmt = |v: f64| -> String { format!("{v:+.*}", pct_dp) };
 
             // Pass 2a: compute raw formatted parts for each row
             struct RawRow {
