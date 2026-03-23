@@ -296,13 +296,17 @@ impl SuiteResult {
             let (mean_divisor, mean_unit, mean_dp) = ns_unit(reference_mean.abs());
 
             // vs-base percentage column: dp based on max percentage magnitude
-            let max_pct = comp
-                .analyses
-                .iter()
-                .filter(|(base, _, _)| base == baseline_name)
-                .map(|(_, _, a)| a.pct_change.abs())
-                .fold(0.0_f64, f64::max);
-            let pct_dp: usize = if max_pct >= 100.0 { 0 } else { 1 };
+            // Percentage dp is per-value based on magnitude, not column-wide.
+            // Alignment comes from width padding, not forced dp.
+            let pct_fmt = |v: f64| -> String {
+                if v.abs() >= 1000.0 {
+                    format!("{v:+.0}")
+                } else if v.abs() >= 100.0 {
+                    format!("{v:+.1}")
+                } else {
+                    format!("{v:+.1}")
+                }
+            };
 
             // Pass 2a: compute raw formatted parts for each row
             struct RawRow {
@@ -367,12 +371,12 @@ impl SuiteResult {
                         } else {
                             DIM
                         };
-                        let v0 = format!("{:+.*}", pct_dp, lo_pct);
-                        let v1 = format!("{:+.*}", pct_dp, mid_pct);
-                        let v2 = format!("{:+.*}", pct_dp, hi_pct);
+                        let v0 = pct_fmt(lo_pct);
+                        let v1 = pct_fmt(mid_pct);
+                        let v2 = pct_fmt(hi_pct);
                         ([v0, v1, v2], "%".to_string(), color)
                     } else {
-                        let v = format!("{:+.*}%", pct_dp, analysis.pct_change);
+                        let v = format!("{}%", pct_fmt(analysis.pct_change));
                         (
                             [v.clone(), String::new(), String::new()],
                             String::new(),
