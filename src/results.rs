@@ -263,10 +263,10 @@ impl SuiteResult {
             // Pre-format all cells to measure widths
             struct Row {
                 name: String,
-                mean_range: String, // "lo  mean  hi" with unit
+                mean: String, // point estimate only
                 throughput: String,
                 cpu: String,
-                vs_base: String, // "lo  pct  hi%" or "baseline"
+                vs_base: String, // [lo  pct  hi]% range or "baseline"
                 vs_base_color: &'static str,
                 is_fastest: bool,
                 markers: String,
@@ -304,13 +304,7 @@ impl SuiteResult {
                     })
                     .unwrap_or_default();
 
-                // Mean as [lo  mean  hi] with shared unit
-                let ci_half = bench.summary.std_err() * 1.96;
-                let lo = (bench.summary.mean - ci_half).max(0.0);
-                let hi = bench.summary.mean + ci_half;
-                let mean_range = format_ns_range(lo, bench.summary.mean, hi);
-
-                // vs baseline column as three-value range
+                // vs baseline column as [lo  pct  hi]% range
                 let (vs_base, vs_base_color) = if bench.name == baseline_name {
                     ("baseline".to_string(), DIM)
                 } else if let Some(analysis) = baseline_analyses.get(bench.name.as_str()) {
@@ -393,7 +387,7 @@ impl SuiteResult {
 
                 rows.push(Row {
                     name: bench.name.clone(),
-                    mean_range,
+                    mean: format_ns(bench.summary.mean),
                     throughput: tp_str,
                     cpu: cpu_str,
                     vs_base,
@@ -404,12 +398,7 @@ impl SuiteResult {
                 });
             }
 
-            let mean_w = rows
-                .iter()
-                .map(|r| r.mean_range.len())
-                .max()
-                .unwrap_or(10)
-                .max(10);
+            let mean_w = rows.iter().map(|r| r.mean.len()).max().unwrap_or(4).max(4);
             let tp_w = if has_throughput {
                 rows.iter()
                     .map(|r| r.throughput.len())
@@ -456,9 +445,9 @@ impl SuiteResult {
                 add_col(&mut mid, vs_w, '┼');
             }
 
-            // Mean column (includes 95% CI bounds)
+            // Mean column
             add_col(&mut top, mean_w, '┬');
-            hdr.push_str(&format!(" │ {:^mean_w$}", "lo  mean  hi"));
+            hdr.push_str(&format!(" │ {:>mean_w$}", "mean"));
             add_col(&mut mid, mean_w, '┼');
 
             if has_throughput {
@@ -519,7 +508,7 @@ impl SuiteResult {
                     line.push_str(&format!(" {DIM}│{RESET} {vc}{:>vs_w$}{vr}", row.vs_base));
                 }
 
-                line.push_str(&format!(" {DIM}│{RESET} {:>mean_w$}", row.mean_range,));
+                line.push_str(&format!(" {DIM}│{RESET} {:>mean_w$}", row.mean));
 
                 if has_throughput {
                     line.push_str(&format!(
