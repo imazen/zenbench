@@ -222,41 +222,80 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
         measurement_time += round_start.elapsed();
         completed_rounds += 1;
 
-        // Auto-rounds: check convergence every 10 rounds after min_rounds
+        // Auto-rounds convergence check.
+        //
+        // For comparison groups: check paired differences against baseline.
+        // A pair is "resolved" when EITHER:
+        //   - Direction resolved: 95% CI on paired diff excludes zero
+        //   - Equivalence established: CI width < target_precision × baseline mean
+        //     (the largest plausible difference is smaller than we care about)
+        //
+        // For standalone (1 benchmark): individual precision check.
+        //
+        // Stop when ALL pairs are resolved.
         if config.auto_rounds
             && completed_rounds >= config.min_rounds.max(30)
             && completed_rounds % 10 == 0
         {
-            let all_precise = (0..n_benchmarks).all(|bench_idx| {
-                let n = samples[bench_idx].len();
-                if n < 10 {
-                    return false;
-                }
-                // Compute running mean and stddev from per-iter times
-                let mut sum = 0.0_f64;
-                let mut sum_sq = 0.0_f64;
-                for (j, &elapsed) in samples[bench_idx].iter().enumerate() {
-                    let per_iter = elapsed as f64 / iters_per_round[j] as f64;
-                    sum += per_iter;
-                    sum_sq += per_iter * per_iter;
-                }
-                let mean = sum / n as f64;
-                let variance = (sum_sq / n as f64) - (mean * mean);
-                let std_dev = variance.max(0.0).sqrt();
-                if mean.abs() < f64::EPSILON {
-                    return true; // zero mean = precise enough
-                }
-                // Relative CI half-width: 1.96 * stddev / (sqrt(n) * mean)
-                let rel_precision = 1.96 * std_dev / ((n as f64).sqrt() * mean.abs());
-                rel_precision < config.target_precision
-            });
+            let n = completed_rounds;
+            let baseline_idx = group
+                .baseline_name
+                .as_ref()
+                .and_then(|name| group.benchmarks.iter().position(|b| b.name == *name))
+                .unwrap_or(0);
 
-            if all_precise {
+            let converged = if n_benchmarks < 2 {
+                // Standalone: individual precision on the single benchmark
+                let (mean, std_dev) = streaming_mean_stddev(&samples[0], &iters_per_round);
+                mean.abs() < f64::EPSILON
+                    || (1.96 * std_dev / ((n as f64).sqrt() * mean.abs()) < config.target_precision)
+            } else {
+                // Comparison: check each baseline pair
+                (0..n_benchmarks).all(|i| {
+                    if i == baseline_idx {
+                        return true; // baseline doesn't compare against itself
+                    }
+                    // Compute paired differences per round
+                    let mut diff_sum = 0.0_f64;
+                    let mut diff_sum_sq = 0.0_f64;
+                    for round in 0..n {
+                        let base_per_iter =
+                            samples[baseline_idx][round] as f64 / iters_per_round[round] as f64;
+                        let cand_per_iter =
+                            samples[i][round] as f64 / iters_per_round[round] as f64;
+                        let diff = cand_per_iter - base_per_iter;
+                        diff_sum += diff;
+                        diff_sum_sq += diff * diff;
+                    }
+                    let diff_mean = diff_sum / n as f64;
+                    let diff_var = (diff_sum_sq / n as f64) - (diff_mean * diff_mean);
+                    let diff_stderr = diff_var.max(0.0).sqrt() / (n as f64).sqrt();
+                    let ci_half = 1.96 * diff_stderr;
+
+                    // Baseline mean for relative threshold
+                    let (base_mean, _) =
+                        streaming_mean_stddev(&samples[baseline_idx], &iters_per_round);
+
+                    // Direction resolved: CI excludes zero
+                    let direction_clear =
+                        (diff_mean - ci_half > 0.0) || (diff_mean + ci_half < 0.0);
+
+                    // Equivalence: CI width is small relative to baseline
+                    let ci_width_relative = if base_mean.abs() > f64::EPSILON {
+                        2.0 * ci_half / base_mean.abs()
+                    } else {
+                        0.0
+                    };
+                    let equivalent = ci_width_relative < config.target_precision;
+
+                    direction_clear || equivalent
+                })
+            };
+
+            if converged {
                 eprintln!(
-                    "[zenbench] '{}' converged after {} rounds (precision < {:.0}%)",
-                    group.name,
-                    completed_rounds,
-                    config.target_precision * 100.0,
+                    "[zenbench] '{}' converged after {} rounds",
+                    group.name, completed_rounds,
                 );
                 break;
             }
@@ -412,6 +451,24 @@ fn run_standalone(
         tags: bench.tags.clone(),
         subgroup: bench.subgroup.clone(),
     }
+}
+
+/// Compute streaming mean and stddev of per-iteration times.
+fn streaming_mean_stddev(raw_samples: &[u64], iters_per_round: &[usize]) -> (f64, f64) {
+    let n = raw_samples.len();
+    if n == 0 {
+        return (0.0, 0.0);
+    }
+    let mut sum = 0.0_f64;
+    let mut sum_sq = 0.0_f64;
+    for (j, &elapsed) in raw_samples.iter().enumerate() {
+        let per_iter = elapsed as f64 / iters_per_round[j] as f64;
+        sum += per_iter;
+        sum_sq += per_iter * per_iter;
+    }
+    let mean = sum / n as f64;
+    let variance = (sum_sq / n as f64) - (mean * mean);
+    (mean, variance.max(0.0).sqrt())
 }
 
 /// Estimate how many iterations fit in ~10ms.
