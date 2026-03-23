@@ -134,7 +134,7 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
     } else {
         std::time::Duration::from_millis(10)
     };
-    let eta_secs = sample_time_est.as_secs_f64() * config.rounds as f64 * n_benchmarks as f64;
+    let eta_secs = sample_time_est.as_secs_f64() * config.max_rounds as f64 * n_benchmarks as f64;
     let eta_str = if eta_secs >= 60.0 {
         format!("{:.0}m{:.0}s", eta_secs / 60.0, eta_secs % 60.0)
     } else {
@@ -146,10 +146,10 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
     );
 
     // Storage: samples[bench_idx] = vec of raw elapsed_ns per round
-    let mut samples: Vec<Vec<u64>> = vec![Vec::with_capacity(config.rounds); n_benchmarks];
+    let mut samples: Vec<Vec<u64>> = vec![Vec::with_capacity(config.max_rounds); n_benchmarks];
     // CPU time samples (parallel to wall time samples)
-    let mut cpu_samples: Vec<Vec<u64>> = vec![Vec::with_capacity(config.rounds); n_benchmarks];
-    let mut iters_per_round: Vec<usize> = Vec::with_capacity(config.rounds);
+    let mut cpu_samples: Vec<Vec<u64>> = vec![Vec::with_capacity(config.max_rounds); n_benchmarks];
+    let mut iters_per_round: Vec<usize> = Vec::with_capacity(config.max_rounds);
     let mut rng = Xoshiro256SS::seed(0xBE0C_0BAD_0000_0001);
 
     // Cache firewall buffer
@@ -162,7 +162,7 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
     let mut completed_rounds = 0;
     let mut measurement_time = std::time::Duration::ZERO;
 
-    for round in 0..config.rounds {
+    for round in 0..config.max_rounds {
         // Check time limit against measurement time only (excludes gate waits).
         // Only enforce after min_rounds so slow benchmarks still get enough data.
         if round >= config.min_rounds && measurement_time >= config.max_time {
@@ -444,12 +444,12 @@ fn run_standalone(
     gate.wait_for_clear();
 
     let iterations = estimate_iterations(&mut bench.func, config);
-    let mut samples = Vec::with_capacity(config.rounds);
-    let mut cpu_samples_vec = Vec::with_capacity(config.rounds);
+    let mut samples = Vec::with_capacity(config.max_rounds);
+    let mut cpu_samples_vec = Vec::with_capacity(config.max_rounds);
 
     let start = Instant::now();
     let mut measurement_time = std::time::Duration::ZERO;
-    for round in 0..config.rounds {
+    for round in 0..config.max_rounds {
         if round >= config.min_rounds && measurement_time >= config.max_time {
             break;
         }

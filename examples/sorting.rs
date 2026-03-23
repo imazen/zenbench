@@ -6,7 +6,7 @@ fn main() {
     let result = zenbench::run(|suite| {
         // Compare different sorting approaches on the same data
         suite.compare("sort_1000_reversed", |group| {
-            group.config().rounds(100);
+            group.config().max_rounds(100);
 
             group.bench("std_sort", |b| {
                 b.with_input(|| (0..1000).rev().collect::<Vec<i32>>())
@@ -27,7 +27,7 @@ fn main() {
 
         // Compare on random-ish data
         suite.compare("sort_1000_shuffled", |group| {
-            group.config().rounds(100);
+            group.config().max_rounds(100);
 
             group.bench("std_sort", |b| {
                 b.with_input(|| {

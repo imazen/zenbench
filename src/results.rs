@@ -264,7 +264,7 @@ impl SuiteResult {
             struct Row {
                 name: String,
                 mean: String,
-                stddev: String,
+                ci: String, // 95% CI half-width on the mean
                 throughput: String,
                 cpu: String,
                 vs_base: String, // formatted % change
@@ -382,7 +382,7 @@ impl SuiteResult {
                 rows.push(Row {
                     name: bench.name.clone(),
                     mean: format_ns(bench.summary.mean),
-                    stddev: format!("±{}", format_ns(bench.summary.std_dev())),
+                    ci: format!("±{}", format_ns(bench.summary.std_err() * 1.96)),
                     throughput: tp_str,
                     cpu: cpu_str,
                     vs_base,
@@ -394,12 +394,7 @@ impl SuiteResult {
             }
 
             let mean_w = rows.iter().map(|r| r.mean.len()).max().unwrap_or(4).max(4);
-            let sd_w = rows
-                .iter()
-                .map(|r| r.stddev.len())
-                .max()
-                .unwrap_or(6)
-                .max(6);
+            let sd_w = rows.iter().map(|r| r.ci.len()).max().unwrap_or(6).max(6);
             let tp_w = if has_throughput {
                 rows.iter()
                     .map(|r| r.throughput.len())
@@ -453,7 +448,7 @@ impl SuiteResult {
 
             // StdDev column
             add_col(&mut top, sd_w, '┬');
-            hdr.push_str(&format!(" │ {:>sd_w$}", "stddev"));
+            hdr.push_str(&format!(" │ {:>sd_w$}", "95% ci"));
             add_col(&mut mid, sd_w, '┼');
 
             if has_throughput {
@@ -516,7 +511,7 @@ impl SuiteResult {
 
                 line.push_str(&format!(
                     " {DIM}│{RESET} {:>mean_w$} {DIM}│{RESET} {DIM}{:>sd_w$}{RESET}",
-                    row.mean, row.stddev,
+                    row.mean, row.ci,
                 ));
 
                 if has_throughput {
@@ -652,7 +647,7 @@ impl SuiteResult {
             struct StandaloneRow {
                 name: String,
                 mean: String,
-                stddev: String,
+                ci: String, // 95% CI half-width on the mean
                 n: String,
                 cpu: String,
             }
@@ -675,7 +670,7 @@ impl SuiteResult {
                     StandaloneRow {
                         name: bench.name.clone(),
                         mean: format_ns(bench.summary.mean),
-                        stddev: format!("±{}", format_ns(bench.summary.std_dev())),
+                        ci: format!("±{}", format_ns(bench.summary.std_err() * 1.96)),
                         n: format!("{}", bench.summary.n),
                         cpu: cpu_str,
                     }
@@ -683,12 +678,7 @@ impl SuiteResult {
                 .collect();
 
             let mean_w = rows.iter().map(|r| r.mean.len()).max().unwrap_or(4).max(4);
-            let sd_w = rows
-                .iter()
-                .map(|r| r.stddev.len())
-                .max()
-                .unwrap_or(6)
-                .max(6);
+            let sd_w = rows.iter().map(|r| r.ci.len()).max().unwrap_or(6).max(6);
             let n_w = rows.iter().map(|r| r.n.len()).max().unwrap_or(1).max(1);
             let cpu_w = if has_cpu {
                 rows.iter().map(|r| r.cpu.len()).max().unwrap_or(3).max(3)
@@ -703,7 +693,7 @@ impl SuiteResult {
             hdr.push_str(&format!(" │ {:>mean_w$}", "mean"));
             mid.push_str(&format!("┼{}", "─".repeat(mean_w + 2)));
             top.push_str(&format!("┬{}", "─".repeat(sd_w + 2)));
-            hdr.push_str(&format!(" │ {:>sd_w$}", "stddev"));
+            hdr.push_str(&format!(" │ {:>sd_w$}", "95% ci"));
             mid.push_str(&format!("┼{}", "─".repeat(sd_w + 2)));
             top.push_str(&format!("┬{}", "─".repeat(n_w + 2)));
             hdr.push_str(&format!(" │ {:>n_w$}", "n"));
@@ -724,7 +714,7 @@ impl SuiteResult {
             for row in &rows {
                 let mut line = format!(
                     "  {DIM}│{RESET} {:<name_w$} {DIM}│{RESET} {:>mean_w$} {DIM}│{RESET} {DIM}{:>sd_w$}{RESET} {DIM}│{RESET} {:>n_w$}",
-                    row.name, row.mean, row.stddev, row.n,
+                    row.name, row.mean, row.ci, row.n,
                 );
                 if has_cpu {
                     line.push_str(&format!(" {DIM}│{RESET} {DIM}{:>cpu_w$}{RESET}", row.cpu,));

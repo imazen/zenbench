@@ -265,7 +265,7 @@ impl BenchGroup {
 #[derive(Debug, Clone)]
 pub struct GroupConfig {
     /// Target number of measurement rounds.
-    pub rounds: usize,
+    pub max_rounds: usize,
     /// Minimum number of rounds before `max_time` is checked.
     /// Guarantees at least this many measurements even on slow benchmarks.
     /// Default: 5.
@@ -329,7 +329,7 @@ pub struct GroupConfig {
 impl Default for GroupConfig {
     fn default() -> Self {
         Self {
-            rounds: 200,
+            max_rounds: 200,
             min_rounds: 5,
             warmup_time: Duration::from_millis(500),
             max_time: Duration::from_secs(10),
@@ -348,8 +348,8 @@ impl Default for GroupConfig {
 }
 
 impl GroupConfig {
-    pub fn rounds(&mut self, rounds: usize) -> &mut Self {
-        self.rounds = rounds;
+    pub fn max_rounds(&mut self, max_rounds: usize) -> &mut Self {
+        self.max_rounds = max_rounds;
         self
     }
 

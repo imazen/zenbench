@@ -170,8 +170,8 @@ suite.compare("my_group", |group| {
         .baseline_only(true)              // only compare against baseline (auto for >3 benchmarks)
         .sort_by_speed(true)              // sort table fastest-first (default: definition order)
         .expect_sub_ns(true)              // suppress "optimized away" warnings for sub-ns benchmarks
-        .rounds(200)                      // target measurement rounds
-        .min_rounds(5)                    // minimum rounds before max_time applies
+        .max_rounds(200)                  // ceiling (auto-rounds may stop earlier)
+        .min_rounds(5)                    // minimum before max_time or convergence applies
         .max_time(Duration::from_secs(10)); // max measurement time (excludes gate waits)
 
     group.bench("reference_impl", |b| { /* ... */ });
