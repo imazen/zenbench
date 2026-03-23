@@ -311,6 +311,13 @@ impl SuiteResult {
             hdr.push_str(&format!("│ {:<name_w$}", "benchmark"));
             add_col(&mut mid, name_w, '├');
 
+            // vs base column (first data column for quick scanning)
+            if has_comparisons {
+                add_col(&mut top, vs_w, '┬');
+                hdr.push_str(&format!(" │ {:>vs_w$}", "vs base"));
+                add_col(&mut mid, vs_w, '┼');
+            }
+
             // Mean column
             add_col(&mut top, mean_w, '┬');
             hdr.push_str(&format!(" │ {:>mean_w$}", "mean"));
@@ -325,11 +332,6 @@ impl SuiteResult {
                 add_col(&mut top, tp_w, '┬');
                 hdr.push_str(&format!(" │ {:>tp_w$}", "throughput"));
                 add_col(&mut mid, tp_w, '┼');
-            }
-            if has_comparisons {
-                add_col(&mut top, vs_w, '┬');
-                hdr.push_str(&format!(" │ {:>vs_w$}", "vs base"));
-                add_col(&mut mid, vs_w, '┼');
             }
             if has_cpu {
                 add_col(&mut top, cpu_w, '┬');
@@ -350,20 +352,26 @@ impl SuiteResult {
                 let name_reset = if row.is_fastest { RESET } else { "" };
 
                 let mut line = format!(
-                    "  {DIM}│{RESET} {name_color}{:<name_w$}{name_reset} {DIM}│{RESET} {:>mean_w$} {DIM}│{RESET} {DIM}{:>sd_w$}{RESET}",
-                    row.name, row.mean, row.stddev,
+                    "  {DIM}│{RESET} {name_color}{:<name_w$}{name_reset}",
+                    row.name,
                 );
+
+                if has_comparisons {
+                    let vc = row.vs_base_color;
+                    let vr = if vc.is_empty() { "" } else { RESET };
+                    line.push_str(&format!(" {DIM}│{RESET} {vc}{:>vs_w$}{vr}", row.vs_base));
+                }
+
+                line.push_str(&format!(
+                    " {DIM}│{RESET} {:>mean_w$} {DIM}│{RESET} {DIM}{:>sd_w$}{RESET}",
+                    row.mean, row.stddev,
+                ));
 
                 if has_throughput {
                     line.push_str(&format!(
                         " {DIM}│{RESET} {CYAN}{:>tp_w$}{RESET}",
                         row.throughput,
                     ));
-                }
-                if has_comparisons {
-                    let vc = row.vs_base_color;
-                    let vr = if vc.is_empty() { "" } else { RESET };
-                    line.push_str(&format!(" {DIM}│{RESET} {vc}{:>vs_w$}{vr}", row.vs_base,));
                 }
                 if has_cpu {
                     line.push_str(&format!(" {DIM}│{RESET} {DIM}{:>cpu_w$}{RESET}", row.cpu));
@@ -375,14 +383,14 @@ impl SuiteResult {
 
             // Bottom border
             let mut bot = String::from("  └");
-            bot.push_str(&format!("{}", "─".repeat(name_w + 2)));
+            bot.push_str(&"─".repeat(name_w + 2));
+            if has_comparisons {
+                bot.push_str(&format!("┴{}", "─".repeat(vs_w + 2)));
+            }
             bot.push_str(&format!("┴{}", "─".repeat(mean_w + 2)));
             bot.push_str(&format!("┴{}", "─".repeat(sd_w + 2)));
             if has_throughput {
                 bot.push_str(&format!("┴{}", "─".repeat(tp_w + 2)));
-            }
-            if has_comparisons {
-                bot.push_str(&format!("┴{}", "─".repeat(vs_w + 2)));
             }
             if has_cpu {
                 bot.push_str(&format!("┴{}", "─".repeat(cpu_w + 2)));
@@ -390,8 +398,48 @@ impl SuiteResult {
             bot.push('┘');
             eprintln!("{DIM}{bot}{RESET}");
 
-            // Terminal bar chart
+            // Terminal bar chart — always sorted fastest-first
             if rows.len() >= 2 {
+                // Sort indices by speed for the bar chart regardless of table order
+                let mut bar_indices: Vec<usize> = (0..comp.benchmarks.len()).collect();
+                bar_indices.sort_by(|&a, &b| {
+                    comp.benchmarks[a]
+                        .summary
+                        .mean
+                        .total_cmp(&comp.benchmarks[b].summary.mean)
+                });
+
+                // Detect terminal width, default 80, cap bar to avoid wrapping
+                let term_width = terminal_width().unwrap_or(80);
+                // Layout: 2 indent + name_w + 2 gap + bar + 1 space + label
+                // We need to figure out the label width first
+                let bar_labels: Vec<String> = if has_throughput {
+                    bar_indices
+                        .iter()
+                        .map(|&i| {
+                            let b = &comp.benchmarks[i];
+                            comp.throughput
+                                .as_ref()
+                                .map(|tp| tp.format_named(b.summary.mean, tp_unit))
+                                .unwrap_or_default()
+                        })
+                        .collect()
+                } else {
+                    bar_indices
+                        .iter()
+                        .map(|&i| format_ns(comp.benchmarks[i].summary.mean))
+                        .collect()
+                };
+                let label_w = bar_labels.iter().map(|l| l.len()).max().unwrap_or(0);
+                let overhead = 2 + name_w + 2 + 1 + label_w;
+                let bar_max = if term_width > overhead + 4 {
+                    term_width - overhead
+                } else {
+                    20 // minimum bar width
+                };
+
+                // Scale: for throughput bars, higher = longer (better).
+                // For time bars, higher = longer (worse — but fastest is highlighted green).
                 let max_mean = comp
                     .benchmarks
                     .iter()
@@ -399,24 +447,22 @@ impl SuiteResult {
                     .fold(0.0_f64, f64::max);
 
                 if max_mean > 0.0 {
-                    const BAR_MAX: usize = 40;
                     eprintln!();
-                    for row in &rows {
-                        // Parse mean back to ns for bar scaling
-                        let bench = comp.benchmarks.iter().find(|b| b.name == row.name).unwrap();
-                        let frac = bench.summary.mean / max_mean;
-                        let bar_len = (frac * BAR_MAX as f64).round() as usize;
-                        let bar_len = bar_len.max(1); // at least one block
+                    for (idx, &bench_i) in bar_indices.iter().enumerate() {
+                        let bench = &comp.benchmarks[bench_i];
+                        let is_fastest = (bench.summary.mean - fastest_mean).abs() < f64::EPSILON;
 
+                        let frac = bench.summary.mean / max_mean;
+                        let bar_len = (frac * bar_max as f64).round().max(1.0) as usize;
                         let bar: String = "█".repeat(bar_len);
 
-                        let name_color = if row.is_fastest { GREEN } else { "" };
-                        let name_reset = if row.is_fastest { RESET } else { "" };
-                        let bar_color = if row.is_fastest { GREEN } else { CYAN };
+                        let name_color = if is_fastest { GREEN } else { "" };
+                        let name_reset = if is_fastest { RESET } else { "" };
+                        let bar_color = if is_fastest { GREEN } else { CYAN };
 
                         eprintln!(
                             "  {name_color}{:<name_w$}{name_reset}  {bar_color}{bar}{RESET} {DIM}{}{RESET}",
-                            row.name, row.mean,
+                            bench.name, bar_labels[idx],
                         );
                     }
                 }
@@ -867,6 +913,18 @@ impl SuiteResult {
 }
 
 /// Format bytes as human-readable size.
+/// Detect terminal width. Checks `COLUMNS` env var, falls back to 80.
+fn terminal_width() -> Option<usize> {
+    if let Ok(cols) = std::env::var("COLUMNS") {
+        if let Ok(w) = cols.parse::<usize>() {
+            if w > 0 {
+                return Some(w);
+            }
+        }
+    }
+    None
+}
+
 fn format_bytes(bytes: usize) -> String {
     if bytes >= 1024 * 1024 {
         format!("{} MiB", bytes / (1024 * 1024))
