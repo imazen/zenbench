@@ -1,5 +1,4 @@
 use crate::bench::{BenchGroup, Bencher, GroupConfig, Suite};
-use crate::checks;
 use crate::gate::{GateConfig, ResourceGate};
 use crate::platform;
 use crate::results::{BenchmarkResult, ComparisonResult, RunId, SuiteResult};
@@ -68,7 +67,6 @@ impl Engine {
             });
 
         let mut comparisons = Vec::new();
-        let mut group_configs = Vec::new();
         let mut standalones = Vec::new();
 
         // Run comparison groups (interleaved)
@@ -76,7 +74,6 @@ impl Engine {
             if group.benchmarks.is_empty() {
                 continue;
             }
-            group_configs.push(group.config.clone());
             let result = run_comparison_group(group, &mut self.gate);
             comparisons.push(result);
         }
@@ -103,48 +100,8 @@ impl Engine {
             unreliable: gate_unreliable,
         };
 
-        // Print results to stderr
+        // Print results to stderr (includes inline footnotes for issues)
         result.print_report();
-
-        // Run diagnostic checks and print warnings
-        let mut warnings = Vec::new();
-        for (i, comp) in result.comparisons.iter().enumerate() {
-            let expect_sub_ns = group_configs.get(i).is_some_and(|c| c.expect_sub_ns);
-            for bench in &comp.benchmarks {
-                warnings.extend(checks::check_benchmark(
-                    &bench.name,
-                    &bench.summary,
-                    comp.completed_rounds,
-                    expect_sub_ns,
-                ));
-            }
-            for (base, cand, analysis) in &comp.analyses {
-                if let Some(w) = checks::check_drift(base, cand, analysis.drift_correlation) {
-                    warnings.push(w);
-                }
-            }
-            if !comp.baseline_only
-                && let Some(w) =
-                    checks::check_multiple_comparisons(&comp.group_name, comp.benchmarks.len())
-            {
-                warnings.push(w);
-            }
-        }
-        for bench in &result.standalones {
-            warnings.extend(checks::check_benchmark(
-                &bench.name,
-                &bench.summary,
-                bench.summary.n,
-                false,
-            ));
-        }
-        if !warnings.is_empty() {
-            eprintln!("  warnings:");
-            for w in &warnings {
-                eprintln!("    \x1b[33m⚠ {w}\x1b[0m");
-            }
-            eprintln!();
-        }
 
         // Lock is released when _lock drops
         result

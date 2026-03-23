@@ -134,7 +134,13 @@ impl SuiteResult {
             "{BOLD_WHITE}═══════════════════════════════════════════════════════════════{RESET}"
         );
 
-        for comp in &self.comparisons {
+        for (group_idx, comp) in self.comparisons.iter().enumerate() {
+            if group_idx > 0 {
+                eprintln!();
+                eprintln!(
+                    "  {DIM}· · · · · · · · · · · · · · · · · · · · · · · · · · · · ·{RESET}"
+                );
+            }
             eprintln!();
 
             // Group header with config info
@@ -170,13 +176,6 @@ impl SuiteResult {
             let has_cpu = comp.benchmarks.iter().any(|b| b.cpu_summary.is_some());
             let has_comparisons = comp.benchmarks.len() >= 2;
 
-            // Build analysis lookup: benchmark name → (pct_change, significant)
-            let baseline_analyses: std::collections::HashMap<&str, &crate::stats::PairedAnalysis> =
-                comp.analyses
-                    .iter()
-                    .map(|(_, cand, analysis)| (cand.as_str(), analysis))
-                    .collect();
-
             // Find the baseline name (first entry in analyses, or first benchmark)
             let baseline_name = comp
                 .analyses
@@ -189,6 +188,14 @@ impl SuiteResult {
                         .unwrap_or("")
                 });
 
+            // Build analysis lookup: candidate name → analysis (only baseline pairs)
+            let baseline_analyses: std::collections::HashMap<&str, &crate::stats::PairedAnalysis> =
+                comp.analyses
+                    .iter()
+                    .filter(|(base, _, _)| base == baseline_name)
+                    .map(|(_, cand, analysis)| (cand.as_str(), analysis))
+                    .collect();
+
             // Compute column widths
             let name_w = comp
                 .benchmarks
@@ -197,6 +204,13 @@ impl SuiteResult {
                 .max()
                 .unwrap_or(4)
                 .max(9); // "benchmark"
+
+            // Footnote collector
+            let mut footnotes: Vec<String> = Vec::new();
+            let mut add_footnote = |msg: String| -> usize {
+                footnotes.push(msg);
+                footnotes.len()
+            };
 
             // Pre-format all cells to measure widths
             struct Row {
@@ -208,62 +222,111 @@ impl SuiteResult {
                 vs_base: String, // formatted % change
                 vs_base_color: &'static str,
                 is_fastest: bool,
+                markers: String, // e.g. "[1][2]"
             }
 
-            let rows: Vec<Row> = display_indices
-                .iter()
-                .map(|&i| {
-                    let bench = &comp.benchmarks[i];
-                    let is_fastest = (bench.summary.mean - fastest_mean).abs() < f64::EPSILON
-                        && comp.benchmarks.len() > 1;
-                    let tp_str = comp
-                        .throughput
-                        .as_ref()
-                        .map(|tp| tp.format_named(bench.summary.mean, tp_unit))
-                        .unwrap_or_default();
-                    let cpu_str = bench
-                        .cpu_summary
-                        .as_ref()
-                        .map(|cpu| {
-                            let eff = if bench.summary.mean > 0.0 {
-                                cpu.mean / bench.summary.mean * 100.0
-                            } else {
-                                0.0
-                            };
-                            format!("{} ({eff:.0}%)", format_ns(cpu.mean))
-                        })
-                        .unwrap_or_default();
+            // Check for group-level issues first
+            if comp.completed_rounds < 10 {
+                add_footnote(format!(
+                    "only {} rounds — need 30+ for reliable statistics",
+                    comp.completed_rounds,
+                ));
+            }
 
-                    // vs baseline column
-                    let (vs_base, vs_base_color) = if bench.name == baseline_name {
-                        ("baseline".to_string(), DIM)
-                    } else if let Some(analysis) = baseline_analyses.get(bench.name.as_str()) {
-                        let pct = analysis.pct_change;
-                        let color = if pct < -1.0 {
-                            GREEN
-                        } else if pct > 1.0 {
-                            RED
+            let mut rows: Vec<Row> = Vec::with_capacity(display_indices.len());
+            for &i in &display_indices {
+                let bench = &comp.benchmarks[i];
+                let is_fastest = (bench.summary.mean - fastest_mean).abs() < f64::EPSILON
+                    && comp.benchmarks.len() > 1;
+                let tp_str = comp
+                    .throughput
+                    .as_ref()
+                    .map(|tp| tp.format_named(bench.summary.mean, tp_unit))
+                    .unwrap_or_default();
+                let cpu_str = bench
+                    .cpu_summary
+                    .as_ref()
+                    .map(|cpu| {
+                        let eff = if bench.summary.mean > 0.0 {
+                            cpu.mean / bench.summary.mean * 100.0
                         } else {
-                            DIM
+                            0.0
                         };
-                        let sig = if analysis.significant { "*" } else { "" };
-                        (format!("{pct:+.1}%{sig}"), color)
-                    } else {
-                        (String::new(), DIM)
-                    };
+                        format!("{} ({eff:.0}%)", format_ns(cpu.mean))
+                    })
+                    .unwrap_or_default();
 
-                    Row {
-                        name: bench.name.clone(),
-                        mean: format_ns(bench.summary.mean),
-                        stddev: format!("±{}", format_ns(bench.summary.std_dev())),
-                        throughput: tp_str,
-                        cpu: cpu_str,
-                        vs_base,
-                        vs_base_color,
-                        is_fastest,
-                    }
-                })
-                .collect();
+                // vs baseline column
+                let (vs_base, vs_base_color) = if bench.name == baseline_name {
+                    ("baseline".to_string(), DIM)
+                } else if let Some(analysis) = baseline_analyses.get(bench.name.as_str()) {
+                    let pct = analysis.pct_change;
+                    let color = if pct < -1.0 {
+                        GREEN
+                    } else if pct > 1.0 {
+                        RED
+                    } else {
+                        DIM
+                    };
+                    let sig = if analysis.significant { "*" } else { "" };
+                    (format!("{pct:+.1}%{sig}"), color)
+                } else {
+                    (String::new(), DIM)
+                };
+
+                // Per-benchmark footnotes
+                let mut markers = String::new();
+                let cv = bench.summary.cv();
+                if cv > 0.20 && bench.summary.n > 10 {
+                    let n = add_footnote(format!(
+                        "CV={:.0}% — noisy, try a quieter system",
+                        cv * 100.0,
+                    ));
+                    markers.push_str(&format!("[{n}]"));
+                }
+                if bench.summary.mean < 1.0
+                    && bench.summary.n > 0
+                    && (cv < 0.01 || bench.summary.variance < f64::EPSILON)
+                {
+                    let n = add_footnote(
+                        "sub-ns with near-zero variance — likely optimized away".to_string(),
+                    );
+                    markers.push_str(&format!("[{n}]"));
+                }
+
+                rows.push(Row {
+                    name: bench.name.clone(),
+                    mean: format_ns(bench.summary.mean),
+                    stddev: format!("±{}", format_ns(bench.summary.std_dev())),
+                    throughput: tp_str,
+                    cpu: cpu_str,
+                    vs_base,
+                    vs_base_color,
+                    is_fastest,
+                    markers,
+                });
+            }
+
+            // Per-comparison footnotes (drift)
+            let mut comparison_markers: std::collections::HashMap<(&str, &str), String> =
+                std::collections::HashMap::new();
+            for (base, cand, analysis) in &comp.analyses {
+                if analysis.drift_correlation.abs() > 0.5 {
+                    let direction = if analysis.drift_correlation > 0.0 {
+                        "later rounds slower (thermal?)"
+                    } else {
+                        "later rounds faster (warmup?)"
+                    };
+                    let n = add_footnote(format!(
+                        "drift r={:.2} — {direction}",
+                        analysis.drift_correlation,
+                    ));
+                    comparison_markers
+                        .entry((base.as_str(), cand.as_str()))
+                        .or_default()
+                        .push_str(&format!("[{n}]"));
+                }
+            }
 
             let mean_w = rows.iter().map(|r| r.mean.len()).max().unwrap_or(4).max(4);
             let sd_w = rows
@@ -377,6 +440,10 @@ impl SuiteResult {
                     line.push_str(&format!(" {DIM}│{RESET} {DIM}{:>cpu_w$}{RESET}", row.cpu));
                 }
                 line.push_str(&format!(" {DIM}│{RESET}"));
+
+                if !row.markers.is_empty() {
+                    line.push_str(&format!(" {YELLOW}{}{RESET}", row.markers));
+                }
 
                 eprintln!("{line}");
             }
@@ -501,22 +568,28 @@ impl SuiteResult {
                     String::new()
                 };
 
+                let drift_marker = comparison_markers
+                    .get(&(base.as_str(), cand.as_str()))
+                    .map(|m| format!(" {YELLOW}{m}{RESET}"))
+                    .unwrap_or_default();
+
                 eprintln!(
                     "  {DIM}{base} vs {cand}:{RESET}  \
                      {color}{:+.2}% ({arrow}){RESET}{sig_marker}  \
-                     {DIM}d={:.2}  p={:.4}  CI [{}, {}]{RESET}{throughput_delta}",
+                     {DIM}d={:.2}  p={:.4}  CI [{}, {}]{RESET}{throughput_delta}{drift_marker}",
                     analysis.pct_change,
                     analysis.cohens_d,
                     analysis.wilcoxon_p,
                     format_ns(analysis.ci_lower),
                     format_ns(analysis.ci_upper),
                 );
+            }
 
-                if analysis.drift_correlation.abs() > 0.5 {
-                    eprintln!(
-                        "    {YELLOW}⚠ drift r={:.2}{RESET}",
-                        analysis.drift_correlation,
-                    );
+            // Print footnotes for this group
+            if !footnotes.is_empty() {
+                eprintln!();
+                for (i, note) in footnotes.iter().enumerate() {
+                    eprintln!("  {YELLOW}[{}]{RESET} {DIM}{note}{RESET}", i + 1);
                 }
             }
         }
