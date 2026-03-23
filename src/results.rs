@@ -324,9 +324,9 @@ impl SuiteResult {
                 is_fastest: bool,
                 mean_str: String,
                 ci_str: String,
-                vs_vals: [String; 3],
-                vs_suffix: String,
+                vs_vals: [String; 3], // pct values (empty for baseline)
                 vs_base_color: &'static str,
+                pre_vs_base: Option<String>, // pre-formatted baseline string
                 throughput: String,
                 cpu: String,
                 markers: String,
@@ -361,15 +361,23 @@ impl SuiteResult {
                 let mean_str = format!("{:.*}", mean_dp, m);
                 let ci_str = format!("{:.*}", mean_dp, c);
 
-                // vs baseline: three raw value strings + suffix + color
-                let (vs_vals, vs_suffix, vs_base_color) = if bench.name == baseline_name {
+                // vs baseline column:
+                // Baseline row: format independently as [lo  mean  hi]unit
+                // Comparison rows: [lo  mid  hi]% with shared pct width
+                let is_baseline = bench.name == baseline_name;
+                // pre_vs_base: Some(formatted string) for baseline, None for comparison rows
+                let (vs_vals, vs_base_color, pre_vs_base) = if is_baseline {
                     let ci_half = bench.summary.std_err() * 1.96;
                     let lo = (bench.summary.mean - ci_half).max(0.0);
                     let hi = bench.summary.mean + ci_half;
                     let v0 = format!("{:.*}", mean_dp, lo / mean_divisor);
                     let v1 = format!("{:.*}", mean_dp, bench.summary.mean / mean_divisor);
                     let v2 = format!("{:.*}", mean_dp, hi / mean_divisor);
-                    ([v0, v1, v2], format!(" {mean_unit}"), DIM)
+                    // Format baseline independently — don't pollute pct widths
+                    let w = [&v0, &v1, &v2].iter().map(|s| s.len()).max().unwrap_or(1);
+                    let s = format!("[{:>w$}  {:>w$}  {:>w$}]{mean_unit}", v0, v1, v2,);
+                    // Baseline: normal color (not dim — it's the reference point)
+                    ([String::new(), String::new(), String::new()], "", Some(s))
                 } else if let Some(analysis) = baseline_analyses.get(bench.name.as_str()) {
                     let base_mean = analysis.baseline.mean;
                     if base_mean.abs() > f64::EPSILON {
@@ -384,21 +392,13 @@ impl SuiteResult {
                         let v0 = pct_fmt(lo_pct);
                         let v1 = pct_fmt(mid_pct);
                         let v2 = pct_fmt(hi_pct);
-                        ([v0, v1, v2], "%".to_string(), color)
+                        ([v0, v1, v2], color, None)
                     } else {
                         let v = format!("{}%", pct_fmt(analysis.pct_change));
-                        (
-                            [v.clone(), String::new(), String::new()],
-                            String::new(),
-                            DIM,
-                        )
+                        ([v, String::new(), String::new()], DIM, None)
                     }
                 } else {
-                    (
-                        [String::new(), String::new(), String::new()],
-                        String::new(),
-                        DIM,
-                    )
+                    ([String::new(), String::new(), String::new()], DIM, None)
                 };
 
                 // Footnotes and markers (collected in this pass)
@@ -465,8 +465,8 @@ impl SuiteResult {
                     mean_str,
                     ci_str,
                     vs_vals,
-                    vs_suffix,
                     vs_base_color,
+                    pre_vs_base,
                     throughput: tp_str,
                     cpu: cpu_str,
                     markers,
@@ -476,8 +476,10 @@ impl SuiteResult {
             // Pass 2b: compute column-wide max widths
             let mean_val_w = raw_rows.iter().map(|r| r.mean_str.len()).max().unwrap_or(1);
             let ci_val_w = raw_rows.iter().map(|r| r.ci_str.len()).max().unwrap_or(1);
+            // vs_val_w only from comparison rows (not baseline — it formats independently)
             let vs_val_w = raw_rows
                 .iter()
+                .filter(|r| r.pre_vs_base.is_none())
                 .flat_map(|r| r.vs_vals.iter())
                 .map(|s| s.len())
                 .max()
@@ -491,18 +493,17 @@ impl SuiteResult {
                     "{:>mean_val_w$} ±{:>ci_val_w$} {mean_unit}",
                     raw.mean_str, raw.ci_str,
                 );
-                // Only render the [v0  v1  v2] bracket form when all three slots are
-                // non-empty (baseline row and normal comparison rows).  The degenerate
-                // "base_mean ≈ 0" fallback already placed a ready-made string in vs_vals[0]
-                // with an empty suffix, so we just emit that directly.
-                let vs_base = if raw.vs_vals[1].is_empty() && raw.vs_vals[2].is_empty() {
-                    // Degenerate case: pre-formatted string sitting in slot 0
-                    format!("{}{}", raw.vs_vals[0], raw.vs_suffix)
-                } else {
+                let vs_base = if let Some(pre) = raw.pre_vs_base {
+                    // Baseline: pre-formatted with its own alignment
+                    pre
+                } else if !raw.vs_vals[0].is_empty() {
+                    // Comparison: use column-wide pct width
                     format!(
-                        "[{:>vs_val_w$}  {:>vs_val_w$}  {:>vs_val_w$}]{}",
-                        raw.vs_vals[0], raw.vs_vals[1], raw.vs_vals[2], raw.vs_suffix,
+                        "[{:>vs_val_w$}  {:>vs_val_w$}  {:>vs_val_w$}]%",
+                        raw.vs_vals[0], raw.vs_vals[1], raw.vs_vals[2],
                     )
+                } else {
+                    String::new()
                 };
                 rows.push(Row {
                     name: bench.name.clone(),
@@ -1194,7 +1195,7 @@ fn format_ns_range(lo: f64, mean: f64, hi: f64) -> String {
         .map(|&v| format!("{:.*}", dp, v / divisor))
         .collect();
     let w = vals.iter().map(|s| s.len()).max().unwrap_or(1);
-    format!("[{:>w$}  {:>w$}  {:>w$}] {unit}", vals[0], vals[1], vals[2],)
+    format!("[{:>w$}  {:>w$}  {:>w$}]{unit}", vals[0], vals[1], vals[2],)
 }
 
 /// Generate a text-based bar chart for a group of benchmarks.
