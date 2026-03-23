@@ -283,6 +283,11 @@ pub struct GroupConfig {
     /// Set to `true` when you know your benchmark genuinely runs in sub-ns time
     /// (e.g., a constant return or a single branch-predicted check).
     pub expect_sub_ns: bool,
+    /// Sort benchmarks by speed (fastest first) in report output.
+    ///
+    /// Default: `false` (definition order). When `true`, the table rows
+    /// are sorted by mean time ascending.
+    pub sort_by_speed: bool,
 }
 
 impl Default for GroupConfig {
@@ -299,6 +304,7 @@ impl Default for GroupConfig {
             yield_between_samples: false,
             baseline_only: None, // auto: true when > 3 benchmarks
             expect_sub_ns: false,
+            sort_by_speed: false,
         }
     }
 }
@@ -331,6 +337,11 @@ impl GroupConfig {
 
     pub fn cache_firewall_bytes(&mut self, bytes: usize) -> &mut Self {
         self.cache_firewall_bytes = bytes;
+        self
+    }
+
+    pub fn sort_by_speed(&mut self, enabled: bool) -> &mut Self {
+        self.sort_by_speed = enabled;
         self
     }
 

@@ -126,10 +126,15 @@ suite.compare("my_group", |group| {
     // Set the baseline benchmark (default: first added)
     group.baseline("reference_impl");
 
+    // Custom throughput unit (default: "ops")
+    group.throughput(Throughput::Elements(100));
+    group.throughput_unit("checks");  // → "5.0 Gchecks/s"
+
     group.config()
         .cache_firewall(true)             // enable L2 cache spoiling between benchmarks
         .cache_firewall_bytes(4 * 1024 * 1024) // 4 MiB for larger L2 caches
         .baseline_only(true)              // only compare against baseline (auto for >3 benchmarks)
+        .sort_by_speed(true)              // sort table fastest-first (default: definition order)
         .expect_sub_ns(true)              // suppress "optimized away" warnings for sub-ns benchmarks
         .rounds(200)                      // target measurement rounds
         .min_rounds(5)                    // minimum rounds before max_time applies
@@ -143,6 +148,43 @@ suite.compare("my_group", |group| {
 Comparison groups with more than 3 benchmarks automatically switch to
 baseline-only comparisons to keep output readable. The full pairwise matrix
 is always available in JSON output.
+
+## Iteration scaling
+
+Zenbench auto-scales iterations so each sample takes ~10ms. During warmup,
+it measures your function and picks an iteration count that fills this
+window. You can constrain this with `min_iterations` and `max_iterations`:
+
+```rust,ignore
+group.config()
+    .min_iterations(1)        // default: 1
+    .max_iterations(10_000_000); // default: 10M (high enough for sub-ns ops)
+```
+
+For sub-nanosecond operations, the auto-scaler naturally ramps up to
+millions of iterations per sample, keeping measurements above timer
+resolution. For slow operations (milliseconds+), it drops to 1 iteration
+per sample.
+
+If you need manual control over batching — for instance, measuring 100
+checks as a single logical operation — use `Throughput::Elements(100)` and
+do the loop yourself:
+
+```rust,ignore
+group.throughput(Throughput::Elements(100));
+group.throughput_unit("checks");
+
+group.bench("check_100x", |b| {
+    b.iter(|| {
+        for _ in 0..100 {
+            black_box(stopper.check());
+        }
+    })
+});
+```
+
+The harness runs the outer `iter` loop for timing. Your inner loop of 100
+is measured as a batch, and throughput is reported per-element.
 
 ## Self-compare
 

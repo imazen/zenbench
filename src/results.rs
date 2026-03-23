@@ -72,6 +72,9 @@ pub struct ComparisonResult {
     /// Custom unit name for Elements throughput (e.g., "checks" → "Gchecks/s").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub throughput_unit: Option<String>,
+    /// Whether benchmarks are sorted by speed in report output.
+    #[serde(default)]
+    pub sort_by_speed: bool,
 }
 
 /// Complete results of a benchmark suite run.
@@ -145,23 +148,46 @@ impl SuiteResult {
             let meta = meta_parts.join(", ");
             eprintln!("  {BOLD}{}{RESET}  {DIM}({meta}){RESET}", comp.group_name);
 
-            // Sort benchmarks by mean time (fastest first) for display
-            let mut sorted_indices: Vec<usize> = (0..comp.benchmarks.len()).collect();
-            sorted_indices.sort_by(|&a, &b| {
-                comp.benchmarks[a]
-                    .summary
-                    .mean
-                    .total_cmp(&comp.benchmarks[b].summary.mean)
-            });
+            // Row order: definition order by default, speed sort when configured
+            let mut display_indices: Vec<usize> = (0..comp.benchmarks.len()).collect();
+            if comp.sort_by_speed {
+                display_indices.sort_by(|&a, &b| {
+                    comp.benchmarks[a]
+                        .summary
+                        .mean
+                        .total_cmp(&comp.benchmarks[b].summary.mean)
+                });
+            }
 
-            let fastest_mean = sorted_indices
-                .first()
-                .map(|&i| comp.benchmarks[i].summary.mean)
-                .unwrap_or(0.0);
+            let fastest_mean = comp
+                .benchmarks
+                .iter()
+                .map(|b| b.summary.mean)
+                .fold(f64::INFINITY, f64::min);
 
             let has_throughput = comp.throughput.is_some();
             let tp_unit = comp.throughput_unit.as_deref();
             let has_cpu = comp.benchmarks.iter().any(|b| b.cpu_summary.is_some());
+            let has_comparisons = comp.benchmarks.len() >= 2;
+
+            // Build analysis lookup: benchmark name → (pct_change, significant)
+            let baseline_analyses: std::collections::HashMap<&str, &crate::stats::PairedAnalysis> =
+                comp.analyses
+                    .iter()
+                    .map(|(_, cand, analysis)| (cand.as_str(), analysis))
+                    .collect();
+
+            // Find the baseline name (first entry in analyses, or first benchmark)
+            let baseline_name = comp
+                .analyses
+                .first()
+                .map(|(base, _, _)| base.as_str())
+                .unwrap_or_else(|| {
+                    comp.benchmarks
+                        .first()
+                        .map(|b| b.name.as_str())
+                        .unwrap_or("")
+                });
 
             // Compute column widths
             let name_w = comp
@@ -179,10 +205,12 @@ impl SuiteResult {
                 stddev: String,
                 throughput: String,
                 cpu: String,
+                vs_base: String, // formatted % change
+                vs_base_color: &'static str,
                 is_fastest: bool,
             }
 
-            let rows: Vec<Row> = sorted_indices
+            let rows: Vec<Row> = display_indices
                 .iter()
                 .map(|&i| {
                     let bench = &comp.benchmarks[i];
@@ -205,12 +233,33 @@ impl SuiteResult {
                             format!("{} ({eff:.0}%)", format_ns(cpu.mean))
                         })
                         .unwrap_or_default();
+
+                    // vs baseline column
+                    let (vs_base, vs_base_color) = if bench.name == baseline_name {
+                        ("baseline".to_string(), DIM)
+                    } else if let Some(analysis) = baseline_analyses.get(bench.name.as_str()) {
+                        let pct = analysis.pct_change;
+                        let color = if pct < -1.0 {
+                            GREEN
+                        } else if pct > 1.0 {
+                            RED
+                        } else {
+                            DIM
+                        };
+                        let sig = if analysis.significant { "*" } else { "" };
+                        (format!("{pct:+.1}%{sig}"), color)
+                    } else {
+                        (String::new(), DIM)
+                    };
+
                     Row {
                         name: bench.name.clone(),
                         mean: format_ns(bench.summary.mean),
                         stddev: format!("±{}", format_ns(bench.summary.std_dev())),
                         throughput: tp_str,
                         cpu: cpu_str,
+                        vs_base,
+                        vs_base_color,
                         is_fastest,
                     }
                 })
@@ -237,27 +286,55 @@ impl SuiteResult {
             } else {
                 0
             };
+            let vs_w = if has_comparisons {
+                rows.iter()
+                    .map(|r| r.vs_base.len())
+                    .max()
+                    .unwrap_or(8)
+                    .max(8) // "vs base"
+            } else {
+                0
+            };
 
-            // Build table
-            // Top border
-            let mut top = format!("  ┌{}", "─".repeat(name_w + 2));
-            let mut hdr = format!("  │ {:<name_w$}", "benchmark");
-            let mut mid = format!("  ├{}", "─".repeat(name_w + 2));
-            top.push_str(&format!("┬{}", "─".repeat(mean_w + 2)));
+            // Helper to build a table line with consistent column structure
+            let add_col = |line: &mut String, width: usize, corner: char| {
+                line.push_str(&format!("{corner}{}", "─".repeat(width + 2)));
+            };
+
+            // Build table borders and header
+            let mut top = String::from("  ");
+            let mut hdr = String::from("  ");
+            let mut mid = String::from("  ");
+
+            // Name column
+            add_col(&mut top, name_w, '┌');
+            hdr.push_str(&format!("│ {:<name_w$}", "benchmark"));
+            add_col(&mut mid, name_w, '├');
+
+            // Mean column
+            add_col(&mut top, mean_w, '┬');
             hdr.push_str(&format!(" │ {:>mean_w$}", "mean"));
-            mid.push_str(&format!("┼{}", "─".repeat(mean_w + 2)));
-            top.push_str(&format!("┬{}", "─".repeat(sd_w + 2)));
+            add_col(&mut mid, mean_w, '┼');
+
+            // StdDev column
+            add_col(&mut top, sd_w, '┬');
             hdr.push_str(&format!(" │ {:>sd_w$}", "stddev"));
-            mid.push_str(&format!("┼{}", "─".repeat(sd_w + 2)));
+            add_col(&mut mid, sd_w, '┼');
+
             if has_throughput {
-                top.push_str(&format!("┬{}", "─".repeat(tp_w + 2)));
+                add_col(&mut top, tp_w, '┬');
                 hdr.push_str(&format!(" │ {:>tp_w$}", "throughput"));
-                mid.push_str(&format!("┼{}", "─".repeat(tp_w + 2)));
+                add_col(&mut mid, tp_w, '┼');
+            }
+            if has_comparisons {
+                add_col(&mut top, vs_w, '┬');
+                hdr.push_str(&format!(" │ {:>vs_w$}", "vs base"));
+                add_col(&mut mid, vs_w, '┼');
             }
             if has_cpu {
-                top.push_str(&format!("┬{}", "─".repeat(cpu_w + 2)));
+                add_col(&mut top, cpu_w, '┬');
                 hdr.push_str(&format!(" │ {:>cpu_w$}", "cpu"));
-                mid.push_str(&format!("┼{}", "─".repeat(cpu_w + 2)));
+                add_col(&mut mid, cpu_w, '┼');
             }
             top.push('┐');
             hdr.push_str(" │");
@@ -283,8 +360,13 @@ impl SuiteResult {
                         row.throughput,
                     ));
                 }
+                if has_comparisons {
+                    let vc = row.vs_base_color;
+                    let vr = if vc.is_empty() { "" } else { RESET };
+                    line.push_str(&format!(" {DIM}│{RESET} {vc}{:>vs_w$}{vr}", row.vs_base,));
+                }
                 if has_cpu {
-                    line.push_str(&format!(" {DIM}│{RESET} {DIM}{:>cpu_w$}{RESET}", row.cpu,));
+                    line.push_str(&format!(" {DIM}│{RESET} {DIM}{:>cpu_w$}{RESET}", row.cpu));
                 }
                 line.push_str(&format!(" {DIM}│{RESET}"));
 
@@ -292,11 +374,15 @@ impl SuiteResult {
             }
 
             // Bottom border
-            let mut bot = format!("  └{}", "─".repeat(name_w + 2));
+            let mut bot = String::from("  └");
+            bot.push_str(&format!("{}", "─".repeat(name_w + 2)));
             bot.push_str(&format!("┴{}", "─".repeat(mean_w + 2)));
             bot.push_str(&format!("┴{}", "─".repeat(sd_w + 2)));
             if has_throughput {
                 bot.push_str(&format!("┴{}", "─".repeat(tp_w + 2)));
+            }
+            if has_comparisons {
+                bot.push_str(&format!("┴{}", "─".repeat(vs_w + 2)));
             }
             if has_cpu {
                 bot.push_str(&format!("┴{}", "─".repeat(cpu_w + 2)));
@@ -304,7 +390,7 @@ impl SuiteResult {
             bot.push('┘');
             eprintln!("{DIM}{bot}{RESET}");
 
-            // Paired comparisons
+            // Detailed paired comparisons (below the table)
             for (base, cand, analysis) in &comp.analyses {
                 let (color, arrow) = if analysis.pct_change < -1.0 {
                     (GREEN, "faster")
@@ -954,6 +1040,7 @@ mod tests {
                 cache_firewall_bytes: 0,
                 baseline_only: false,
                 throughput_unit: None,
+                sort_by_speed: false,
             }],
             standalones: vec![],
             total_time: Duration::from_secs(5),

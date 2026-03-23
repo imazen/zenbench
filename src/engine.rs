@@ -341,6 +341,7 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
         cache_firewall_bytes: config.cache_firewall_bytes,
         baseline_only,
         throughput_unit: group.throughput_unit.clone(),
+        sort_by_speed: config.sort_by_speed,
     }
 }
 
