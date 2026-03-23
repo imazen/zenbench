@@ -304,9 +304,19 @@ impl SuiteResult {
                     })
                     .unwrap_or_default();
 
-                // vs baseline column as [lo  pct  hi]% range
+                // vs baseline column:
+                // - baseline row: show its own [lo mean hi] absolute range
+                // - other rows: show [lo pct hi]% relative to baseline mean
+                //
+                // The percentages use baseline.mean as denominator. This is
+                // valid because the paired analysis cancels correlated noise:
+                // each round computes (candidate - baseline) before aggregation,
+                // so baseline variance doesn't inflate the difference CI.
                 let (vs_base, vs_base_color) = if bench.name == baseline_name {
-                    ("baseline".to_string(), DIM)
+                    let ci_half = bench.summary.std_err() * 1.96;
+                    let lo = (bench.summary.mean - ci_half).max(0.0);
+                    let hi = bench.summary.mean + ci_half;
+                    (format_ns_range(lo, bench.summary.mean, hi), DIM)
                 } else if let Some(analysis) = baseline_analyses.get(bench.name.as_str()) {
                     let base_mean = analysis.baseline.mean;
                     if base_mean.abs() > f64::EPSILON {
