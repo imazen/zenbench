@@ -285,6 +285,7 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
             summary,
             cpu_summary,
             tags: bench.tags.clone(),
+            subgroup: bench.subgroup.clone(),
         });
     }
 
@@ -353,6 +354,7 @@ fn run_standalone(
         summary,
         cpu_summary,
         tags: bench.tags.clone(),
+        subgroup: bench.subgroup.clone(),
     }
 }
 

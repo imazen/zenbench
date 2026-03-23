@@ -143,6 +143,7 @@ impl Suite {
         self.standalones.push(Benchmark {
             name: name.into(),
             tags: Vec::new(),
+            subgroup: None,
             func: BenchFn::new(f),
         });
     }
@@ -162,6 +163,8 @@ pub struct BenchGroup {
     pub(crate) throughput: Option<Throughput>,
     pub(crate) throughput_unit: Option<String>,
     pub(crate) baseline_name: Option<String>,
+    /// Current subgroup label, applied to subsequent benchmarks.
+    current_subgroup: Option<String>,
 }
 
 impl BenchGroup {
@@ -173,6 +176,7 @@ impl BenchGroup {
             throughput: None,
             throughput_unit: None,
             baseline_name: None,
+            current_subgroup: None,
         }
     }
 
@@ -184,6 +188,7 @@ impl BenchGroup {
         self.benchmarks.push(Benchmark {
             name: name.into(),
             tags: Vec::new(),
+            subgroup: self.current_subgroup.clone(),
             func: BenchFn::new(f),
         });
     }
@@ -202,6 +207,7 @@ impl BenchGroup {
                 .iter()
                 .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
                 .collect(),
+            subgroup: self.current_subgroup.clone(),
             func: BenchFn::new(f),
         });
     }
@@ -212,6 +218,23 @@ impl BenchGroup {
     /// so throughput is set at the group level.
     pub fn throughput(&mut self, throughput: Throughput) -> &mut Self {
         self.throughput = Some(throughput);
+        self
+    }
+
+    /// Set a visual subgroup label for subsequent benchmarks.
+    ///
+    /// Subgroups are display-only — benchmarks are still interleaved and
+    /// compared across subgroups within the same comparison group. The label
+    /// appears as a section header in the table and bar chart.
+    ///
+    /// ```rust,ignore
+    /// group.subgroup("Ok path");
+    /// group.bench("no_error", |b| { /* ... */ });
+    /// group.subgroup("Error path");
+    /// group.bench("with_backtrace", |b| { /* ... */ });
+    /// ```
+    pub fn subgroup(&mut self, label: impl Into<String>) -> &mut Self {
+        self.current_subgroup = Some(label.into());
         self
     }
 
@@ -365,6 +388,7 @@ impl GroupConfig {
 pub struct Benchmark {
     pub(crate) name: String,
     pub(crate) tags: Vec<(String, String)>,
+    pub(crate) subgroup: Option<String>,
     pub(crate) func: BenchFn,
 }
 

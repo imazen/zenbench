@@ -37,6 +37,9 @@ pub struct BenchmarkResult {
     /// Key-value tags for multi-dimensional reporting.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<(String, String)>,
+    /// Visual subgroup label (display-only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subgroup: Option<String>,
 }
 
 impl BenchmarkResult {
@@ -239,7 +242,8 @@ impl SuiteResult {
                 vs_base: String, // formatted % change
                 vs_base_color: &'static str,
                 is_fastest: bool,
-                markers: String, // e.g. "[1][2]"
+                markers: String,          // e.g. "[1][2]"
+                subgroup: Option<String>, // visual label
             }
 
             // Check for group-level issues first
@@ -321,6 +325,7 @@ impl SuiteResult {
                     vs_base_color,
                     is_fastest,
                     markers,
+                    subgroup: bench.subgroup.clone(),
                 });
             }
 
@@ -426,8 +431,42 @@ impl SuiteResult {
             eprintln!("{DIM}{hdr}{RESET}");
             eprintln!("{DIM}{mid}{RESET}");
 
+            // Compute total inner width for subgroup separator
+            let has_subgroups = rows.iter().any(|r| r.subgroup.is_some());
+            let table_inner_w = name_w
+                + 2
+                + if has_comparisons { vs_w + 3 } else { 0 }
+                + mean_w
+                + 3
+                + sd_w
+                + 3
+                + if has_throughput { tp_w + 3 } else { 0 }
+                + if has_cpu { cpu_w + 3 } else { 0 }
+                - 1; // last column has no trailing separator
+
             // Data rows
+            let mut current_subgroup: Option<&str> = None;
             for row in &rows {
+                // Subgroup separator
+                if has_subgroups {
+                    let row_sg = row.subgroup.as_deref();
+                    if row_sg != current_subgroup {
+                        current_subgroup = row_sg;
+                        if let Some(label) = row_sg {
+                            // Draw a mid-table separator with the subgroup name
+                            let label_len = label.len();
+                            let pad = if table_inner_w > label_len + 4 {
+                                table_inner_w - label_len - 3
+                            } else {
+                                1
+                            };
+                            eprintln!(
+                                "  {DIM}├─ {RESET}{BOLD}{label}{RESET}{DIM} {}{RESET}",
+                                "─".repeat(pad) + "┤",
+                            );
+                        }
+                    }
+                }
                 let name_color = if row.is_fastest { GREEN } else { "" };
                 let name_reset = if row.is_fastest { RESET } else { "" };
 
@@ -1189,6 +1228,7 @@ mod tests {
                 ("library".to_string(), "zenflate".to_string()),
                 ("level".to_string(), "L6".to_string()),
             ],
+            subgroup: None,
         };
         assert_eq!(br.tag("library"), Some("zenflate"));
         assert_eq!(br.tag("level"), Some("L6"));
@@ -1209,12 +1249,14 @@ mod tests {
                         summary: make_summary(5_000_000.0), // 5ms
                         cpu_summary: None,
                         tags: vec![("library".to_string(), "zenflate".to_string())],
+                        subgroup: None,
                     },
                     BenchmarkResult {
                         name: "libdeflate".to_string(),
                         summary: make_summary(10_000_000.0), // 10ms
                         cpu_summary: None,
                         tags: vec![("library".to_string(), "libdeflate".to_string())],
+                        subgroup: None,
                     },
                 ],
                 analyses: vec![],
