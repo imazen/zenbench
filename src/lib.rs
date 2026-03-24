@@ -11,9 +11,11 @@ pub mod checks;
 mod ci;
 pub mod daemon;
 mod engine;
+mod format;
 mod gate;
 pub mod mcp;
 pub mod platform;
+mod report;
 mod results;
 mod stats;
 
