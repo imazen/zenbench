@@ -1,8 +1,14 @@
-// Without precise-timing, no unsafe is permitted anywhere.
-// With precise-timing, unsafe is denied (errors) but the timing module
-// can override with #[allow(unsafe_code)] for TSC reads and asm fences.
-#![cfg_attr(not(feature = "precise-timing"), forbid(unsafe_code))]
-#![cfg_attr(feature = "precise-timing", deny(unsafe_code))]
+// Without precise-timing or alloc-profiling, no unsafe is permitted anywhere.
+// With either feature, unsafe is denied (errors) but the timing/alloc modules
+// can override with #[allow(unsafe_code)] for TSC reads, asm fences, and GlobalAlloc.
+#![cfg_attr(
+    not(any(feature = "precise-timing", feature = "alloc-profiling")),
+    forbid(unsafe_code)
+)]
+#![cfg_attr(
+    any(feature = "precise-timing", feature = "alloc-profiling"),
+    deny(unsafe_code)
+)]
 #![doc = include_str!("../README.md")]
 
 //! # Zenbench
@@ -25,8 +31,12 @@ mod results;
 mod stats;
 #[cfg(feature = "precise-timing")]
 mod timing;
+#[cfg(feature = "alloc-profiling")]
+mod alloc;
 
 pub use bench::{BenchGroup, Bencher, GroupConfig, Suite, Throughput};
+#[cfg(feature = "alloc-profiling")]
+pub use alloc::{AllocProfiler, AllocStats};
 
 /// Create an Engine from a Suite (used by criterion_compat macros).
 #[doc(hidden)]

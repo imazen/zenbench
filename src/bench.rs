@@ -657,6 +657,9 @@ pub struct Bencher {
     /// Always present in the struct for simpler code paths — read only with the feature.
     #[cfg_attr(not(feature = "precise-timing"), allow(dead_code))]
     pub(crate) tsc_ticks_per_ns: Option<f64>,
+    /// Allocation delta for this sample (when alloc-profiling is active).
+    #[cfg(feature = "alloc-profiling")]
+    pub(crate) alloc_delta: Option<crate::alloc::AllocSnapshot>,
 }
 
 impl Bencher {
@@ -666,6 +669,8 @@ impl Bencher {
             elapsed_ns: 0,
             cpu_ns: 0,
             tsc_ticks_per_ns: None,
+            #[cfg(feature = "alloc-profiling")]
+            alloc_delta: None,
         }
     }
 
@@ -675,6 +680,8 @@ impl Bencher {
             elapsed_ns: 0,
             cpu_ns: 0,
             tsc_ticks_per_ns,
+            #[cfg(feature = "alloc-profiling")]
+            alloc_delta: None,
         }
     }
 
@@ -688,6 +695,9 @@ impl Bencher {
     /// [`iter_deferred_drop`](Self::iter_deferred_drop) or `with_input().run()` instead.
     #[inline(never)]
     pub fn iter<O, F: FnMut() -> O>(&mut self, mut f: F) {
+        #[cfg(feature = "alloc-profiling")]
+        let alloc_before = crate::alloc::AllocSnapshot::now();
+
         #[cfg(feature = "cpu-time")]
         let cpu_start = cpu_time::ThreadTime::now();
 
@@ -726,6 +736,11 @@ impl Bencher {
         {
             self.cpu_ns = cpu_start.elapsed().as_nanos() as u64;
         }
+
+        #[cfg(feature = "alloc-profiling")]
+        {
+            self.alloc_delta = Some(crate::alloc::AllocSnapshot::now().delta(alloc_before));
+        }
     }
 
     /// Measure a function, deferring drop of outputs until after timing.
@@ -750,6 +765,9 @@ impl Bencher {
     #[inline(never)]
     pub fn iter_deferred_drop<O, F: FnMut() -> O>(&mut self, mut f: F) {
         let mut outputs: Vec<O> = Vec::with_capacity(self.iterations);
+
+        #[cfg(feature = "alloc-profiling")]
+        let alloc_before = crate::alloc::AllocSnapshot::now();
 
         #[cfg(feature = "cpu-time")]
         let cpu_start = cpu_time::ThreadTime::now();
@@ -786,6 +804,11 @@ impl Bencher {
         #[cfg(feature = "cpu-time")]
         {
             self.cpu_ns = cpu_start.elapsed().as_nanos() as u64;
+        }
+
+        #[cfg(feature = "alloc-profiling")]
+        {
+            self.alloc_delta = Some(crate::alloc::AllocSnapshot::now().delta(alloc_before));
         }
 
         // Prevent the compiler from seeing the writes as dead stores.

@@ -10,7 +10,7 @@ keywords = ["benchmark", "performance", "profiling", "testing"]
 categories = ["development-tools", "development-tools::profiling"]
 
 [features]
-default = ["cli", "daemon", "precise-timing"]
+default = ["cli", "daemon", "precise-timing", "alloc-profiling"]
 cli = ["dep:clap"]
 daemon = []
 cpu-time = ["dep:cpu-time"]
@@ -18,6 +18,10 @@ cpu-time = ["dep:cpu-time"]
 # and asm fences for stronger dead-code-elimination prevention.
 # Requires unsafe code in the timing module only.
 precise-timing = []
+# Enables AllocProfiler for tracking heap allocations per benchmark.
+# Install as #[global_allocator] in your bench binary to activate.
+# Requires unsafe code in the alloc module only.
+alloc-profiling = []
 # MCP server support (future)
 # mcp = []
 

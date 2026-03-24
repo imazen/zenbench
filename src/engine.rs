@@ -300,6 +300,11 @@ fn run_comparison_group(
     // CPU time samples (parallel to wall time samples)
     let mut cpu_samples: Vec<Vec<u64>> = vec![Vec::with_capacity(config.max_rounds); n_benchmarks];
     let mut iters_per_round: Vec<usize> = Vec::with_capacity(config.max_rounds);
+
+    // Allocation tracking: accumulate totals per benchmark
+    #[cfg(feature = "alloc-profiling")]
+    let mut alloc_totals: Vec<(u64, u64, u64, u64, u64, u64)> =
+        vec![(0, 0, 0, 0, 0, 0); n_benchmarks]; // (allocs, deallocs, reallocs, bytes_alloc, bytes_dealloc, iterations)
     let mut rng = Xoshiro256SS::seed(0xBE0C_0BAD_0000_0001);
 
     // Cache firewall buffer
@@ -375,6 +380,18 @@ fn run_comparison_group(
             let compensated = bencher.elapsed_ns.saturating_sub(overhead_total).max(1);
             samples[bench_idx].push(compensated);
             cpu_samples[bench_idx].push(bencher.cpu_ns);
+
+            // Accumulate allocation stats
+            #[cfg(feature = "alloc-profiling")]
+            if let Some(delta) = bencher.alloc_delta {
+                let t = &mut alloc_totals[bench_idx];
+                t.0 += delta.allocs;
+                t.1 += delta.deallocs;
+                t.2 += delta.reallocs;
+                t.3 += delta.bytes_allocated;
+                t.4 += delta.bytes_deallocated;
+                t.5 += round_iters as u64;
+            }
         }
 
         measurement_time += round_start.elapsed();
@@ -575,6 +592,17 @@ fn run_comparison_group(
             None
         };
 
+        // Compute allocation stats if profiling is active
+        #[cfg(feature = "alloc-profiling")]
+        let alloc_stats = {
+            let t = &alloc_totals[i];
+            if crate::alloc::is_active() && t.5 > 0 {
+                Some(crate::alloc::AllocStats::from_totals(t.0, t.1, t.2, t.3, t.4, t.5))
+            } else {
+                None
+            }
+        };
+
         individual_results.push(BenchmarkResult {
             name: bench.name.clone(),
             summary,
@@ -582,6 +610,8 @@ fn run_comparison_group(
             tags: bench.tags.clone(),
             subgroup: bench.subgroup.clone(),
             cold_start_ns: cold_starts[i] as f64,
+            #[cfg(feature = "alloc-profiling")]
+            alloc_stats,
         });
     }
 
@@ -661,6 +691,8 @@ fn run_standalone(
         tags: bench.tags.clone(),
         subgroup: bench.subgroup.clone(),
         cold_start_ns: _cold_start_ns as f64,
+        #[cfg(feature = "alloc-profiling")]
+        alloc_stats: None, // Standalone benchmarks don't track allocs yet
     }
 }
 

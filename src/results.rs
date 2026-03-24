@@ -46,6 +46,11 @@ pub struct BenchmarkResult {
     /// This is the coldest measurement we can capture without process isolation.
     #[serde(default)]
     pub cold_start_ns: f64,
+    /// Allocation statistics (when `alloc-profiling` feature is active and
+    /// `AllocProfiler` is installed as the global allocator).
+    #[cfg(feature = "alloc-profiling")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alloc_stats: Option<crate::alloc::AllocStats>,
 }
 
 impl BenchmarkResult {
@@ -230,6 +235,16 @@ impl SuiteResult {
                 }
                 for (k, v) in &bench.tags {
                     meta.push(format!("{k}={}", llm_quote(v)));
+                }
+
+                // Allocation stats (when profiler is active)
+                #[cfg(feature = "alloc-profiling")]
+                if let Some(alloc) = &bench.alloc_stats {
+                    meta.push(format!("allocs/iter={:.1}", alloc.allocs_per_iter));
+                    meta.push(format!("bytes/iter={:.0}", alloc.bytes_per_iter));
+                    if alloc.reallocs_per_iter > 0.0 {
+                        meta.push(format!("reallocs/iter={:.1}", alloc.reallocs_per_iter));
+                    }
                 }
 
                 // Join sections with " | " for visual grouping
@@ -458,11 +473,14 @@ impl SuiteResult {
         let mut out = String::new();
 
         // Header
-        out.push_str(
-            "group,benchmark,subgroup,mean_ns,std_dev_ns,median_ns,mad_ns,min_ns,max_ns,n,cv,\
+        let mut header = "group,benchmark,subgroup,mean_ns,std_dev_ns,median_ns,mad_ns,min_ns,max_ns,n,cv,\
              cold_start_ns,cpu_mean_ns,cpu_efficiency,throughput_value,throughput_unit,\
-             vs_base_pct,vs_base_ci_lo_pct,vs_base_ci_hi_pct,significant,cohens_d,wilcoxon_p,drift_r\n",
-        );
+             vs_base_pct,vs_base_ci_lo_pct,vs_base_ci_hi_pct,significant,cohens_d,wilcoxon_p,drift_r"
+            .to_string();
+        #[cfg(feature = "alloc-profiling")]
+        header.push_str(",allocs_per_iter,deallocs_per_iter,reallocs_per_iter,bytes_per_iter");
+        header.push('\n');
+        out.push_str(&header);
 
         // Comparison groups
         for comp in &self.comparisons {
@@ -566,7 +584,7 @@ impl SuiteResult {
                     };
 
                 out.push_str(&format!(
-                    "{},{},{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{},{:.4},{},{},{},{},{},{},{},{},{},{},{},{}\n",
+                    "{},{},{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{},{:.4},{},{},{},{},{},{},{},{},{},{},{},{}",
                     csv_escape(&comp.group_name),
                     csv_escape(&bench.name),
                     subgroup,
@@ -591,6 +609,20 @@ impl SuiteResult {
                     wilcoxon_p,
                     drift_r,
                 ));
+                #[cfg(feature = "alloc-profiling")]
+                if let Some(alloc) = &bench.alloc_stats {
+                    out.push_str(&format!(
+                        ",{:.1},{:.1},{:.1},{:.0}",
+                        alloc.allocs_per_iter,
+                        alloc.deallocs_per_iter,
+                        alloc.reallocs_per_iter,
+                        alloc.bytes_per_iter,
+                    ));
+                } else {
+                    #[cfg(feature = "alloc-profiling")]
+                    out.push_str(",,,,");
+                }
+                out.push('\n');
             }
         }
 
@@ -737,6 +769,8 @@ mod tests {
             ],
             subgroup: None,
             cold_start_ns: 0.0,
+            #[cfg(feature = "alloc-profiling")]
+            alloc_stats: None,
         };
         assert_eq!(br.tag("library"), Some("zenflate"));
         assert_eq!(br.tag("level"), Some("L6"));
@@ -759,6 +793,8 @@ mod tests {
                         tags: vec![("library".to_string(), "zenflate".to_string())],
                         subgroup: None,
                         cold_start_ns: 0.0,
+                        #[cfg(feature = "alloc-profiling")]
+                        alloc_stats: None,
                     },
                     BenchmarkResult {
                         name: "libdeflate".to_string(),
@@ -767,6 +803,8 @@ mod tests {
                         tags: vec![("library".to_string(), "libdeflate".to_string())],
                         subgroup: None,
                         cold_start_ns: 0.0,
+                        #[cfg(feature = "alloc-profiling")]
+                        alloc_stats: None,
                     },
                 ],
                 analyses: vec![],
@@ -871,6 +909,8 @@ mod tests {
                         tags: vec![],
                         subgroup: None,
                         cold_start_ns: 12_500.0, // 12.5µs cold start
+                        #[cfg(feature = "alloc-profiling")]
+                        alloc_stats: None,
                     },
                     BenchmarkResult {
                         name: "libdeflate".to_string(),
@@ -879,6 +919,8 @@ mod tests {
                         tags: vec![],
                         subgroup: None,
                         cold_start_ns: 0.0,
+                        #[cfg(feature = "alloc-profiling")]
+                        alloc_stats: None,
                     },
                 ],
                 analyses: vec![("zenflate".to_string(), "libdeflate".to_string(), analysis)],
@@ -900,6 +942,8 @@ mod tests {
                 tags: vec![],
                 subgroup: None,
                 cold_start_ns: 5_000.0,
+                #[cfg(feature = "alloc-profiling")]
+                alloc_stats: None,
             }],
             total_time: Duration::from_secs(3),
             gate_waits: 2,
