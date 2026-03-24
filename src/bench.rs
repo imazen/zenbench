@@ -538,6 +538,17 @@ pub struct GroupConfig {
     /// enough that context switches typically fall between samples, not
     /// within them.
     pub sample_target_ns: u64,
+    /// Stack alignment jitter (default: true when `precise-timing` enabled).
+    ///
+    /// Shifts the stack pointer by a random offset (0..4096 bytes, 16-byte
+    /// aligned) before each sample. This varies cache-line alignment of
+    /// stack variables across samples, defeating systematic bias from
+    /// lucky/unlucky alignment (Mytkowicz et al., ASPLOS 2009).
+    ///
+    /// Adds ~1-2µs overhead per sample from the recursive trampoline.
+    /// Negligible for samples > 10µs, but disable for sub-µs measurements
+    /// where the trampoline overhead would dominate.
+    pub stack_jitter: bool,
 }
 
 impl Default for GroupConfig {
@@ -561,6 +572,7 @@ impl Default for GroupConfig {
             bootstrap_resamples: 10_000,
             cold_start: false,
             sample_target_ns: 1_000_000, // 1ms — short enough to dodge context switches
+            stack_jitter: cfg!(feature = "precise-timing"), // on by default with precise-timing
         }
     }
 }
@@ -660,6 +672,16 @@ impl GroupConfig {
     /// Higher = better timer overhead amortization (good for sub-ns benchmarks).
     pub fn sample_target_ns(&mut self, ns: u64) -> &mut Self {
         self.sample_target_ns = ns.max(1_000); // minimum 1µs
+        self
+    }
+
+    /// Enable or disable stack alignment jitter (default: true with precise-timing).
+    ///
+    /// Randomizes stack pointer alignment before each sample to defeat
+    /// cache-line alignment bias. Disable for sub-µs benchmarks where
+    /// the ~1-2µs trampoline overhead would dominate.
+    pub fn stack_jitter(&mut self, enabled: bool) -> &mut Self {
+        self.stack_jitter = enabled;
         self
     }
 }

@@ -376,9 +376,33 @@ fn run_comparison_group(
                 fw.spoil();
             }
 
-            // Run the benchmark
+            // Stack alignment jitter: shift stack by random offset before
+            // each sample to defeat cache-line alignment bias.
+            // The offset varies per benchmark per round.
+            #[cfg(feature = "precise-timing")]
+            let stack_offset = if config.stack_jitter {
+                (rng.next_u64() as usize) % 4096
+            } else {
+                0
+            };
+
+            // Run the benchmark (with optional stack alignment jitter)
             let bench = &mut group.benchmarks[bench_idx];
             let mut bencher = Bencher::new_with_tsc(round_iters, tsc_ticks_per_ns);
+
+            #[cfg(feature = "precise-timing")]
+            {
+                if stack_offset > 0 {
+                    // Burn stack space via recursive trampoline, then call benchmark.
+                    // The trampoline is safe — just recursive calls with padded frames.
+                    let depth = (stack_offset & !0xF) / 64;
+                    crate::timing::stack_jitter_call(&mut bench.func, &mut bencher, depth);
+                } else {
+                    bench.func.call(&mut bencher);
+                }
+            }
+
+            #[cfg(not(feature = "precise-timing"))]
             bench.func.call(&mut bencher);
 
             // Subtract loop overhead (black_box + iteration control flow).

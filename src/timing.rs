@@ -318,6 +318,39 @@ impl TscTimer {
     }
 }
 
+// ── Stack alignment jitter ───────────────────────────────────────────────
+
+/// Call a benchmark function with stack alignment jitter.
+///
+/// Burns `depth` stack frames (each ~64 bytes) via recursion before calling
+/// the benchmark. This shifts the stack pointer by approximately `depth × 64`
+/// bytes, varying cache-line alignment of stack variables across samples.
+/// Defeats systematic bias from lucky/unlucky alignment (Mytkowicz et al.,
+/// ASPLOS 2009).
+///
+/// Fully safe — uses recursive calls with padded frames. The `black_box`
+/// on the pad array prevents the optimizer from collapsing frames or
+/// applying tail-call optimization.
+///
+/// Overhead: ~1-2ns per recursion level. With typical depths of 0-64
+/// (for 0-4096 byte offsets), overhead is 0-128ns — negligible for
+/// samples > 10µs.
+#[inline(never)]
+pub fn stack_jitter_call(
+    func: &mut crate::bench::BenchFn,
+    bencher: &mut crate::bench::Bencher,
+    depth: usize,
+) {
+    // Pad: 64 bytes of stack space per frame. black_box prevents
+    // the compiler from optimizing away the allocation or merging frames.
+    let _pad: [u8; 64] = std::hint::black_box([0u8; 64]);
+    if depth == 0 {
+        func.call(bencher);
+    } else {
+        stack_jitter_call(func, bencher, depth - 1);
+    }
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -358,6 +391,51 @@ mod tests {
         // that's not a test failure — just informational.
         let invariant = tsc_is_invariant();
         eprintln!("TSC invariant: {invariant}");
+    }
+
+    #[test]
+    fn stack_jitter_call_works() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        static CALLED: AtomicBool = AtomicBool::new(false);
+
+        let mut func = crate::bench::BenchFn::new(|b: &mut crate::bench::Bencher| {
+            CALLED.store(true, Ordering::Relaxed);
+            b.iter(|| std::hint::black_box(42u64));
+        });
+        let mut bencher = crate::bench::Bencher::new(10);
+
+        // Depth 0 — direct call
+        CALLED.store(false, Ordering::Relaxed);
+        stack_jitter_call(&mut func, &mut bencher, 0);
+        assert!(CALLED.load(Ordering::Relaxed), "depth=0 should call func");
+
+        // Depth 10 — ~640 bytes of stack shift
+        CALLED.store(false, Ordering::Relaxed);
+        stack_jitter_call(&mut func, &mut bencher, 10);
+        assert!(CALLED.load(Ordering::Relaxed), "depth=10 should call func");
+
+        // Depth 50 — ~3200 bytes of stack shift
+        CALLED.store(false, Ordering::Relaxed);
+        stack_jitter_call(&mut func, &mut bencher, 50);
+        assert!(CALLED.load(Ordering::Relaxed), "depth=50 should call func");
+    }
+
+    #[test]
+    fn stack_jitter_different_depths_produce_results() {
+        // Run a simple benchmark at different jitter depths and verify
+        // all produce valid (positive) elapsed times
+        for depth in [0, 5, 20, 50] {
+            let mut func = crate::bench::BenchFn::new(|b: &mut crate::bench::Bencher| {
+                b.iter(|| std::hint::black_box(42u64));
+            });
+            let mut bencher = crate::bench::Bencher::new(100);
+            stack_jitter_call(&mut func, &mut bencher, depth);
+            assert!(
+                bencher.elapsed_ns > 0,
+                "depth={depth} should produce positive elapsed_ns"
+            );
+        }
     }
 
     #[test]
