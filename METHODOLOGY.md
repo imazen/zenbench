@@ -205,19 +205,235 @@ valuable remaining gaps.
 
 ### Criterion.rs
 
-Criterion uses bootstrap resampling for CI, modified Tukey's method for
-outlier classification, and a noise threshold for filtering negligible
-changes.
+Criterion (0.8.x) is the most widely used Rust benchmarking library.
+Its statistics are the most sophisticated of the established tools, but
+its execution model has fundamental limitations that interleaving
+addresses.
 
-**What we took**: Bootstrap CI (10K resamples), Tukey's IQR filtering.
+**Statistics:**
 
-**Where we diverge**: Criterion keeps outliers in the analysis data and
-just warns about them. We remove IQR outliers from paired differences
-before computing CI. Our approach gives tighter intervals but could mask
-genuinely bimodal performance (e.g., a function that's fast 90% of the
-time and slow 10% due to a cold cache path). If your function has
-legitimate bimodal behavior, our CI is optimistic. The raw data in JSON
-output preserves all measurements including outliers.
+- **Bootstrap CI**: 100K resamples using `oorandom::Rand64` (seeded from
+  system time, non-reproducible). Percentile method — takes 2.5th and
+  97.5th percentiles of the bootstrap distribution. CIs are computed on
+  mean, median, stddev, MAD, and slope (in Linear sampling mode).
+- **Slope regression**: In Linear mode, iteration counts are
+  `[d, 2d, 3d, ..., 100d]`, enabling through-origin OLS regression
+  `time = slope × iterations`. The slope separates per-iteration time
+  from constant overhead (function call, timer, black_box). This is
+  criterion's strongest statistical feature — it answers "what does each
+  iteration cost?" rather than "what does each iteration plus overhead
+  cost?"
+- **Comparison**: Two-stage gate. First, Welch's t-test via mixed
+  bootstrap (pool both samples under H0, bootstrap the t-statistic,
+  compute p-value vs significance_level=0.05). Second, a ±1% noise
+  threshold — both gates must pass for a "regression/improvement"
+  verdict. This dual-gate design prevents both false positives (noise
+  threshold) and false negatives (statistical test).
+- **Two-sample bootstrap**: For relative change, uses a sqrt(N) chunking
+  optimization — one resample of A paired with sqrt(N) resamples of B
+  per chunk. Reduces total draws but introduces within-chunk correlation.
+- **Outlier classification**: Tukey's fences with 5 categories (low
+  severe, low mild, not an outlier, high mild, high severe). Mild at
+  1.5×IQR, severe at 3×IQR. **Outliers are reported but NOT removed** —
+  all statistics run on the full sample. This is more conservative than
+  our approach but means a single extreme outlier can dominate the mean.
+- **Effect size**: None. Reports percentage change with CI, but no
+  standardized metric (Cohen's d or similar).
+- **Drift detection**: None.
+- **Distribution fitting**: None. All inference is nonparametric via
+  bootstrap. KDE (Gaussian kernel, Silverman bandwidth) exists for
+  plotting only.
+
+**Execution model:**
+
+- 3-second warmup (doubling iterations).
+- Linear or Flat sampling mode, auto-selected. Linear runs 100 samples
+  with iteration counts `[d, 2d, ..., 100d]` for OLS. Flat uses the
+  same iteration count for all samples (loses the slope estimate).
+- 5-second measurement time (default). Fixed sample count (100).
+- No interleaving. Samples are collected sequentially in one batch.
+- Stack alignment jitter (0.8.x): `alloca` shifts the stack by
+  `i % page_size` per sample, varying cache line alignment.
+- Quick mode: doubling strategy with stdev convergence check. Produces
+  only 2 data points — fast but statistically weak.
+
+**What we took**: Bootstrap CI (our 10K vs their 100K), Tukey's IQR
+method, the general approach of computing CIs on differences rather than
+individual benchmarks.
+
+**Where we diverge**:
+
+| Aspect | Criterion | Zenbench |
+|---|---|---|
+| Bootstrap resamples | 100K, non-reproducible | 10K, deterministic seed |
+| CI method | Percentile | Percentile (same) |
+| Outlier handling | Classify but keep | IQR-remove from paired diffs |
+| Comparison test | Welch t-test (parametric) | Wilcoxon signed-rank (non-parametric) |
+| Practical significance | ±1% noise threshold | None (CI-only) |
+| Effect size | None | Cohen's d |
+| Drift detection | None | Spearman rank correlation |
+| Slope regression | OLS through origin (Linear mode) | None |
+| Interleaving | None | Always-on shuffle |
+| Resource gating | None | CPU/RAM/temp/process |
+| Convergence | Fixed 100 samples | Adaptive (CI width + stability) |
+| Stack jitter | alloca per sample | ±20% iteration jitter |
+
+**Key differences explained**:
+
+- *Outlier removal vs preservation*: Criterion keeps outliers so its
+  statistics reflect everything that happened. We remove IQR outliers
+  from paired differences before computing CI. Our approach gives tighter
+  intervals but could mask genuinely bimodal performance (a function
+  that's fast 90% of the time and slow 10% due to a cold cache path).
+  The raw data in JSON output preserves all measurements including
+  outliers.
+- *No interleaving is criterion's biggest weakness*: If system load
+  changes during measurement, earlier samples differ systematically from
+  later ones. Linear mode is especially vulnerable — later samples run
+  more iterations and are weighted differently in the regression.
+- *Slope regression is criterion's biggest strength*: See the "Gaps"
+  section below for why this matters and how we might address it.
+
+### Divan
+
+Divan (0.1.x) prioritizes ergonomics and low overhead over statistical
+depth. It's the fastest benchmarking framework to set up and the
+lightest at runtime.
+
+**Statistics:**
+
+Divan's statistics are minimal by design. The `StatsSet` struct has four
+fields: `fastest` (min), `slowest` (max), `median`, and `mean`. That is
+the entire statistical model. There is:
+
+- No confidence intervals (no bootstrap, no t-distribution, nothing)
+- No variance or standard deviation
+- No outlier detection or removal
+- No effect size measurement
+- No regression detection between runs
+- No historical comparison or baseline tracking
+- No p-values or hypothesis testing of any kind
+- No machine-readable output (no CSV, JSON, or HTML)
+
+This is a deliberate tradeoff: divan runs fast, reports clean numbers,
+and gets out of your way. If you need to know *whether a difference is
+real*, divan can't tell you.
+
+**Execution model:**
+
+Adaptive tuning via timer precision. Starts at `sample_size = 1` and
+doubles until each sample is ≥100× the timer's precision floor. Then
+collects 100 samples at that size. No explicit warmup — the tuning
+doublings serve that purpose (early small-batch runs are discarded).
+
+**Where divan excels:**
+
+- **Overhead compensation**: Explicitly measures and subtracts per-iteration
+  loop overhead and allocation-tracking overhead. This is more principled
+  than criterion's slope regression for isolating the benchmark from the
+  harness.
+- **DCE prevention**: Uses `asm!("")` fences (not just `compiler_fence`)
+  which LLVM cannot reason through at all. Stronger than `black_box`
+  alone.
+- **Deferred drop**: Outputs are written to `MaybeUninit` slots during
+  the timed loop; `Drop` runs only after timing ends. Prevents drop
+  cost from polluting measurements.
+- **Allocation profiling**: Built-in `AllocProfiler` wrapping
+  `GlobalAlloc` that counts allocs/deallocs/reallocs per benchmark.
+- **TSC timer**: Optional `rdtsc`/`rdtscp` with proper serialization
+  barriers and automatic frequency calibration.
+- **Multi-threaded benchmarks**: First-class via
+  `#[divan::bench(threads = [1,2,4,8])]` with barrier-synchronized start.
+- **Picosecond precision**: Internal `FineDuration` uses u128 picoseconds.
+
+**What we could learn from divan:**
+
+1. Overhead compensation — measuring and subtracting loop/timer overhead
+   rather than assuming it's negligible.
+2. Stronger DCE fences — `asm!("")` blocks prevent more optimizations
+   than `black_box` alone (though this requires `unsafe` or nightly).
+3. Deferred drop — excluding `Drop::drop` from timing for types with
+   expensive destructors.
+4. TSC support — hardware cycle counters for sub-nanosecond precision.
+
+### tango-bench
+
+tango-bench (0.7.x) is the only other Rust framework built around
+paired measurement, but takes a radically different architectural
+approach to achieve it.
+
+**The dylib trick:**
+
+tango loads two versions of the same benchmark into a single process
+simultaneously. You compile your benchmark, save the binary with
+`cargo-export`, modify your code, then run `cargo bench -- compare
+<saved-binary>`. The runner loads the old binary as a shared library via
+`libloading` (with ELF/PE binary patching for PIE/IAT issues). Both
+versions coexist in the same address space, sharing thermal state,
+frequency, scheduler timeslice, and cache hierarchy.
+
+This same-process approach eliminates the dominant noise source: inter-run
+system state variation. Both functions experience identical environmental
+conditions within each sample, not just similar conditions.
+
+**Interleaving:**
+
+Deterministic ABAB alternation — on every sample, the function pointers
+are swapped. This is not randomized (ours is). Periodic system effects
+with period 2 could systematically bias results, though the authors
+presumably chose deterministic alternation for reproducibility.
+
+Three sampler strategies for iteration count per sample: Flat (constant),
+Linear (sweep 1..N), and Random (default — random count each sample).
+The Random sampler decorrelates cache/alignment effects from measurement
+order, similar to our ±20% jitter.
+
+**Statistics:**
+
+Deliberately minimal. Z-test on paired differences with threshold
+z ≥ 2.6 (~99% significance) AND |diff/baseline| > 0.5% practical
+threshold. No bootstrap, no CIs, no effect size, no non-parametric
+tests. Welford's algorithm for streaming mean/variance. Optional Tukey
+IQR outlier removal (`--filter-outliers`).
+
+**Anti-bias techniques:**
+
+- Cache firewall (`--cache-firewall N`): reads N KiB of cache lines
+  between samples to force eviction.
+- Stack randomization (`--randomize-stack N`): `alloca`-based random
+  stack offset per sample.
+- System time bias detection: warns if kernel time > 5% of total CPU
+  time (via `getrusage`).
+- Warmup: `iterations/10` warmup before each sample.
+
+**Comparison with zenbench:**
+
+| Aspect | tango-bench | Zenbench |
+|---|---|---|
+| Pairing mechanism | Same-process dylib | Separate builds |
+| Interleaving | Deterministic ABAB | Randomized shuffle |
+| Statistics | Z-test only | Bootstrap CI + Wilcoxon + Cohen's d + Spearman |
+| Confidence intervals | None | 95% bootstrap |
+| Effect size | 0.5% practical threshold | Cohen's d |
+| Outlier handling | IQR (opt-in) | IQR (always, on paired diffs) |
+| Cache firewall | Opt-in, user-specified size | Opt-in, 2 MiB default |
+| Stack randomization | alloca per sample | None |
+| Iteration jitter | Random sampler (default) | ±20% per round |
+| Resource gating | System time bias warning | CPU/RAM/temp/process |
+| Cross-process coordination | None | File lock (fs4) |
+| Machine-readable output | None | JSON/CSV/LLM/Markdown |
+| Setup complexity | cargo-export + linker flags | Just `cargo bench` |
+
+**tango's unique advantage**: Same-process comparison is strictly more
+powerful than interleaving for noise reduction. Both functions share the
+exact same system state, not just similar state from the same time
+window. But the dylib approach requires special build steps and has
+platform-specific fragility (PIE patching on Linux, IAT patching on
+Windows).
+
+**tango's key weakness**: Minimal statistics. You get "significant/not
+significant" but no confidence interval on the magnitude. No way to
+distinguish "1% ± 0.2%" from "1% ± 5%".
 
 ## What we compute
 
@@ -528,6 +744,569 @@ Design considerations:
 - **Process-level CPU time**: Aggregate CPU time across all threads
   for efficiency analysis (CPU-seconds per wall-second).
 
+## Gaps and future statistical work
+
+A systematic comparison against criterion, divan, and tango-bench
+reveals concrete methodology gaps in zenbench. Ordered by impact.
+
+### Statistical gaps
+
+#### 1. No slope regression (HIGH)
+
+**What criterion does**: In Linear mode, iteration counts are
+`[d, 2d, ..., 100d]`. OLS regression through the origin fits
+`time = slope × iterations`. The slope is the per-iteration cost,
+cleanly separated from constant overhead (function call, timing calls,
+`black_box`).
+
+**Why it matters**: For a 5ns function, the per-iteration overhead from
+`Instant::now()` and `black_box` can be 10-40ns. Our measurement
+includes this overhead; criterion's slope estimate doesn't. This is most
+impactful for fast benchmarks (< 100ns per iteration). For slower
+benchmarks (> 1μs), the overhead is < 1% and irrelevant.
+
+**Mitigation**: We target 10ms per sample with many iterations, so the
+per-iteration overhead fraction is small. The ±20% iteration jitter
+decorrelates iteration count from systematic effects. But we can't
+extract the constant overhead.
+
+**TODO**: Add a `linear_sampling` mode to `GroupConfig`. Vary iteration
+counts linearly across samples within each round (e.g., `[d, 2d, ...,
+10d]` within each round's allocation for a benchmark). Fit through-origin
+OLS on per-round data. Report slope as the "adjusted" per-iteration time
+alongside the raw mean. This is compatible with interleaving — each
+benchmark in the round can use a different iteration count from its
+linear schedule.
+
+#### 2. No overhead compensation (HIGH)
+
+**What divan does**: Measures the per-iteration cost of the empty sample
+loop (`for i in 0..N { black_box(i); }`) and subtracts it from all
+measurements. Also measures per-call overhead of allocation tracking.
+100 samples of 10,000 iterations, keeps the minimum.
+
+**Why it matters**: Same root issue as slope regression — the benchmark
+harness has a per-iteration cost that inflates measurements. Overhead
+compensation is simpler to implement than slope regression and addresses
+the same problem for flat sampling.
+
+**TODO**: At startup, measure empty-loop overhead (100 samples ×
+10K iterations, take minimum). Subtract `overhead × iterations` from
+each sample's elapsed time, clamped to zero. Store measured overhead in
+`SuiteResult` for transparency. This is complementary to slope
+regression — apply it in flat mode, skip it in linear mode where the
+slope already handles it.
+
+#### 3. No practical significance gate (MEDIUM)
+
+**What criterion does**: A ±1% noise threshold. Even if the t-test says
+p < 0.05, the change is reported as "no change" unless the CI is
+entirely outside ±1%. This prevents "statistically significant but
+unmeasurably small" reports.
+
+**What tango does**: |diff/baseline| > 0.5% practical threshold
+alongside the Z-test.
+
+**What we do**: The `significant` flag fires whenever the 95% CI
+excludes zero. With enough samples, even a 0.001% difference triggers
+it. The Cohen's d footnote (d < 0.2 → "tiny effect") partially addresses
+this, but it's informational — it doesn't suppress the significance
+flag.
+
+**TODO**: Add `noise_threshold` to `GroupConfig` (default 1%). Suppress
+the green/red coloring and significance flag when the entire CI falls
+within ±noise_threshold of zero. Still show the CI values — the user can
+see the numbers, but the visual treatment says "this is noise." Make the
+footnote say "within noise threshold" rather than "tiny effect size."
+
+#### 4. No per-benchmark confidence intervals (MEDIUM)
+
+**What criterion does**: Bootstraps CIs on each benchmark's mean,
+median, stddev, and MAD individually.
+
+**What we do**: Bootstrap CIs on paired differences only. Users can't
+assess "how confident am I that this benchmark's throughput is 5.2
+GiB/s?"
+
+**TODO**: Bootstrap individual benchmark summaries (mean, median) with
+the same 10K resample machinery. Report in JSON/LLM output. Optionally
+display as `mean ± CI` in terminal when no comparison is present
+(standalone benchmarks).
+
+#### 5. Bootstrap resample count (LOW)
+
+We use 10K resamples; criterion uses 100K. For 95% CIs, the 2.5th
+percentile of 10K is the 250th sorted value — plenty of resolution.
+For 99% CIs or extreme quantiles, 100K gives better tail coverage.
+
+**TODO**: Make resample count configurable via `GroupConfig`. Default
+10K is fine. Document that users can increase to 100K for tighter tail
+estimates at a ~10× cost in analysis time.
+
+### Methodology gaps
+
+#### 6. No TSC / hardware timer (MEDIUM)
+
+Both divan and tango support `rdtsc`/`rdtscp` with proper serialization
+barriers. For sub-nanosecond benchmarks, wall-clock `Instant::now()` has
+~20ns resolution on some systems, making it impossible to measure 2ns
+functions at 1-iteration-per-sample.
+
+**TODO**: Add an optional `hw-timer` feature. On x86_64, use `rdtsc`
+(with `lfence` before) for start and `rdtscp` (with `lfence` after) for
+end. Calibrate TSC frequency against `Instant` at startup. Report times
+in nanoseconds (converted from cycles), not raw cycles. Fall back to
+`Instant` on non-x86 or when TSC is not invariant. This requires
+`unsafe` — gate behind a feature flag and document the tradeoff.
+
+#### 7. No stack alignment jitter (MEDIUM)
+
+**What criterion does**: `alloca`-based stack offset of `i % page_size`
+per sample. Varies cache line alignment of stack variables across
+samples.
+
+**What tango does**: `--randomize-stack N` with `alloca` for random
+0..N byte stack offset per measurement.
+
+**What we do**: ±20% iteration jitter addresses some aliasing but not
+stack-frame alignment specifically. Code and data alignment effects
+(Mytkowicz 2009) can create systematic bias.
+
+**TODO**: Add optional stack alignment jitter. Before each sample,
+`alloca` a random 0..4096 byte offset. This is `unsafe` (or requires
+platform-specific shims). Gate behind a feature flag or make opt-in via
+`GroupConfig`. Consider whether iteration jitter already provides
+sufficient decorrelation for most use cases — this may be lower priority
+than the statistical gaps above.
+
+#### 8. No explicit warmup phase (LOW)
+
+**What criterion does**: 3-second wall-time warmup, doubling iterations.
+**What tango does**: `iterations/10` warmup per sample.
+**What divan does**: Tuning phase doublings serve as implicit warmup.
+
+**What we do**: Binary search during iteration estimation runs the
+benchmark a few times. Not a time-based warmup.
+
+**Why it's low priority**: Rust is ahead-of-time compiled (no JIT
+warmup). The binary search runs each benchmark 5+ times during
+estimation, warming caches and branch predictors. For benchmarks that
+build large data structures or warm filesystem caches, the current
+approach may be insufficient — but these are better handled by
+`with_input()` separating setup from measurement.
+
+**TODO**: Add `warmup_time` to `GroupConfig` (default: 0 = current
+behavior). When set, run the benchmark in a loop for that duration
+before starting measurement rounds. Low priority — the iteration
+estimation already provides partial warmup.
+
+#### 9. Deferred drop (LOW)
+
+**What divan does**: Outputs written to `MaybeUninit<O>` slots during
+timed loop; `Drop::drop` runs only after timing ends. Prevents drop
+cost from polluting measurements for types with expensive destructors
+(e.g., large `Vec`, `String`, file handles).
+
+**What we do**: `Bencher::iter()` includes drop cost of the return
+value. `with_input().run()` excludes setup but includes drop.
+
+**TODO**: Consider a `Bencher::iter_with_deferred_drop()` variant that
+collects outputs in a pre-allocated buffer and drops them after timing.
+This requires careful lifetime management and capacity planning (what
+if the output is 1 MiB × 10,000 iterations?). The `with_input().run()`
+API already handles the common case where setup is expensive. Lower
+priority than statistical improvements.
+
+### What we already do that others don't
+
+For completeness — areas where zenbench leads:
+
+- **Auto-convergence**: Unique. No competitor adapts measurement
+  duration to statistical certainty. Saves time on clean systems,
+  spends more on noisy ones.
+- **Resource gating**: Unique. CPU load, temperature, RAM, heavy
+  process monitoring before each round.
+- **Drift detection**: Unique. Spearman rank correlation catches
+  thermal throttling that sequential frameworks miss entirely.
+- **Non-parametric testing**: Wilcoxon signed-rank is more robust than
+  criterion's Welch t-test or tango's Z-test. No normality assumption.
+- **Cohen's d**: Only framework with a standardized effect size metric.
+- **Process coordination**: File lock prevents concurrent benchmarks
+  from corrupting each other's measurements.
+- **Interleaving + rich statistics**: tango interleaves but has minimal
+  stats. Criterion has rich stats but no interleaving. Zenbench has both.
+
+## Baseline persistence and CI regression testing
+
+### The problem
+
+CI performance regression testing requires comparing the current
+commit's performance against a known-good reference. This means:
+
+1. Storing benchmark results durably (not in `/tmp/`)
+2. Identifying results by commit, branch, or named tag
+3. Comparing new results against the stored baseline
+4. Alerting when performance degrades beyond a threshold
+5. Updating the baseline when changes are intentional
+
+zenbench already has the statistical machinery (PairedAnalysis, bootstrap
+CI, significance detection) and serialization (SuiteResult JSON). What's
+missing is the storage, identity, and workflow layer.
+
+### Design: named baselines
+
+**Storage location**: `.zenbench/baselines/` in the project directory.
+Each baseline is a `SuiteResult` JSON file named by its identifier:
+
+```
+.zenbench/baselines/
+  main.json           # latest results from main branch
+  v0.3.0.json         # release baseline
+  prod.json           # named tag for production reference
+```
+
+These are regular files that can be committed to git (for reproducibility
+and review) or gitignored (for large suites).
+
+**CLI commands**:
+
+```bash
+# Save current results as a named baseline
+cargo bench -- --save-baseline main
+
+# Compare against a saved baseline
+cargo bench -- --baseline main
+
+# Update baseline only if no regressions
+cargo bench -- --baseline main --update-on-pass
+
+# List saved baselines
+zenbench baseline list
+
+# Delete a baseline
+zenbench baseline delete old-baseline
+```
+
+**Behavior of `--baseline`**:
+
+When `--baseline main` is specified, zenbench:
+1. Runs the full benchmark suite (interleaved, converging)
+2. Loads `.zenbench/baselines/main.json`
+3. For each benchmark present in both, computes PairedAnalysis between
+   the baseline's per-round means and the new run's per-round means
+4. Reports using the same CI / significance / Cohen's d framework
+5. Exits with nonzero status if any significant regressions are detected
+
+**Threshold configuration**:
+
+```toml
+# .zenbench/config.toml (future)
+[thresholds]
+noise_threshold = 0.01        # ±1% noise gate (suppress tiny changes)
+max_regression_pct = 5.0      # fail CI if any benchmark regresses >5%
+significance_level = 0.95     # CI confidence level
+```
+
+Thresholds can also be set per-group in code:
+
+```rust
+group.config().noise_threshold(0.02);     // 2% for this group
+group.config().max_regression_pct(10.0);  // 10% for noisy benchmarks
+```
+
+### Comparison against saved baselines vs. interleaved comparison
+
+Saved baseline comparison is fundamentally weaker than interleaved
+comparison. The baseline and candidate ran at different times, on
+potentially different hardware, under different system conditions. The
+paired-difference statistical framework assumes the two measurements
+experienced similar conditions — which is true within an interleaved
+run but NOT across runs.
+
+**Mitigation strategies:**
+
+1. **Wider CIs for cross-run comparisons**: Apply an inflation factor
+   to the CI based on estimated cross-run variance. Store the baseline's
+   internal variance alongside its means — use it to widen the
+   comparison CI appropriately.
+2. **Require more evidence**: Use a stricter significance threshold
+   (99% instead of 95%) or larger noise threshold for cross-run
+   comparisons.
+3. **Calibration workloads**: See "Cross-machine comparability" below.
+4. **Prefer self-compare for PRs**: Use `self-compare` (interleaved,
+   same machine, same run) for PR checks. Use saved baselines only for
+   tracking trends on main.
+
+### CI workflow recommendations
+
+**PR checks** (blocking, high confidence):
+
+```yaml
+# Build both versions, interleave on same runner
+- run: cargo bench -- self-compare --ref origin/main --format=json
+  # Exits nonzero if significant regressions detected
+```
+
+This is the gold standard — interleaved, paired, same hardware, same
+thermal state. The only overhead is building twice.
+
+**Main branch tracking** (non-blocking, trend analysis):
+
+```yaml
+# Run benchmarks, save as baseline tagged by commit
+- run: cargo bench -- --save-baseline "commit-$(git rev-parse --short HEAD)"
+  # Also update the "main" baseline for PR comparisons
+- run: cp .zenbench/baselines/commit-*.json .zenbench/baselines/main.json
+```
+
+Over time this builds a time series suitable for change point detection
+(see below).
+
+**Release gates** (blocking, named baseline):
+
+```yaml
+- run: cargo bench -- --baseline release-v0.3.0 --max-regression-pct 3
+```
+
+### TODO: baseline persistence implementation
+
+1. **`--save-baseline <name>`**: Save `SuiteResult` to
+   `.zenbench/baselines/<name>.json`. Overwrite if exists.
+2. **`--baseline <name>`**: Load baseline, run benchmarks, compare.
+   Match benchmarks by group name + benchmark name. Report missing
+   benchmarks (new or removed) separately.
+3. **`--update-on-pass`**: After comparison, if no regressions exceed
+   threshold, overwrite the baseline with the new results.
+4. **Exit codes**: 0 = pass, 1 = regression detected, 2 = error.
+   Machine-readable JSON summary on stdout for CI integration.
+5. **`zenbench baseline list/delete/show`**: CLI management commands.
+6. **Threshold configuration**: `noise_threshold` and
+   `max_regression_pct` in `GroupConfig`, overridable via CLI flags
+   and config file.
+
+### Cross-run statistical adjustment
+
+When comparing against a saved baseline (not interleaved), the paired
+assumptions break down. The two runs experienced different system
+states, so the difference distribution has higher variance than an
+interleaved comparison would measure.
+
+**Approach: variance inflation**
+
+Store the baseline's per-benchmark variance (from its original
+interleaved run). When comparing cross-run:
+
+1. Compute the new run's per-benchmark variance
+2. Estimate cross-run variance as `max(var_baseline, var_new)` plus
+   a configurable additive term (the "cross-run noise floor")
+3. Widen the CI by the ratio `sqrt(cross_run_var / interleaved_var)`
+4. Apply stricter significance threshold (99% CI instead of 95%)
+
+This is conservative — it reduces false positives from hardware
+fluctuations at the cost of missing small regressions. For catching
+small regressions, self-compare (interleaved) is the right tool.
+
+## Cross-machine comparability
+
+### The fundamental problem
+
+CI runners are not stable hardware. GitHub Actions runners use shared
+VMs with variable CPU allocation, noisy neighbors, and no guarantees
+about CPU model or frequency. Even self-hosted runners may be
+heterogeneous. A benchmark that takes 100ns on one runner might take
+130ns on another, and neither number is wrong.
+
+This means absolute times from different machines cannot be directly
+compared. But CI regression testing requires *some* form of
+cross-machine comparison, at least for trend tracking.
+
+### Approach 1: Relative benchmarking (PRIMARY — already implemented)
+
+The strongest approach: don't compare across machines. Run both old
+and new code on the same machine in the same CI job. The ratio
+(new/old) cancels out hardware differences.
+
+zenbench's `self-compare` already implements this via git worktrees.
+For PR regression testing, this is the recommended approach.
+
+**Limitation**: Requires building two versions, roughly doubling CI
+time. Cannot track absolute performance trends over time (only
+relative to the comparison point).
+
+### Approach 2: Calibration workloads (MEDIUM priority)
+
+Run a small set of known reference benchmarks alongside real
+benchmarks. Normalize real benchmark times by dividing by the
+corresponding calibration time from the same run.
+
+**Design:**
+
+```rust
+// Built-in calibration suite
+suite.calibrate(|cal| {
+    cal.integer_throughput();    // tight loop: adds, multiplies, branches
+    cal.memory_bandwidth();     // sequential memcpy, 1 MiB
+    cal.memory_latency();       // pointer-chasing, 4 MiB (L3-bound)
+    cal.branch_heavy();         // unpredictable branches
+});
+```
+
+The calibration runs before real benchmarks (excluded from gate waits
+since it's measuring the machine, not user code). Results are stored
+alongside the SuiteResult:
+
+```json
+{
+  "calibration": {
+    "integer_throughput_ns": 0.42,
+    "memory_bandwidth_gbps": 18.5,
+    "memory_latency_ns": 12.3,
+    "branch_heavy_ns": 8.7,
+    "cpu_model": "AMD EPYC 7763",
+    "logical_cores": 4
+  }
+}
+```
+
+**Normalization**: For each real benchmark, divide its mean time by
+the most relevant calibration metric. CPU-bound benchmarks normalize
+by `integer_throughput`; memory-bound by `memory_bandwidth`. The user
+tags each benchmark group with its dominant bottleneck, or zenbench
+auto-detects based on IPC heuristics (future work).
+
+**Pros**: Simple, fast (~100ms for calibration), gives approximate
+hardware-normalized scores. Useful for trend tracking.
+
+**Cons**: Different benchmarks scale differently across hardware. A
+single calibration factor is approximate. A CPU-bound calibration
+won't normalize a memory-bound benchmark correctly. Multiple
+calibration workloads help but don't eliminate the problem.
+
+### Approach 3: Testbed separation (MEDIUM priority)
+
+Tag each result with a hardware fingerprint: CPU model, cache sizes,
+core count, OS. Compare only within the same testbed. When hardware
+changes, start a new baseline.
+
+**Design:**
+
+```json
+{
+  "testbed": {
+    "cpu_model": "AMD EPYC 7763",
+    "cpu_family": 25,
+    "cache_l1d_kb": 32,
+    "cache_l2_kb": 512,
+    "cache_l3_kb": 32768,
+    "cores_physical": 2,
+    "cores_logical": 4,
+    "os": "linux",
+    "arch": "x86_64"
+  }
+}
+```
+
+Baseline comparisons refuse to compare across testbeds unless
+`--cross-testbed` is explicitly passed (which widens CIs per the
+variance inflation approach above).
+
+This is Bencher's approach. It's simple, correct, and conservative.
+The cost is losing historical comparison across hardware transitions.
+
+### Approach 4: Change point detection (FUTURE)
+
+For long-running time series (nightly benchmarks on main), use change
+point detection (E-Divisive algorithm) instead of point-to-point
+threshold comparison. CPD analyzes the entire history and detects
+*persistent shifts* in the distribution.
+
+**Why this matters for cross-machine**: When hardware changes, CPD
+produces a single change point. Threshold-based detection would fire
+on every benchmark. CPD handles it gracefully — one notification
+about the hardware transition, then it re-baselines automatically.
+
+**Design**: Store benchmark results as a time series (one point per
+commit on main). Run CPD as a post-processing step. Alert when a
+change point is detected that doesn't correspond to a known hardware
+transition.
+
+**Implementation**: Apache Otava's windowed t-test approach (not full
+E-Divisive permutation test) is the practical choice. The windowed
+variant is O(1) per new data point and needs ~30 historical points to
+be reliable.
+
+This is complementary to self-compare: self-compare catches
+regressions at PR time (blocking), CPD catches gradual drifts on main
+(advisory).
+
+### Approach 5: Instruction counting (OPTIONAL)
+
+Use Valgrind's Cachegrind/Callgrind to count executed instructions
+instead of measuring wall time. Instruction counts are nearly
+hardware-independent (< 0.001% variance across runs).
+
+**Integration**: This would be a separate mode, not a replacement for
+wall-clock benchmarking. Something like:
+
+```bash
+cargo bench -- --mode=cachegrind --bench my_bench
+```
+
+**Caveats**:
+- **Not all instructions cost the same.** Code that replaces 1000
+  scalar ops with 125 AVX2 ops looks *slower* by instruction count
+  despite being faster in wall time.
+- **Cache simulation is outdated.** Cachegrind's model doesn't match
+  modern CPUs (no prefetching, no OoO, simplified associativity).
+- **~20-50× slowdown.** Only practical for a subset of benchmarks.
+- **Linux only.** Valgrind doesn't run on Windows or macOS ARM.
+- **Not perfectly deterministic.** CodSpeed discovered that different
+  CPU models cause glibc's malloc to detect different CPU features,
+  changing code paths and producing different instruction counts for
+  the same binary.
+- **Cannot measure threading.** Valgrind serializes threads.
+
+This is useful as a *complementary signal* alongside wall-clock
+measurements, not as a replacement. iai-callgrind already does this
+well — integration or interop with iai-callgrind may be more practical
+than reimplementing.
+
+### Approach comparison
+
+| Approach | Cross-machine? | Accuracy | CI time | Complexity |
+|---|---|---|---|---|
+| Relative (self-compare) | N/A (same machine) | Excellent | 2× build | Already built |
+| Calibration workloads | Approximate | Good for similar HW | +100ms | Medium |
+| Testbed separation | No (avoids the problem) | Exact within testbed | None | Low |
+| Change point detection | Handles transitions | Good for trends | Post-processing | High |
+| Instruction counting | Yes | Misses SIMD/cache | 20-50× | Medium-High |
+
+### TODO: cross-machine and baseline implementation priority
+
+**Phase 1 — Baseline persistence (HIGH)**:
+- Named baseline save/load (`--save-baseline`, `--baseline`)
+- Threshold-based CI exit codes
+- Hardware fingerprint in SuiteResult (testbed identification)
+- Cross-run variance inflation for non-interleaved comparisons
+- Noise threshold gate (from statistical gaps TODO)
+
+**Phase 2 — Calibration and testbed awareness (MEDIUM)**:
+- Built-in calibration workloads (integer, memory BW, memory latency)
+- Calibration results stored in SuiteResult
+- Testbed fingerprinting and comparison guards
+- Calibration-normalized scores in output
+
+**Phase 3 — Time series and change point detection (FUTURE)**:
+- Time-series storage format (append-only, per-benchmark)
+- E-Divisive change point detection (windowed t-test variant)
+- Advisory alerts for gradual regressions on main
+- Dashboard / report generation for trend visualization
+
+**Phase 4 — Instruction counting integration (FUTURE, OPTIONAL)**:
+- `--mode=cachegrind` for hardware-independent metrics
+- Interop with iai-callgrind output format
+- Side-by-side wall-clock + instruction-count reporting
+
 ## References
 
 - Mytkowicz, Diwan, Hauswirth, Sweeney. [Producing Wrong Data Without Doing Anything Obviously Wrong](https://dl.acm.org/doi/10.1145/1508284.1508275). ASPLOS 2009.
@@ -538,4 +1317,12 @@ Design considerations:
 - Tratt. [Minimum Times Tend to Mislead When Benchmarking](https://tratt.net/laurie/blog/2019/minimum_times_tend_to_mislead_when_benchmarking.html). 2019.
 - [nanobench documentation](https://nanobench.ankerl.com/reference.html) (Ankerl).
 - [Criterion.rs Analysis Process](https://bheisler.github.io/criterion.rs/book/analysis.html).
+- [Divan announcement and design philosophy](https://nikolaivazquez.com/blog/divan/).
+- [tango-bench: paired benchmarking via dylib loading](https://github.com/bazhenov/tango).
 - [Google Benchmark User Guide](https://google.github.io/benchmark/user_guide.html).
+- [Apache Otava: Change Point Detection for Performance Regressions](https://otava.apache.org/docs/math/). 8 years of optimization from MongoDB/DataStax.
+- [CodSpeed: Why glibc is faster on some GitHub Actions Runners](https://codspeed.io/blog/unrelated-benchmark-regression). Cross-machine instruction count pitfalls.
+- [iai-callgrind: Hardware-agnostic Rust benchmarking via Cachegrind](https://github.com/iai-callgrind/iai-callgrind).
+- [Bencher: Continuous Benchmarking](https://bencher.dev/docs/explanation/continuous-benchmarking/).
+- [Aakinshin: Performance Stability of GitHub Actions](https://aakinshin.net/posts/github-actions-perf-stability/). Measured up to 3× variance.
+- [rustc-perf: Instruction counts as primary metric](https://kobzol.github.io/rust/rustc/2023/09/23/rustc-runtime-benchmarks.html). SQLite also uses this approach.

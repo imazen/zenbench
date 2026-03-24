@@ -90,11 +90,36 @@ Don't mix bench_parallel/bench_contended with rayon — competing thread pools.
 - `bench_scaling` efficiency/scaling columns (currently just uses throughput)
 - Add scaling/efficiency metrics to the LLM format output
 
+### Statistical gaps (from comparative analysis — see METHODOLOGY.md "Gaps" section)
+- **Overhead compensation** (HIGH): Measure empty-loop overhead at startup, subtract from samples. Complements slope regression for flat mode.
+- **Slope regression / linear sampling** (HIGH): Vary iteration counts linearly within rounds, fit OLS through origin to separate per-iteration cost from constant overhead. Most impactful for <100ns benchmarks.
+- **Practical significance gate** (MEDIUM): Add `noise_threshold` to GroupConfig (default 1%). Suppress significance flag when entire CI falls within ±threshold.
+- **Per-benchmark CIs** (MEDIUM): Bootstrap individual benchmark means/medians, not just paired diffs. Report in JSON/LLM, display for standalone benchmarks.
+- **TSC / hardware timer** (MEDIUM): `hw-timer` feature for rdtsc/rdtscp on x86_64. Required for sub-ns benchmarks. Needs `unsafe`, feature-gated.
+- **Stack alignment jitter** (MEDIUM): alloca-based random stack offset per sample (à la criterion/tango). Feature-gated, opt-in.
+- **Configurable bootstrap resamples** (LOW): Allow 10K→100K via GroupConfig for tighter tail CIs.
+- **Explicit warmup phase** (LOW): `warmup_time` in GroupConfig. Low priority since iteration estimation already warms caches.
+- **Deferred drop** (LOW): `iter_with_deferred_drop()` to exclude Drop cost from timing.
+
+### CI regression testing (HIGH — see METHODOLOGY.md "Baseline persistence" section)
+- **Named baseline save/load**: `--save-baseline <name>` / `--baseline <name>` storing to `.zenbench/baselines/`
+- **Threshold-based CI exit codes**: 0=pass, 1=regression, 2=error. `--max-regression-pct` flag.
+- **`--update-on-pass`**: Overwrite baseline if no regressions exceed threshold.
+- **Cross-run variance inflation**: Widen CIs for non-interleaved (saved baseline) comparisons.
+- **Hardware fingerprint in SuiteResult**: CPU model, cache sizes, cores, arch for testbed identification.
+- **Testbed comparison guards**: Warn or refuse when comparing across different hardware.
+
+### Cross-machine comparability (MEDIUM — see METHODOLOGY.md "Cross-machine" section)
+- **Calibration workloads**: Built-in integer/memory-bw/memory-latency/branch microbenchmarks. Run before real benchmarks, store in SuiteResult. Normalize scores by calibration.
+- **Calibration-normalized output**: Additional column/field showing hardware-adjusted scores.
+
 ### Medium-term
 - Asymptotic complexity analysis (Big O fitting, like Google Benchmark)
 - Manual timing mode for GPU/custom hardware
 - Process-level CPU time for threading efficiency analysis
 - Custom counters (user-defined per-iteration metrics)
+- Change point detection (E-Divisive) for time-series regression tracking on main
+- Instruction counting mode (Cachegrind integration or iai-callgrind interop)
 
 ### Known bugs / tech debt
 - No tests for the terminal report, LLM format, or bar chart output
