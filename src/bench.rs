@@ -370,31 +370,11 @@ impl BenchGroup {
         let logical_cores = sys.cpus().len().max(1);
         let physical_cores = sysinfo::System::physical_core_count().unwrap_or(logical_cores);
 
-        // Dense probe points — auto-rounds convergence handles runtime.
-        //
-        // Thread counts far from the peak converge in ~30 rounds (the
-        // difference from baseline is obviously large). Counts near the
-        // peak need more rounds (small differences need more data).
-        // Convergence IS the binary search — it spends time proportional
-        // to how close the results are.
-        //
-        // So we can afford dense probing: every multiple of physical/4
-        // up to logical cores, plus powers of 2 for the familiar pattern.
-        let mut counts = vec![1];
-        // Every quarter of physical cores
-        let quarter = (physical_cores / 4).max(1);
-        let mut t = quarter;
-        while t <= physical_cores {
-            counts.push(t);
-            t += quarter;
-        }
-        // Powers of 2 (for familiar scaling pattern)
-        let mut p = 2;
-        while p <= logical_cores {
-            counts.push(p);
-            p *= 2;
-        }
-        // Logical cores (SMT) if different
+        // Every integer from 1 to physical_cores, then the SMT point.
+        // Auto-rounds convergence makes this cheap — far-from-peak counts
+        // converge in 30 rounds; near-peak counts get more rounds automatically.
+        // Optimal thread counts like 3 or 5 are common and can't be predicted.
+        let mut counts: Vec<usize> = (1..=physical_cores).collect();
         if logical_cores > physical_cores {
             counts.push(logical_cores);
         }
