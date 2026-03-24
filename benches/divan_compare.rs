@@ -89,8 +89,19 @@ zenbench::main!(|suite| {
     });
 
     suite.compare("hashmap", |group| {
-        group.config().max_rounds(50).auto_rounds(false);
+        group.config().max_rounds(100).auto_rounds(false);
         group.bench("insert_100", |b| b.iter(work_hashmap_100));
+    });
+
+    // Same hashmap but with low iteration count to match divan/criterion's
+    // ~100 iterations per sample. Tests whether iteration count (cache
+    // hotness) explains the measurement difference.
+    suite.compare("hashmap_cold", |group| {
+        group.config()
+            .max_rounds(100)
+            .auto_rounds(false)
+            .cold_start(true); // 1 iter/sample + cache firewall
+        group.bench("insert_100_cold", |b| b.iter(work_hashmap_100));
     });
 
     // Print summary for manual comparison against divan output
