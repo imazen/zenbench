@@ -92,7 +92,10 @@ impl Engine {
             if group.benchmarks.is_empty() {
                 continue;
             }
-            // Set gate thread allowance based on max thread count in group
+            // For threaded benchmarks: the gate fights itself — each round
+            // creates a CPU load spike that triggers a gate wait before the
+            // next round. Disable gate checks for groups with threaded benchmarks.
+            // The benchmark IS the load; gating on it is counterproductive.
             let max_threads = group
                 .benchmarks
                 .iter()
@@ -104,7 +107,12 @@ impl Engine {
                 })
                 .max()
                 .unwrap_or(0);
-            self.gate.set_thread_allowance(max_threads);
+            if max_threads > 1 {
+                // Disable gate for threaded groups — our own threads ARE the load
+                self.gate.set_thread_allowance(usize::MAX);
+            } else {
+                self.gate.set_thread_allowance(0);
+            }
             let result = run_comparison_group(group, &mut self.gate);
             comparisons.push(result);
 
@@ -198,7 +206,18 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
         estimates.push(est);
         cold_starts.push(cold_ns);
     }
-    let iterations_per_sample = estimates.iter().copied().min().unwrap_or(1).max(1);
+    // Use the LOWER MEDIAN estimate. The min is dragged down by the slowest
+    // benchmark (e.g., 16-thread bench_parallel), but the upper median would
+    // make slow benchmarks take minutes per sample. The lower median balances:
+    // most benchmarks get reasonable precision, slow benchmarks get shorter
+    // samples (acceptable — their per-iteration times are long enough).
+    let mut sorted_estimates = estimates.clone();
+    sorted_estimates.sort_unstable();
+    let iterations_per_sample = if sorted_estimates.is_empty() {
+        1
+    } else {
+        sorted_estimates[(sorted_estimates.len() - 1) / 2].max(1)
+    };
 
     // Phase 2: Interleaved measurement
     // ETA: warmup gave us a rough per-sample time. Estimate total.
@@ -259,7 +278,7 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
         // don't burn 30s on a gate when max_time is 10s.
         // After min_rounds, use 3x measurement budget as wall cap.
         // During min_rounds, allow up to 10x to ensure we get enough data.
-        let wall_multiplier = if round < config.min_rounds { 10 } else { 3 };
+        let wall_multiplier = if round < config.min_rounds { 5 } else { 3 };
         let wall_remaining = config
             .max_time
             .saturating_mul(wall_multiplier)
@@ -393,20 +412,27 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
 
                     let resolved = direction_clear || equivalent;
 
-                    // (2) STABLE? The effect size estimate won't shift much
-                    // between runs. For large differences, we want the CI
-                    // to be tight relative to the difference itself.
-                    // For small/zero differences, baseline-relative is enough.
-                    let stable = if diff_mean.abs() > f64::EPSILON && direction_clear {
-                        // Relative precision of the difference itself
-                        // e.g., diff = -42% ± 3% → ci_half/diff = 7% relative error
-                        let effect_precision = ci_half / diff_mean.abs();
-                        // Require < 10% relative error on the effect size,
-                        // AND < target_precision of baseline (absolute floor)
-                        effect_precision < 0.10 && ci_pct_of_baseline < config.target_precision
+                    // (2) STABLE? For large differences (>10% of baseline),
+                    // require the CI to be tight relative to the difference
+                    // so the reported percentage is reproducible.
+                    // For small differences (<10%), baseline-relative precision
+                    // is enough — we don't need to pin down a 1% difference
+                    // to ±0.1%.
+                    let pct_diff = if base_mean.abs() > f64::EPSILON {
+                        (diff_mean / base_mean).abs()
                     } else {
-                        // No meaningful difference or equivalence case —
-                        // baseline-relative precision is sufficient
+                        0.0
+                    };
+                    let stable = if direction_clear && pct_diff > 0.10 {
+                        // Large effect: CI should be tight relative to the
+                        // difference itself, so the reported % is reproducible.
+                        // Don't also require baseline-relative precision —
+                        // a 10× difference doesn't need 2% absolute precision.
+                        let effect_precision = ci_half / diff_mean.abs();
+                        effect_precision < 0.10
+                    } else {
+                        // Small or uncertain: need baseline-relative precision
+                        // to determine if the difference is real or noise.
                         ci_pct_of_baseline < config.target_precision
                     };
 
@@ -544,7 +570,7 @@ fn run_standalone(
         if round >= config.min_rounds && measurement_time >= config.max_time {
             break;
         }
-        let wall_multiplier = if round < config.min_rounds { 10 } else { 3 };
+        let wall_multiplier = if round < config.min_rounds { 5 } else { 3 };
         let wall_remaining = config
             .max_time
             .saturating_mul(wall_multiplier)
