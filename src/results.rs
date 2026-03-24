@@ -86,6 +86,9 @@ pub struct ComparisonResult {
     /// Whether sub-ns warnings are suppressed.
     #[serde(default)]
     pub expect_sub_ns: bool,
+    /// Whether cold-start mode was used.
+    #[serde(default)]
+    pub cold_start: bool,
     /// Base iterations per sample (before jitter). 0 if unknown.
     #[serde(default)]
     pub iterations_per_sample: usize,
@@ -765,6 +768,7 @@ mod tests {
                 throughput_unit: None,
                 sort_by_speed: false,
                 expect_sub_ns: false,
+                cold_start: false,
                 iterations_per_sample: 1000,
             }],
             standalones: vec![],

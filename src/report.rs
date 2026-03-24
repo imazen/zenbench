@@ -80,7 +80,9 @@ pub fn print_report(result: &SuiteResult) {
             format!("{iters_str} calls")
         };
         let mut meta = format!("{} rounds \u{d7} {calls_str}", comp.completed_rounds);
-        if comp.cache_firewall {
+        if comp.cold_start {
+            meta.push_str(", cold start, clear-L2");
+        } else if comp.cache_firewall {
             meta.push_str(", clear-L2");
         }
         if comp.expect_sub_ns {

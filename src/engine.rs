@@ -492,6 +492,7 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
         throughput_unit: group.throughput_unit.clone(),
         sort_by_speed: config.sort_by_speed,
         expect_sub_ns: config.expect_sub_ns,
+        cold_start: config.cold_start,
         iterations_per_sample,
     }
 }

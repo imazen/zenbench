@@ -457,6 +457,15 @@ pub struct GroupConfig {
     /// below this threshold — i.e., the 95% CI half-width is less than
     /// this fraction of the mean.
     pub target_precision: f64,
+    /// Cold-start measurement mode.
+    ///
+    /// When `true`, forces `min_iterations = 1`, `max_iterations = 1`,
+    /// and `cache_firewall = true`. Each sample is a single cold call
+    /// with L2 cache spoiled between samples. Results reflect first-call
+    /// performance, not hot-loop throughput.
+    ///
+    /// Use for: CLI tools, serverless cold starts, first-request latency.
+    pub cold_start: bool,
 }
 
 impl Default for GroupConfig {
@@ -476,6 +485,7 @@ impl Default for GroupConfig {
             sort_by_speed: false,
             auto_rounds: true,
             target_precision: 0.02,
+            cold_start: false,
         }
     }
 }
@@ -538,6 +548,19 @@ impl GroupConfig {
 
     pub fn target_precision(&mut self, precision: f64) -> &mut Self {
         self.target_precision = precision;
+        self
+    }
+
+    /// Enable cold-start mode: 1 call/sample with L2 cache spoiling.
+    ///
+    /// Measures first-call performance, not hot-loop throughput.
+    pub fn cold_start(&mut self, enabled: bool) -> &mut Self {
+        self.cold_start = enabled;
+        if enabled {
+            self.min_iterations = 1;
+            self.max_iterations = 1;
+            self.cache_firewall = true;
+        }
         self
     }
 }
