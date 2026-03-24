@@ -332,86 +332,109 @@ b.with_input(|| load_file())
 This doesn't cover mid-benchmark I/O exclusion but handles most cases
 without timer overhead.
 
-## Future work: multithreaded benchmarking
+## Multithreaded benchmarking
 
-Several distinct problems need separate solutions.
+Three patterns, three APIs.
 
-### Problem 1: Throughput under contention
+### Pattern 1: Contended shared state — `bench_contended()`
 
 "How fast is this `Mutex<HashMap>` with 8 threads hammering it?"
 
-You need all threads to start simultaneously (barrier), run for a fixed
-duration, and report aggregate throughput. Google Benchmark does this
-with `Threads(N)` and an internal barrier.
+```rust,ignore
+group.bench_contended("mutex_map", 8,
+    || Mutex::new(HashMap::new()),       // setup: fresh state each sample
+    |b, shared, tid| {
+        b.iter(|| { shared.lock().unwrap().insert(tid, 42); })
+    },
+);
+```
 
-A zenbench design would add a thread count to the bencher:
+All threads barrier-synchronize before starting. Wall-clock time from
+barrier release to all threads completing. Thread creation/joining is
+excluded. Setup runs fresh each sample so lock state doesn't carry over.
+
+### Pattern 2: Independent parallel scaling — `bench_parallel()`
+
+"Does this work scale linearly with threads, or am I hitting
+memory bandwidth / cache contention / SMT limits?"
 
 ```rust,ignore
-group.bench_threaded("contended_map", 8, |b, thread_id| {
-    b.iter(|| {
-        map.lock().unwrap().insert(thread_id, 42);
-    })
+for threads in [1, 2, 4, 8] {
+    group.bench_parallel(format!("{threads}t"), threads, |b, _tid| {
+        b.iter(|| expensive_pure_computation())
+    });
+}
+```
+
+Same as `bench_contended` but no shared state. Each thread works
+independently. If 4 threads aren't 4x the throughput of 1 thread,
+you're hitting a scaling wall.
+
+### Pattern 3: Existing thread pools (rayon, tokio) — `bench()`
+
+"How fast is `par_sort()` / parallel pipeline / async handler?"
+
+```rust,ignore
+group.bench("par_sort", |b| {
+    b.with_input(|| (0..10_000).rev().collect::<Vec<i32>>())
+        .run(|mut v| { v.par_sort(); v })
 });
 ```
 
-Key requirements:
-- All threads wait at a barrier before the timed region
-- Wall-clock time is the measurement (not per-thread CPU)
-- Thread creation/destruction excluded from timing
-- Report ops/sec across all threads, not per-thread
+Just use regular `bench()`. Wall-clock timing already captures all
+threads' work. The thread pool persists across samples — this is
+realistic (your production rayon pool is warm too).
 
-### Problem 2: Parallel algorithm wall time
+**Do not** use `bench_parallel` or `bench_contended` for rayon/tokio
+code. Those APIs spawn their own threads, which compete with the
+existing pool for cores. The result is artificial contention that
+doesn't reflect production.
 
-"How fast does rayon sort this array?"
+### Rayon-specific guidance
 
-Here the benchmark itself is single-threaded from the harness's
-perspective — it calls `data.par_sort()` which spawns threads
-internally. Wall-clock time is correct; thread-local CPU time
-would undercount.
+- **Thread pool lifetime**: Rayon's global pool initializes on first
+  use and persists for the process. This means the first sample pays
+  pool startup cost; subsequent samples reuse warm threads. This is
+  realistic — most production code uses a long-lived pool.
 
-This *already works* in zenbench: `b.iter(|| data.par_sort())`
-measures wall-clock time, which includes all threads' work. The
-only issue is that the `cpu-time` feature (if enabled) measures
-only the calling thread's CPU time, which would be misleading.
+- **Pool size**: Rayon defaults to `num_cpus` threads. If you're
+  benchmarking within a comparison group, all benchmarks share the
+  same pool size. To compare different pool sizes, configure rayon's
+  `ThreadPoolBuilder` in each benchmark's setup.
 
-Should: document that `cpu-time` is per-thread and meaningless
-for parallel benchmarks. Consider adding `ProcessTime` measurement
-that aggregates all threads.
+- **cpu-time feature**: Thread-local CPU time only measures the
+  calling thread. For rayon benchmarks this severely undercounts
+  actual CPU usage. Use wall-clock time (the default) for parallel
+  workloads.
 
-### Problem 3: Benchmark isolation
+- **Interaction with resource gating**: Rayon's threads show up as
+  CPU load in the gate check. The gate doesn't know they're part of
+  the benchmark, not background noise. For heavily parallel benchmarks,
+  consider `GateConfig::disabled()` or raising `max_cpu_load`.
 
-Our `Bencher` is `&mut` — single owner, not shareable across threads.
-This is correct: timing state must not be concurrent. For threaded
-benchmarks, the harness owns the timer and the user's closure runs on
-worker threads with a shared barrier.
+### Design notes
 
-### What "doing it right" means
+- **Barrier-synchronized start**: Both `bench_contended` and
+  `bench_parallel` use `Barrier::new(threads + 1)` — the +1 is the
+  timing thread. All worker threads wait at the barrier, then the main
+  thread starts the timer and waits at the second barrier for completion.
 
-1. **Barrier-synchronized start**: All threads begin the timed region
-   simultaneously. Without this, thread creation stagger dominates
-   short benchmarks.
+- **Interleaving works**: Threaded benchmarks are just `BenchFn`
+  closures. They run in their slot during the round shuffle like any
+  other benchmark. Threads are created and destroyed per sample.
 
-2. **Wall-clock primary**: For threaded benchmarks, wall-clock time is
-   the metric users care about. CPU time across threads is only useful
-   for efficiency analysis (CPU seconds per wall second).
+- **Thread creation overhead**: Each sample spawns and joins `N`
+  threads. This is excluded from timing (outside the barriers) but
+  adds wall-clock overhead between samples. For benchmarks where thread
+  creation cost matters, use rayon's persistent pool instead.
 
-3. **Deterministic thread count**: The thread pool should be fixed, not
-   auto-detected. "8 threads" means 8, regardless of hardware. Users
-   can parameterize across thread counts.
+### Future work
 
-4. **Interleaving still works**: Threaded benchmarks within a comparison
-   group can still be interleaved round-by-round. The shuffle order
-   doesn't need to change — each benchmark just uses its own threads
-   during its sample.
-
-5. **Resource gating awareness**: N benchmark threads + system load
-   needs smarter gate checking. A 16-thread benchmark on a 16-core
-   machine leaves no room for background processes; the gate should
-   know the benchmark's thread count.
-
-None of this is implemented yet. The current API supports parallel code
-that manages its own threads internally (case 2). Explicit harness-level
-threading (cases 1 and 3) needs a new API.
+- **Resource gating thread awareness**: The gate should know a
+  benchmark's thread count so it doesn't flag the benchmark's own
+  threads as "heavy processes."
+- **Process-level CPU time**: Aggregate CPU time across all threads
+  for efficiency analysis (CPU-seconds per wall-second).
 
 ## References
 

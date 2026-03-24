@@ -283,6 +283,68 @@ impl BenchGroup {
         });
     }
 
+    /// Add a parallel throughput benchmark (no shared state).
+    ///
+    /// Spawns `threads` threads that each run the same work independently.
+    /// Measures total wall-clock time. Use this to find scaling limits —
+    /// if 4 threads aren't 4x faster, you're hitting cache/memory bandwidth
+    /// or SMT contention.
+    ///
+    /// Each thread gets its own thread index (0..threads) but no shared state.
+    /// For shared-state contention testing, use [`bench_contended`] instead.
+    ///
+    /// ```rust,ignore
+    /// // Compare 1, 2, 4 threads doing independent work
+    /// for threads in [1, 2, 4] {
+    ///     group.bench_parallel(format!("{threads}t"), threads, |b, _tid| {
+    ///         b.iter(|| expensive_computation())
+    ///     });
+    /// }
+    /// ```
+    ///
+    /// **Rayon / existing thread pools**: Don't use this for code that manages
+    /// its own threads (rayon, tokio, etc.). Just use regular `bench()` —
+    /// wall-clock timing already captures all threads' work. `bench_parallel`
+    /// spawns its own threads, which would compete with rayon's pool.
+    pub fn bench_parallel<F>(&mut self, name: impl Into<String>, threads: usize, work: F)
+    where
+        F: Fn(&mut Bencher, usize) + Send + Sync + Clone + 'static,
+    {
+        let name = name.into();
+        let threads = threads.max(1);
+
+        self.benchmarks.push(Benchmark {
+            name,
+            tags: vec![("threads".to_string(), threads.to_string())],
+            subgroup: self.current_subgroup.clone(),
+            func: BenchFn::new(move |bencher: &mut Bencher| {
+                let iterations = bencher.iterations;
+                let barrier = Arc::new(Barrier::new(threads + 1));
+
+                let mut handles = Vec::with_capacity(threads);
+                for tid in 0..threads {
+                    let barrier = barrier.clone();
+                    let work = work.clone();
+                    handles.push(std::thread::spawn(move || {
+                        let mut thread_bencher = Bencher::new(iterations);
+                        barrier.wait();
+                        work(&mut thread_bencher, tid);
+                        barrier.wait();
+                    }));
+                }
+
+                barrier.wait();
+                let start = std::time::Instant::now();
+                barrier.wait();
+                bencher.elapsed_ns = start.elapsed().as_nanos() as u64;
+
+                for h in handles {
+                    h.join().expect("benchmark thread panicked");
+                }
+            }),
+        });
+    }
+
     /// Declare the throughput for this group.
     ///
     /// All benchmarks in the group process the same amount of data,
