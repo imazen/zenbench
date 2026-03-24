@@ -362,7 +362,10 @@ impl SuiteResult {
                 // mean = typical performance
                 let min_str = format!("{:.*}", mean_dp, bench.summary.min / mean_divisor);
                 let mean_str = format!("{:.*}", mean_dp, bench.summary.mean / mean_divisor);
-                let sigma_str = format!("{:.*}", mean_dp, bench.summary.std_dev() / mean_divisor);
+                // MAD (median absolute deviation, scaled) instead of stddev.
+                // Robust to outliers — one 10x spike from a context switch
+                // doesn't destroy it like it does stddev.
+                let sigma_str = format!("{:.*}", mean_dp, bench.summary.mad / mean_divisor);
 
                 // vs baseline column: unit inside brackets, shared width
                 // Baseline: [260ns  262ns  265ns]
@@ -595,7 +598,7 @@ impl SuiteResult {
             // σ column
             if show_sigma {
                 add_col(&mut top, sigma_w, '┬');
-                hdr.push_str(&format!(" │ {:>sigma_w$}", "σ"));
+                hdr.push_str(&format!(" │ {:>sigma_w$}", "mad"));
                 add_col(&mut mid, sigma_w, '┼');
             }
 
