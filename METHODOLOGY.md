@@ -290,6 +290,129 @@ heavy processes before each measurement round. It cannot detect:
    CPU instructions. As Tratt showed, these can diverge for parallel or
    I/O-heavy code.
 
+## Future work: pause/resume for I/O isolation
+
+The `with_input().run()` API excludes setup and teardown from timing,
+but there's no way to exclude work *within* the timed region. If your
+benchmark reads a file, processes it, and writes output, you currently
+time all three. Google Benchmark's `PauseTiming()`/`ResumeTiming()` lets
+you bracket the part you care about.
+
+The problem: timer calls have their own overhead (~20-50ns each). For a
+microsecond-scale benchmark, two pause/resume calls per iteration add
+measurable bias. Google Benchmark documents this caveat.
+
+A possible design for zenbench:
+
+```rust,ignore
+b.iter(|| {
+    let data = load_file();       // not timed
+    b.resume();
+    let result = process(&data);  // timed
+    b.pause();
+    write_output(&result);        // not timed
+    result
+});
+```
+
+This requires `Bencher` to carry timer state and accumulate only the
+resumed intervals. The overhead of two `Instant::now()` calls per
+pause/resume is unavoidable — document it and let users decide.
+
+An alternative: `with_input` already handles the common case (expensive
+setup, cheap teardown). For the "I/O sandwich" pattern, users can
+restructure:
+
+```rust,ignore
+b.with_input(|| load_file())
+    .run(|data| process(&data))
+// output is dropped outside timing
+```
+
+This doesn't cover mid-benchmark I/O exclusion but handles most cases
+without timer overhead.
+
+## Future work: multithreaded benchmarking
+
+Several distinct problems need separate solutions.
+
+### Problem 1: Throughput under contention
+
+"How fast is this `Mutex<HashMap>` with 8 threads hammering it?"
+
+You need all threads to start simultaneously (barrier), run for a fixed
+duration, and report aggregate throughput. Google Benchmark does this
+with `Threads(N)` and an internal barrier.
+
+A zenbench design would add a thread count to the bencher:
+
+```rust,ignore
+group.bench_threaded("contended_map", 8, |b, thread_id| {
+    b.iter(|| {
+        map.lock().unwrap().insert(thread_id, 42);
+    })
+});
+```
+
+Key requirements:
+- All threads wait at a barrier before the timed region
+- Wall-clock time is the measurement (not per-thread CPU)
+- Thread creation/destruction excluded from timing
+- Report ops/sec across all threads, not per-thread
+
+### Problem 2: Parallel algorithm wall time
+
+"How fast does rayon sort this array?"
+
+Here the benchmark itself is single-threaded from the harness's
+perspective — it calls `data.par_sort()` which spawns threads
+internally. Wall-clock time is correct; thread-local CPU time
+would undercount.
+
+This *already works* in zenbench: `b.iter(|| data.par_sort())`
+measures wall-clock time, which includes all threads' work. The
+only issue is that the `cpu-time` feature (if enabled) measures
+only the calling thread's CPU time, which would be misleading.
+
+Should: document that `cpu-time` is per-thread and meaningless
+for parallel benchmarks. Consider adding `ProcessTime` measurement
+that aggregates all threads.
+
+### Problem 3: Benchmark isolation
+
+Our `Bencher` is `&mut` — single owner, not shareable across threads.
+This is correct: timing state must not be concurrent. For threaded
+benchmarks, the harness owns the timer and the user's closure runs on
+worker threads with a shared barrier.
+
+### What "doing it right" means
+
+1. **Barrier-synchronized start**: All threads begin the timed region
+   simultaneously. Without this, thread creation stagger dominates
+   short benchmarks.
+
+2. **Wall-clock primary**: For threaded benchmarks, wall-clock time is
+   the metric users care about. CPU time across threads is only useful
+   for efficiency analysis (CPU seconds per wall second).
+
+3. **Deterministic thread count**: The thread pool should be fixed, not
+   auto-detected. "8 threads" means 8, regardless of hardware. Users
+   can parameterize across thread counts.
+
+4. **Interleaving still works**: Threaded benchmarks within a comparison
+   group can still be interleaved round-by-round. The shuffle order
+   doesn't need to change — each benchmark just uses its own threads
+   during its sample.
+
+5. **Resource gating awareness**: N benchmark threads + system load
+   needs smarter gate checking. A 16-thread benchmark on a 16-core
+   machine leaves no room for background processes; the gate should
+   know the benchmark's thread count.
+
+None of this is implemented yet. The current API supports parallel code
+that manages its own threads internally (case 2). Explicit harness-level
+threading (cases 1 and 3) needs a new API.
+
 ## References
 
 - Mytkowicz, Diwan, Hauswirth, Sweeney. [Producing Wrong Data Without Doing Anything Obviously Wrong](https://dl.acm.org/doi/10.1145/1508284.1508275). ASPLOS 2009.
