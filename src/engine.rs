@@ -240,6 +240,15 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
     let mut measurement_time = std::time::Duration::ZERO;
 
     for round in 0..config.max_rounds {
+        // Hard wall-clock limit — includes gate waits. Safety net.
+        if group_start.elapsed() >= config.max_wall_time {
+            eprintln!(
+                "[zenbench] '{}' hit wall-clock limit ({:.0}s)",
+                group.name,
+                config.max_wall_time.as_secs_f64(),
+            );
+            break;
+        }
         // Check time limit against measurement time only (excludes gate waits).
         // Only enforce after min_rounds so slow benchmarks still get enough data.
         if round >= config.min_rounds && measurement_time >= config.max_time {
@@ -529,6 +538,9 @@ fn run_standalone(
     let start = Instant::now();
     let mut measurement_time = std::time::Duration::ZERO;
     for round in 0..config.max_rounds {
+        if start.elapsed() >= config.max_wall_time {
+            break;
+        }
         if round >= config.min_rounds && measurement_time >= config.max_time {
             break;
         }

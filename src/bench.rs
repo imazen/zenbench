@@ -508,6 +508,13 @@ pub struct GroupConfig {
     /// below this threshold — i.e., the 95% CI half-width is less than
     /// this fraction of the mean.
     pub target_precision: f64,
+    /// Hard wall-clock time limit for the entire group (including gate waits).
+    ///
+    /// Default: 120 seconds. Prevents runaway benchmarks from blocking CI
+    /// or interactive use indefinitely. This is a safety net, not a tuning
+    /// parameter — if you're hitting it, your benchmarks are too slow or
+    /// the system is too noisy.
+    pub max_wall_time: Duration,
     /// Cold-start measurement mode.
     ///
     /// When `true`, forces `min_iterations = 1`, `max_iterations = 1`,
@@ -536,6 +543,7 @@ impl Default for GroupConfig {
             sort_by_speed: false,
             auto_rounds: true,
             target_precision: 0.02,
+            max_wall_time: Duration::from_secs(120),
             cold_start: false,
         }
     }
@@ -599,6 +607,11 @@ impl GroupConfig {
 
     pub fn target_precision(&mut self, precision: f64) -> &mut Self {
         self.target_precision = precision;
+        self
+    }
+
+    pub fn max_wall_time(&mut self, dur: Duration) -> &mut Self {
+        self.max_wall_time = dur;
         self
     }
 
