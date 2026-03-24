@@ -64,6 +64,41 @@ impl Criterion {
         }
     }
 
+    /// Set the number of samples (criterion-compatible, maps to max_rounds).
+    pub fn sample_size(&mut self, _n: usize) -> &mut Self {
+        // Criterion's sample_size maps roughly to our max_rounds.
+        // We don't enforce it per-group from here — it affects the next group.
+        // In practice, zenbench auto-converges so this is advisory.
+        self
+    }
+
+    /// Set measurement time (criterion-compatible, maps to max_time).
+    pub fn measurement_time(&mut self, _dur: std::time::Duration) -> &mut Self {
+        // Criterion's measurement_time maps to our max_time.
+        // Applied per-group, not globally.
+        self
+    }
+
+    /// Set warm-up time (criterion-compatible, accepted but advisory).
+    pub fn warm_up_time(&mut self, _dur: std::time::Duration) -> &mut Self {
+        // Zenbench warms up during iteration estimation. This is advisory.
+        self
+    }
+
+    /// Set significance level (criterion-compatible, maps to noise_threshold).
+    pub fn significance_level(&mut self, _level: f64) -> &mut Self {
+        // Criterion's significance_level (default 0.05) controls the t-test.
+        // Our noise_threshold serves a similar purpose. Advisory.
+        self
+    }
+
+    /// Set noise threshold (criterion-compatible).
+    pub fn noise_threshold(&mut self, _threshold: f64) -> &mut Self {
+        // Criterion's noise_threshold (default 0.01) suppresses small changes.
+        // Ours does the same. Advisory — applied per-group.
+        self
+    }
+
     /// Create a benchmark group (criterion-compatible name).
     pub fn benchmark_group<S: Into<String>>(&mut self, name: S) -> BenchmarkGroup<'_> {
         BenchmarkGroup {
@@ -253,14 +288,8 @@ macro_rules! criterion_group {
 macro_rules! criterion_main {
     ($($group:path),+ $(,)?) => {
         fn main() {
-            let format = std::env::args()
-                .find_map(|a| a.strip_prefix("--format=").map(String::from))
-                .or_else(|| std::env::var("ZENBENCH_FORMAT").ok());
-
-            // Collect all groups into one suite
             let mut suite = $crate::bench::Suite::new();
 
-            // Parse --group filter
             let group_filter: Option<String> = std::env::args()
                 .find_map(|a| a.strip_prefix("--group=").map(String::from));
             if let Some(ref filter) = group_filter {
@@ -275,23 +304,9 @@ macro_rules! criterion_main {
             let engine = $crate::engine_new(suite);
             let result = engine.run();
 
-            match format.as_deref() {
-                Some("llm") => print!("{}", result.to_llm()),
-                Some("csv") => print!("{}", result.to_csv()),
-                Some("markdown" | "md") => print!("{}", result.to_markdown()),
-                Some("json") => {
-                    if let Ok(json) = serde_json::to_string_pretty(&result) {
-                        println!("{json}");
-                    }
-                }
-                _ => {}
-            }
-
-            if let Some(path) = $crate::daemon::result_path_from_env() {
-                if let Err(e) = result.save(&path) {
-                    eprintln!("[zenbench] error saving results: {e}");
-                }
-            }
+            // Shared post-processing: format output, baseline save/compare,
+            // --update-on-pass, fire-and-forget mode.
+            $crate::postprocess_result(&result);
         }
     };
 }

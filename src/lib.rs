@@ -36,6 +36,100 @@ mod timing;
 mod alloc;
 
 pub use bench::{BenchGroup, Bencher, GroupConfig, Suite, Throughput};
+
+/// Post-run processing: format output, save baseline, compare against baseline.
+///
+/// Shared between `main!` and `criterion_main!` macros. Not intended for
+/// direct use — call via the macros instead.
+#[doc(hidden)]
+pub fn postprocess_result(result: &SuiteResult) {
+    let args: Vec<String> = std::env::args().collect();
+    let format = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--format=").map(String::from))
+        .or_else(|| std::env::var("ZENBENCH_FORMAT").ok());
+    let save_baseline: Option<String> = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--save-baseline=").map(String::from));
+    let baseline_name: Option<String> = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--baseline=").map(String::from));
+    let max_regression: f64 = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--max-regression=").and_then(|v| v.parse().ok()))
+        .unwrap_or(5.0);
+    let update_on_pass = args.iter().any(|a| a == "--update-on-pass");
+
+    // Output in requested format (to stdout)
+    match format.as_deref() {
+        Some("llm") => print!("{}", result.to_llm()),
+        Some("csv") => print!("{}", result.to_csv()),
+        Some("markdown" | "md") => print!("{}", result.to_markdown()),
+        Some("json") => {
+            if let Ok(json) = serde_json::to_string_pretty(result) {
+                println!("{json}");
+            }
+        }
+        _ => {} // default: terminal report already printed to stderr
+    }
+
+    // Save as named baseline
+    if let Some(ref name) = save_baseline {
+        match baseline::save_baseline(result, name) {
+            Ok(path) => eprintln!("[zenbench] baseline '{name}' saved to {}", path.display()),
+            Err(e) => {
+                eprintln!("[zenbench] error saving baseline '{name}': {e}");
+                std::process::exit(2);
+            }
+        }
+    }
+
+    // Compare against named baseline
+    if let Some(ref name) = baseline_name {
+        match baseline::load_baseline(name) {
+            Ok(saved) => {
+                let comparison =
+                    baseline::compare_against_baseline(&saved, result, max_regression);
+                baseline::print_comparison_report(&comparison);
+
+                if comparison.regressions > 0 {
+                    eprintln!(
+                        "\n[zenbench] FAIL: {} regression(s) exceed {max_regression}% threshold",
+                        comparison.regressions,
+                    );
+                    std::process::exit(1);
+                } else {
+                    eprintln!(
+                        "\n[zenbench] PASS: no regressions exceed {max_regression}% threshold"
+                    );
+                    // --update-on-pass: overwrite baseline with current results
+                    if update_on_pass {
+                        match baseline::save_baseline(result, name) {
+                            Ok(path) => eprintln!(
+                                "[zenbench] baseline '{name}' updated (--update-on-pass) → {}",
+                                path.display()
+                            ),
+                            Err(e) => {
+                                eprintln!("[zenbench] warning: failed to update baseline: {e}");
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("[zenbench] {e}");
+                std::process::exit(2);
+            }
+        }
+    }
+
+    // Save results if in fire-and-forget mode
+    if let Some(path) = daemon::result_path_from_env()
+        && let Err(e) = result.save(&path)
+    {
+        eprintln!("[zenbench] error saving results: {e}");
+    }
+}
 #[cfg(feature = "alloc-profiling")]
 pub use alloc::{AllocProfiler, AllocStats};
 
@@ -153,93 +247,17 @@ pub fn run_and_save<F: FnOnce(&mut Suite)>(f: F) -> SuiteResult {
 macro_rules! main {
     (|$suite:ident| $body:block) => {
         fn main() {
-            // Parse args (cargo bench -- --format=llm --group=sorting --baseline=main)
-            let args: Vec<String> = std::env::args().collect();
-            let format = args
-                .iter()
-                .find_map(|a| a.strip_prefix("--format=").map(String::from))
-                .or_else(|| std::env::var("ZENBENCH_FORMAT").ok());
-            let group_filter: Option<String> = args
-                .iter()
+            let group_filter: Option<String> = std::env::args()
                 .find_map(|a| a.strip_prefix("--group=").map(String::from));
-            let save_baseline: Option<String> = args
-                .iter()
-                .find_map(|a| a.strip_prefix("--save-baseline=").map(String::from));
-            let baseline: Option<String> = args
-                .iter()
-                .find_map(|a| a.strip_prefix("--baseline=").map(String::from));
-            let max_regression: f64 = args
-                .iter()
-                .find_map(|a| a.strip_prefix("--max-regression=").and_then(|v| v.parse().ok()))
-                .unwrap_or(5.0); // default: 5% threshold
 
             let result = $crate::run(|$suite: &mut $crate::Suite| {
-                // Set group filter before user code runs — groups are
-                // skipped during execution, not filtered from output.
                 if let Some(ref filter) = group_filter {
                     $suite.set_group_filter(filter.clone());
                 }
                 $body
             });
 
-            // Output in requested format (to stdout)
-            match format.as_deref() {
-                Some("llm") => print!("{}", result.to_llm()),
-                Some("csv") => print!("{}", result.to_csv()),
-                Some("markdown" | "md") => print!("{}", result.to_markdown()),
-                Some("json") => {
-                    if let Ok(json) = serde_json::to_string_pretty(&result) {
-                        println!("{json}");
-                    }
-                }
-                _ => {} // default: terminal report already printed to stderr
-            }
-
-            // Save as named baseline
-            if let Some(ref name) = save_baseline {
-                match $crate::baseline::save_baseline(&result, name) {
-                    Ok(path) => eprintln!("[zenbench] baseline '{}' saved to {}", name, path.display()),
-                    Err(e) => {
-                        eprintln!("[zenbench] error saving baseline '{}': {}", name, e);
-                        std::process::exit(2);
-                    }
-                }
-            }
-
-            // Compare against named baseline
-            if let Some(ref name) = baseline {
-                match $crate::baseline::load_baseline(name) {
-                    Ok(saved) => {
-                        let comparison = $crate::baseline::compare_against_baseline(
-                            &saved,
-                            &result,
-                            max_regression,
-                        );
-                        $crate::baseline::print_comparison_report(&comparison);
-
-                        if comparison.regressions > 0 {
-                            eprintln!(
-                                "\n[zenbench] FAIL: {} regression(s) exceed {}% threshold",
-                                comparison.regressions, max_regression,
-                            );
-                            std::process::exit(1);
-                        } else {
-                            eprintln!("\n[zenbench] PASS: no regressions exceed {}% threshold", max_regression);
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("[zenbench] {e}");
-                        std::process::exit(2);
-                    }
-                }
-            }
-
-            // Save results if in fire-and-forget mode
-            if let Some(path) = $crate::daemon::result_path_from_env() {
-                if let Err(e) = result.save(&path) {
-                    eprintln!("[zenbench] error saving results: {e}");
-                }
-            }
+            $crate::postprocess_result(&result);
         }
     };
 }
