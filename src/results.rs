@@ -185,7 +185,7 @@ impl SuiteResult {
                 }
 
                 // Section 3: Measurement
-                let mut measurement = vec![
+                let measurement = vec![
                     format!("min={}", crate::format::format_ns(s.min)),
                     format!("mean={}", crate::format::format_ns(s.mean)),
                     format!("median={}", crate::format::format_ns(s.median)),
@@ -275,105 +275,135 @@ impl SuiteResult {
 
         // Comparison groups
         for comp in &self.comparisons {
+            out.push_str(&format!("## {}\n\n", comp.group_name));
+
+            // Methodology line
+            let calls_str = if comp.iterations_per_sample == 1 {
+                "1 call (cold start)".to_string()
+            } else {
+                format!("{} calls", comp.iterations_per_sample)
+            };
             out.push_str(&format!(
-                "## {} ({} rounds)\n\n",
-                comp.group_name, comp.completed_rounds
+                "*{} rounds \u{d7} {}*\n\n",
+                comp.completed_rounds, calls_str
             ));
 
-            // Build table columns
             let has_throughput = comp.throughput.is_some();
-            let has_cpu = comp.benchmarks.iter().any(|b| b.cpu_summary.is_some());
-            if has_throughput && has_cpu {
-                out.push_str("| Benchmark | Mean | CPU | Eff% | Throughput |\n");
-                out.push_str("|-----------|------|-----|------|------------|\n");
+
+            // Find baseline name
+            let baseline_name = comp
+                .analyses
+                .first()
+                .map(|(base, _, _)| base.as_str())
+                .unwrap_or_else(|| {
+                    comp.benchmarks
+                        .first()
+                        .map(|b| b.name.as_str())
+                        .unwrap_or("")
+                });
+
+            // Build analysis lookup: candidate name -> analysis (only baseline pairs)
+            let analyses: std::collections::HashMap<&str, &PairedAnalysis> = comp
+                .analyses
+                .iter()
+                .filter(|(base, _, _)| base == baseline_name)
+                .map(|(_, cand, a)| (cand.as_str(), a))
+                .collect();
+
+            let has_comparisons = comp.benchmarks.len() >= 2;
+
+            // Table header
+            if has_throughput && has_comparisons {
+                out.push_str("| Benchmark | Min | Mean | vs Base | Throughput |\n");
+                out.push_str("|-----------|-----|------|---------|------------|\n");
             } else if has_throughput {
-                out.push_str("| Benchmark | Mean | Median | Throughput |\n");
-                out.push_str("|-----------|------|--------|------------|\n");
-            } else if has_cpu {
-                out.push_str("| Benchmark | Mean | CPU | Eff% | StdDev |\n");
-                out.push_str("|-----------|------|-----|------|--------|\n");
+                out.push_str("| Benchmark | Min | Mean | Throughput |\n");
+                out.push_str("|-----------|-----|------|------------|\n");
+            } else if has_comparisons {
+                out.push_str("| Benchmark | Min | Mean | vs Base |\n");
+                out.push_str("|-----------|-----|------|----------|\n");
             } else {
-                out.push_str("| Benchmark | Mean | Median | StdDev |\n");
-                out.push_str("|-----------|------|--------|--------|\n");
+                out.push_str("| Benchmark | Min | Mean |\n");
+                out.push_str("|-----------|-----|------|\n");
             }
 
-            for bench in &comp.benchmarks {
-                let cpu_mean = bench
-                    .cpu_summary
-                    .as_ref()
-                    .map(|c| format_ns(c.mean))
-                    .unwrap_or_default();
-                let efficiency = bench
-                    .cpu_summary
-                    .as_ref()
-                    .map(|c| {
-                        if bench.summary.mean > 0.0 {
-                            format!("{:.0}%", c.mean / bench.summary.mean * 100.0)
-                        } else {
-                            String::new()
-                        }
-                    })
-                    .unwrap_or_default();
+            let has_subgroups = comp.benchmarks.iter().any(|b| b.subgroup.is_some());
+            let mut current_subgroup: Option<&str> = None;
 
-                if has_throughput && has_cpu {
-                    let tp = comp
-                        .throughput
+            for bench in &comp.benchmarks {
+                // Subgroup header row
+                if has_subgroups {
+                    let row_sg = bench.subgroup.as_deref();
+                    if row_sg != current_subgroup {
+                        current_subgroup = row_sg;
+                        if let Some(label) = row_sg {
+                            let n_cols = if has_throughput && has_comparisons {
+                                5
+                            } else if has_throughput || has_comparisons {
+                                4
+                            } else {
+                                3
+                            };
+                            let empty_cols = " |".repeat(n_cols - 1);
+                            out.push_str(&format!("| **{label}** |{empty_cols}\n"));
+                        }
+                    }
+                }
+
+                let min_str = format_ns(bench.summary.min);
+                let mean_str = format_ns(bench.summary.mean);
+
+                // vs Base column
+                let vs_base = if has_comparisons {
+                    if bench.name == baseline_name {
+                        mean_str.clone()
+                    } else if let Some(analysis) = analyses.get(bench.name.as_str()) {
+                        let base_mean = analysis.baseline.mean;
+                        if base_mean.abs() > f64::EPSILON {
+                            let lo_pct = analysis.ci_lower / base_mean * 100.0;
+                            let mid_pct = analysis.ci_median / base_mean * 100.0;
+                            let hi_pct = analysis.ci_upper / base_mean * 100.0;
+                            format!("[{:+.1}%  {:+.1}%  {:+.1}%]", lo_pct, mid_pct, hi_pct)
+                        } else {
+                            format!("{:+.1}%", analysis.pct_change)
+                        }
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                };
+
+                let tp_str = if has_throughput {
+                    comp.throughput
                         .as_ref()
                         .map(|t| {
                             t.format_named(bench.summary.mean, comp.throughput_unit.as_deref())
                         })
-                        .unwrap_or_default();
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                };
+
+                if has_throughput && has_comparisons {
                     out.push_str(&format!(
                         "| {} | {} | {} | {} | {} |\n",
-                        bench.name,
-                        format_ns(bench.summary.mean),
-                        cpu_mean,
-                        efficiency,
-                        tp,
+                        bench.name, min_str, mean_str, vs_base, tp_str,
                     ));
                 } else if has_throughput {
-                    let tp = comp
-                        .throughput
-                        .as_ref()
-                        .map(|t| {
-                            t.format_named(bench.summary.mean, comp.throughput_unit.as_deref())
-                        })
-                        .unwrap_or_default();
                     out.push_str(&format!(
                         "| {} | {} | {} | {} |\n",
-                        bench.name,
-                        format_ns(bench.summary.mean),
-                        format_ns(bench.summary.median),
-                        tp,
+                        bench.name, min_str, mean_str, tp_str,
                     ));
-                } else if has_cpu {
+                } else if has_comparisons {
                     out.push_str(&format!(
-                        "| {} | {} | {} | {} | \u{b1}{} |\n",
-                        bench.name,
-                        format_ns(bench.summary.mean),
-                        cpu_mean,
-                        efficiency,
-                        format_ns(bench.summary.std_dev()),
+                        "| {} | {} | {} | {} |\n",
+                        bench.name, min_str, mean_str, vs_base,
                     ));
                 } else {
                     out.push_str(&format!(
-                        "| {} | {} | {} | \u{b1}{} |\n",
-                        bench.name,
-                        format_ns(bench.summary.mean),
-                        format_ns(bench.summary.median),
-                        format_ns(bench.summary.std_dev()),
-                    ));
-                }
-            }
-
-            // Paired comparisons
-            if !comp.analyses.is_empty() {
-                out.push('\n');
-                for (base, cand, analysis) in &comp.analyses {
-                    let sig = if analysis.significant { " **" } else { "" };
-                    out.push_str(&format!(
-                        "- **{base}** vs **{cand}**: {:+.2}%{sig} (d={:.2}, p={:.4})\n",
-                        analysis.pct_change, analysis.cohens_d, analysis.wilcoxon_p,
+                        "| {} | {} | {} |\n",
+                        bench.name, min_str, mean_str,
                     ));
                 }
             }
@@ -394,15 +424,14 @@ impl SuiteResult {
         // Standalone benchmarks
         if !self.standalones.is_empty() {
             out.push_str("## Standalone\n\n");
-            out.push_str("| Benchmark | Mean | Median | StdDev |\n");
-            out.push_str("|-----------|------|--------|--------|\n");
+            out.push_str("| Benchmark | Min | Mean |\n");
+            out.push_str("|-----------|-----|------|\n");
             for bench in &self.standalones {
                 out.push_str(&format!(
-                    "| {} | {} | {} | \u{b1}{} |\n",
+                    "| {} | {} | {} |\n",
                     bench.name,
+                    format_ns(bench.summary.min),
                     format_ns(bench.summary.mean),
-                    format_ns(bench.summary.median),
-                    format_ns(bench.summary.std_dev()),
                 ));
             }
         }
@@ -416,11 +445,33 @@ impl SuiteResult {
 
         // Header
         out.push_str(
-            "group,benchmark,mean_ns,std_dev_ns,median_ns,mad_ns,min_ns,max_ns,n,cv,cpu_mean_ns,cpu_efficiency,throughput_value,throughput_unit\n",
+            "group,benchmark,subgroup,mean_ns,std_dev_ns,median_ns,mad_ns,min_ns,max_ns,n,cv,\
+             cold_start_ns,cpu_mean_ns,cpu_efficiency,throughput_value,throughput_unit,\
+             vs_base_pct,vs_base_ci_lo_pct,vs_base_ci_hi_pct,significant,cohens_d,wilcoxon_p,drift_r\n",
         );
 
         // Comparison groups
         for comp in &self.comparisons {
+            // Find baseline name
+            let baseline_name = comp
+                .analyses
+                .first()
+                .map(|(base, _, _)| base.as_str())
+                .unwrap_or_else(|| {
+                    comp.benchmarks
+                        .first()
+                        .map(|b| b.name.as_str())
+                        .unwrap_or("")
+                });
+
+            // Build analysis lookup: candidate name -> analysis (only baseline pairs)
+            let analyses: std::collections::HashMap<&str, &PairedAnalysis> = comp
+                .analyses
+                .iter()
+                .filter(|(base, _, _)| base == baseline_name)
+                .map(|(_, cand, a)| (cand.as_str(), a))
+                .collect();
+
             for bench in &comp.benchmarks {
                 let (tp_val, tp_unit) = comp
                     .throughput
@@ -445,10 +496,67 @@ impl SuiteResult {
                     })
                     .unwrap_or_else(|| (String::new(), String::new()));
 
+                let cold = if bench.cold_start_ns > 0.0 {
+                    format!("{:.2}", bench.cold_start_ns)
+                } else {
+                    String::new()
+                };
+
+                let subgroup = bench
+                    .subgroup
+                    .as_deref()
+                    .map(csv_escape)
+                    .unwrap_or_default();
+
+                // vs-base columns
+                let (vs_pct, vs_ci_lo, vs_ci_hi, significant, cohens_d, wilcoxon_p, drift_r) =
+                    if bench.name == baseline_name {
+                        // baseline row: no comparison values
+                        (
+                            String::new(),
+                            String::new(),
+                            String::new(),
+                            String::new(),
+                            String::new(),
+                            String::new(),
+                            String::new(),
+                        )
+                    } else if let Some(analysis) = analyses.get(bench.name.as_str()) {
+                        let base_mean = analysis.baseline.mean;
+                        let (ci_lo, ci_hi) = if base_mean.abs() > f64::EPSILON {
+                            (
+                                format!("{:.4}", analysis.ci_lower / base_mean * 100.0),
+                                format!("{:.4}", analysis.ci_upper / base_mean * 100.0),
+                            )
+                        } else {
+                            (String::new(), String::new())
+                        };
+                        (
+                            format!("{:.4}", analysis.pct_change),
+                            ci_lo,
+                            ci_hi,
+                            format!("{}", analysis.significant),
+                            format!("{:.4}", analysis.cohens_d),
+                            format!("{:.6}", analysis.wilcoxon_p),
+                            format!("{:.4}", analysis.drift_correlation),
+                        )
+                    } else {
+                        (
+                            String::new(),
+                            String::new(),
+                            String::new(),
+                            String::new(),
+                            String::new(),
+                            String::new(),
+                            String::new(),
+                        )
+                    };
+
                 out.push_str(&format!(
-                    "{},{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{},{:.4},{},{},{},{}\n",
+                    "{},{},{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{},{:.4},{},{},{},{},{},{},{},{},{},{},{},{}\n",
                     csv_escape(&comp.group_name),
                     csv_escape(&bench.name),
+                    subgroup,
                     bench.summary.mean,
                     bench.summary.std_dev(),
                     bench.summary.median,
@@ -457,10 +565,18 @@ impl SuiteResult {
                     bench.summary.max,
                     bench.summary.n,
                     bench.summary.cv(),
+                    cold,
                     cpu_mean,
                     cpu_eff,
                     tp_val,
                     tp_unit,
+                    vs_pct,
+                    vs_ci_lo,
+                    vs_ci_hi,
+                    significant,
+                    cohens_d,
+                    wilcoxon_p,
+                    drift_r,
                 ));
             }
         }
@@ -480,9 +596,22 @@ impl SuiteResult {
                 })
                 .unwrap_or_else(|| (String::new(), String::new()));
 
+            let cold = if bench.cold_start_ns > 0.0 {
+                format!("{:.2}", bench.cold_start_ns)
+            } else {
+                String::new()
+            };
+
+            let subgroup = bench
+                .subgroup
+                .as_deref()
+                .map(csv_escape)
+                .unwrap_or_default();
+
             out.push_str(&format!(
-                ",{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{},{:.4},{},{},,\n",
+                ",{},{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{},{:.4},{},{},{},,,,,,,,\n",
                 csv_escape(&bench.name),
+                subgroup,
                 bench.summary.mean,
                 bench.summary.std_dev(),
                 bench.summary.median,
@@ -491,6 +620,7 @@ impl SuiteResult {
                 bench.summary.max,
                 bench.summary.n,
                 bench.summary.cv(),
+                cold,
                 cpu_mean,
                 cpu_eff,
             ));
