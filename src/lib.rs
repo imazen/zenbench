@@ -130,19 +130,25 @@ pub fn run_and_save<F: FnOnce(&mut Suite)>(f: F) -> SuiteResult {
 macro_rules! main {
     (|$suite:ident| $body:block) => {
         fn main() {
+            // Parse --format=X from args (cargo bench -- --format=llm)
+            // or fall back to ZENBENCH_FORMAT env var.
+            let format = std::env::args()
+                .find_map(|a| a.strip_prefix("--format=").map(String::from))
+                .or_else(|| std::env::var("ZENBENCH_FORMAT").ok());
+
             let result = $crate::run(|$suite: &mut $crate::Suite| $body);
 
-            // Check ZENBENCH_FORMAT env var for output format
-            match std::env::var("ZENBENCH_FORMAT").as_deref() {
-                Ok("llm") => print!("{}", result.to_llm()),
-                Ok("csv") => print!("{}", result.to_csv()),
-                Ok("markdown" | "md") => print!("{}", result.to_markdown()),
-                Ok("json") => {
-                    if let Err(e) = result.save("/dev/stdout") {
-                        eprintln!("[zenbench] error writing JSON: {e}");
+            // Output in requested format (to stdout)
+            match format.as_deref() {
+                Some("llm") => print!("{}", result.to_llm()),
+                Some("csv") => print!("{}", result.to_csv()),
+                Some("markdown" | "md") => print!("{}", result.to_markdown()),
+                Some("json") => {
+                    if let Ok(json) = serde_json::to_string_pretty(&result) {
+                        println!("{json}");
                     }
                 }
-                _ => {} // default: terminal report already printed
+                _ => {} // default: terminal report already printed to stderr
             }
 
             // Save results if in fire-and-forget mode

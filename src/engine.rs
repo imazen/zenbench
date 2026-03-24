@@ -54,6 +54,22 @@ impl Engine {
         let git_hash = platform::git_commit_hash();
         let start = Instant::now();
 
+        // Auto-save: write results to a temp file so LLMs/tools can re-read
+        // without re-running. Opt out with ZENBENCH_NO_SAVE=1.
+        let save_path = if std::env::var("ZENBENCH_NO_SAVE").is_ok() {
+            None
+        } else {
+            Some(auto_save_path(&run_id))
+        };
+        if let Some(path) = &save_path {
+            eprintln!("[zenbench] results → {}", path.display());
+            // Write incomplete marker so killed runs are detectable
+            let _ = std::fs::write(
+                path,
+                "# zenbench results (INCOMPLETE — benchmark still running)\n",
+            );
+        }
+
         // Acquire cross-process lock if configured
         let _lock = self
             .lock_dir
@@ -69,13 +85,34 @@ impl Engine {
         let mut comparisons = Vec::new();
         let mut standalones = Vec::new();
 
-        // Run comparison groups (interleaved)
+        // Run comparison groups (interleaved), streaming results to file
         for group in &mut self.suite.groups {
             if group.benchmarks.is_empty() {
                 continue;
             }
             let result = run_comparison_group(group, &mut self.gate);
             comparisons.push(result);
+
+            // Stream: append completed group's LLM lines to the save file
+            if let Some(path) = &save_path {
+                let partial = SuiteResult {
+                    run_id: run_id.clone(),
+                    timestamp: chrono_now(),
+                    git_hash: git_hash.clone(),
+                    ci_environment: ci.clone(),
+                    comparisons: comparisons.clone(),
+                    standalones: Vec::new(),
+                    total_time: start.elapsed(),
+                    gate_waits: self.gate.total_waits(),
+                    gate_wait_time: self.gate.total_wait_time(),
+                    unreliable: false,
+                };
+                let n_groups = comparisons.len();
+                let mut content =
+                    format!("# zenbench results (INCOMPLETE — {n_groups} groups done so far)\n",);
+                content.push_str(&partial.to_llm());
+                let _ = std::fs::write(path, &content);
+            }
         }
 
         // Run standalone benchmarks
@@ -99,6 +136,13 @@ impl Engine {
             gate_wait_time: self.gate.total_wait_time(),
             unreliable: gate_unreliable,
         };
+
+        // Write final complete results
+        if let Some(path) = &save_path {
+            let mut content = String::from("# zenbench results (complete)\n");
+            content.push_str(&result.to_llm());
+            let _ = std::fs::write(path, &content);
+        }
 
         // Print results to stderr (includes inline footnotes for issues)
         result.print_report();
@@ -491,6 +535,15 @@ fn run_standalone(
         subgroup: bench.subgroup.clone(),
         cold_start_ns: _cold_start_ns as f64,
     }
+}
+
+/// Generate a temp file path for auto-saving results.
+/// Uses PID + run_id for uniqueness — no filesystem round-trips
+/// (Windows' GetTempFileName is notoriously slow).
+fn auto_save_path(run_id: &RunId) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join("zenbench");
+    let _ = std::fs::create_dir_all(&dir);
+    dir.join(format!("zenbench-{}.txt", run_id))
 }
 
 /// Compute streaming mean and stddev of per-iteration times.
