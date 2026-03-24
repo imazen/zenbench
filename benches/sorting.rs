@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::sync::Mutex;
 use zenbench::Throughput;
 use zenbench::black_box;
 
@@ -54,7 +56,24 @@ zenbench::main!(|suite| {
         });
     });
 
-    // Group 3: sort sizes
+    // Group 3: contended data structures
+    suite.compare("contention", |group| {
+        for &threads in &[1, 2, 4] {
+            let label = format!("mutex_map_{threads}t");
+            group.bench_contended(
+                label,
+                threads,
+                || Mutex::new(HashMap::<u64, u64>::new()),
+                |b, shared, tid| {
+                    b.iter(|| {
+                        shared.lock().unwrap().insert(tid as u64, black_box(42));
+                    })
+                },
+            );
+        }
+    });
+
+    // Group 4: sort sizes
     suite.compare("sort_sizes", |group| {
         for &size in &[10, 100, 1000, 10_000] {
             let label = format!("unstable_{size}");

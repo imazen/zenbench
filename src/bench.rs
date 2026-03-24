@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Barrier};
 use std::time::Duration;
 
 /// Throughput declaration for a benchmark group.
@@ -209,6 +210,76 @@ impl BenchGroup {
                 .collect(),
             subgroup: self.current_subgroup.clone(),
             func: BenchFn::new(f),
+        });
+    }
+
+    /// Add a multithreaded contention benchmark.
+    ///
+    /// Spawns `threads` threads that all start simultaneously (barrier-synchronized)
+    /// and run the benchmark closure in parallel. Measures wall-clock time from
+    /// barrier release to all threads completing — this is the throughput under
+    /// contention that your users experience.
+    ///
+    /// The `setup` closure runs once to create shared state (typically an `Arc`).
+    /// The `work` closure runs on each thread with a reference to the shared state
+    /// and the thread index (0..threads).
+    ///
+    /// ```rust,ignore
+    /// group.bench_contended("mutex_map", 8,
+    ///     || Arc::new(Mutex::new(HashMap::new())),
+    ///     |b, shared, thread_id| {
+    ///         b.iter(|| { shared.lock().unwrap().insert(thread_id, 42); })
+    ///     },
+    /// );
+    /// ```
+    pub fn bench_contended<S, Setup, Work>(
+        &mut self,
+        name: impl Into<String>,
+        threads: usize,
+        setup: Setup,
+        work: Work,
+    ) where
+        S: Send + Sync + 'static,
+        Setup: Fn() -> S + Send + 'static,
+        Work: Fn(&mut Bencher, &S, usize) + Send + Sync + Clone + 'static,
+    {
+        let name = name.into();
+        let threads = threads.max(1);
+
+        self.benchmarks.push(Benchmark {
+            name,
+            tags: vec![("threads".to_string(), threads.to_string())],
+            subgroup: self.current_subgroup.clone(),
+            func: BenchFn::new(move |bencher: &mut Bencher| {
+                let shared = setup();
+                let shared = Arc::new(shared);
+                let iterations = bencher.iterations;
+                let barrier = Arc::new(Barrier::new(threads + 1)); // +1 for the timing thread
+
+                let mut handles = Vec::with_capacity(threads);
+                for tid in 0..threads {
+                    let shared = shared.clone();
+                    let barrier = barrier.clone();
+                    let work = work.clone();
+                    handles.push(std::thread::spawn(move || {
+                        // Each thread gets its own bencher for iteration counting
+                        let mut thread_bencher = Bencher::new(iterations);
+                        barrier.wait(); // synchronized start
+                        work(&mut thread_bencher, &shared, tid);
+                        barrier.wait(); // synchronized end
+                    }));
+                }
+
+                // Timing thread: wait for all threads to start, then time until done
+                barrier.wait(); // all threads released
+                let start = std::time::Instant::now();
+                barrier.wait(); // all threads finished
+                bencher.elapsed_ns = start.elapsed().as_nanos() as u64;
+
+                for h in handles {
+                    h.join().expect("benchmark thread panicked");
+                }
+            }),
         });
     }
 
