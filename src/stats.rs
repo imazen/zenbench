@@ -142,7 +142,10 @@ pub struct PairedAnalysis {
     /// Number of outliers detected.
     pub n_outliers: usize,
     /// Bootstrap 95% confidence interval for the mean difference (ns).
+    /// All three are percentiles of the bootstrap distribution.
     pub ci_lower: f64,
+    /// Bootstrap median of the paired difference (p50).
+    pub ci_median: f64,
     pub ci_upper: f64,
     /// Drift correlation: Spearman rank correlation of measurement index vs time.
     /// Values near ±1 indicate systematic drift (thermal throttling, etc.).
@@ -218,7 +221,7 @@ impl PairedAnalysis {
         };
 
         // Bootstrap 95% CI on mean diff
-        let (ci_lower, ci_upper) = bootstrap_ci(&clean_diffs, 10_000, 0.95);
+        let (ci_lower, ci_median, ci_upper) = bootstrap_ci(&clean_diffs, 10_000, 0.95);
 
         // Drift detection: Spearman correlation of index vs diff
         let drift_correlation = spearman_correlation(&clean_diffs);
@@ -241,6 +244,7 @@ impl PairedAnalysis {
             n_samples: n,
             n_outliers,
             ci_lower,
+            ci_median,
             ci_upper,
             drift_correlation,
             wilcoxon_p,
@@ -304,11 +308,15 @@ fn iqr_range(values: &[f64]) -> Option<(f64, f64)> {
 
 /// Bootstrap confidence interval for the mean of `values`.
 ///
+/// Returns (lower, median, upper) — the lower and upper bounds of the CI
+/// plus the bootstrap median. All three are percentiles of the bootstrap
+/// distribution, so they're internally consistent.
+///
 /// Uses a simple xoshiro256** PRNG to avoid depending on `rand`.
-fn bootstrap_ci(values: &[f64], n_resamples: usize, confidence: f64) -> (f64, f64) {
+fn bootstrap_ci(values: &[f64], n_resamples: usize, confidence: f64) -> (f64, f64, f64) {
     if values.len() < 2 {
         let m = values.first().copied().unwrap_or(0.0);
-        return (m, m);
+        return (m, m, m);
     }
 
     let n = values.len();
@@ -330,8 +338,10 @@ fn bootstrap_ci(values: &[f64], n_resamples: usize, confidence: f64) -> (f64, f6
     let lo_idx = ((alpha / 2.0) * means.len() as f64) as usize;
     let hi_idx = ((1.0 - alpha / 2.0) * means.len() as f64) as usize;
 
+    let med_idx = means.len() / 2;
     (
         means[lo_idx.min(means.len() - 1)],
+        means[med_idx],
         means[hi_idx.min(means.len() - 1)],
     )
 }
@@ -560,7 +570,7 @@ mod tests {
     #[test]
     fn bootstrap_ci_basic() {
         let vals: Vec<f64> = (0..100).map(|i| 100.0 + i as f64 * 0.01).collect();
-        let (lo, hi) = bootstrap_ci(&vals, 5000, 0.95);
+        let (lo, _med, hi) = bootstrap_ci(&vals, 5000, 0.95);
         assert!(lo < hi);
         let mean = vals.iter().sum::<f64>() / vals.len() as f64;
         assert!(lo <= mean && mean <= hi);

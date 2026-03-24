@@ -385,7 +385,7 @@ impl SuiteResult {
                     let base_mean = analysis.baseline.mean;
                     if base_mean.abs() > f64::EPSILON {
                         let lo_pct = analysis.ci_lower / base_mean * 100.0;
-                        let mid_pct = analysis.pct_change;
+                        let mid_pct = analysis.ci_median / base_mean * 100.0;
                         let hi_pct = analysis.ci_upper / base_mean * 100.0;
                         let color = if analysis.significant {
                             if mid_pct < 0.0 { GREEN } else { RED }
@@ -602,7 +602,7 @@ impl SuiteResult {
             // vs base column
             if has_comparisons {
                 add_col(&mut top, vs_w, '┬');
-                hdr.push_str(&format!(" │ {:^vs_w$}", "[lo · mean · hi] 95%ci"));
+                hdr.push_str(&format!(" │ {:>vs_w$}", "95% CI vs base"));
                 add_col(&mut mid, vs_w, '┼');
             }
 
