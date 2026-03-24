@@ -58,6 +58,18 @@ impl Engine {
         let timer_res = platform::timer_resolution_ns();
         let loop_overhead_ns = measure_loop_overhead();
 
+        // Run calibration workloads (opt-out: ZENBENCH_NO_CALIBRATE=1)
+        let calibration = if std::env::var("ZENBENCH_NO_CALIBRATE").is_err() {
+            let cal = crate::calibration::run_calibration();
+            eprintln!(
+                "[zenbench] calibration: int={:.2}ns/iter mem_bw={:.1}GiB/s mem_lat={:.1}ns",
+                cal.integer_ns, cal.memory_bw_gibps, cal.memory_lat_ns,
+            );
+            Some(cal)
+        } else {
+            None
+        };
+
         // Try to use hardware TSC timer for sub-ns precision
         #[cfg(feature = "precise-timing")]
         let tsc_ticks_per_ns: Option<f64> = match crate::timing::TscTimer::new() {
@@ -176,6 +188,7 @@ impl Engine {
                     timer_resolution_ns: timer_res,
                     loop_overhead_ns,
                     testbed: testbed.clone(),
+                    calibration: calibration.clone(),
                 };
                 let n_groups = comparisons.len();
                 let mut content =
@@ -218,6 +231,7 @@ impl Engine {
             timer_resolution_ns: timer_res,
             loop_overhead_ns,
             testbed,
+            calibration,
         };
 
         // Write final complete results

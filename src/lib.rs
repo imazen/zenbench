@@ -18,6 +18,7 @@
 
 mod bench;
 pub mod baseline;
+pub mod calibration;
 mod checks;
 mod ci;
 pub mod criterion_compat;

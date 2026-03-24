@@ -22,6 +22,9 @@ precise-timing = []
 # Install as #[global_allocator] in your bench binary to activate.
 # Requires unsafe code in the alloc module only.
 alloc-profiling = []
+# Enables async benchmarking via Bencher::to_async(runtime).
+# Requires tokio runtime. Uses block_on() inside sync loop — same as criterion.
+async = ["dep:tokio"]
 # MCP server support (future)
 # mcp = []
 
@@ -41,6 +44,7 @@ sysinfo = "0.38"
 fs4 = { version = "0.13", features = ["sync"] }
 clap = { version = "4", features = ["derive"], optional = true }
 cpu-time = { version = "1.0.0", optional = true }
+tokio = { version = "1", features = ["rt"], optional = true }
 
 [[bench]]
 name = "sorting"
@@ -65,3 +69,4 @@ harness = false
 [dev-dependencies]
 divan = "0.1"
 criterion = { version = "0.8", features = ["html_reports"] }
+tokio = { version = "1", features = ["rt", "macros"] }

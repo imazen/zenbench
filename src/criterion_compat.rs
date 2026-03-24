@@ -53,6 +53,11 @@ impl From<BenchmarkId> for String {
 /// `c.bench_function("name", ...)` → `suite.bench("name", ...)`.
 pub struct Criterion {
     suite: Suite,
+    // Stored config to apply to the next group created
+    config_max_rounds: Option<usize>,
+    config_max_time: Option<std::time::Duration>,
+    config_warmup_time: Option<std::time::Duration>,
+    config_noise_threshold: Option<f64>,
 }
 
 impl Criterion {
@@ -61,41 +66,39 @@ impl Criterion {
     pub fn default() -> Self {
         Self {
             suite: Suite::new(),
+            config_max_rounds: None,
+            config_max_time: None,
+            config_warmup_time: None,
+            config_noise_threshold: None,
         }
     }
 
     /// Set the number of samples (criterion-compatible, maps to max_rounds).
-    pub fn sample_size(&mut self, _n: usize) -> &mut Self {
-        // Criterion's sample_size maps roughly to our max_rounds.
-        // We don't enforce it per-group from here — it affects the next group.
-        // In practice, zenbench auto-converges so this is advisory.
+    pub fn sample_size(&mut self, n: usize) -> &mut Self {
+        self.config_max_rounds = Some(n);
         self
     }
 
     /// Set measurement time (criterion-compatible, maps to max_time).
-    pub fn measurement_time(&mut self, _dur: std::time::Duration) -> &mut Self {
-        // Criterion's measurement_time maps to our max_time.
-        // Applied per-group, not globally.
+    pub fn measurement_time(&mut self, dur: std::time::Duration) -> &mut Self {
+        self.config_max_time = Some(dur);
         self
     }
 
-    /// Set warm-up time (criterion-compatible, accepted but advisory).
-    pub fn warm_up_time(&mut self, _dur: std::time::Duration) -> &mut Self {
-        // Zenbench warms up during iteration estimation. This is advisory.
+    /// Set warm-up time (criterion-compatible).
+    pub fn warm_up_time(&mut self, dur: std::time::Duration) -> &mut Self {
+        self.config_warmup_time = Some(dur);
         self
     }
 
-    /// Set significance level (criterion-compatible, maps to noise_threshold).
+    /// Set significance level (criterion-compatible, accepted but advisory).
     pub fn significance_level(&mut self, _level: f64) -> &mut Self {
-        // Criterion's significance_level (default 0.05) controls the t-test.
-        // Our noise_threshold serves a similar purpose. Advisory.
         self
     }
 
     /// Set noise threshold (criterion-compatible).
-    pub fn noise_threshold(&mut self, _threshold: f64) -> &mut Self {
-        // Criterion's noise_threshold (default 0.01) suppresses small changes.
-        // Ours does the same. Advisory — applied per-group.
+    pub fn noise_threshold(&mut self, threshold: f64) -> &mut Self {
+        self.config_noise_threshold = Some(threshold);
         self
     }
 
@@ -105,6 +108,10 @@ impl Criterion {
             name: name.into(),
             suite: &mut self.suite,
             group: None,
+            config_max_rounds: self.config_max_rounds,
+            config_max_time: self.config_max_time,
+            config_warmup_time: self.config_warmup_time,
+            config_noise_threshold: self.config_noise_threshold,
         }
     }
 
@@ -156,12 +163,31 @@ pub struct BenchmarkGroup<'a> {
     name: String,
     suite: &'a mut Suite,
     group: Option<crate::bench::BenchGroup>,
+    // Config inherited from Criterion
+    config_max_rounds: Option<usize>,
+    config_max_time: Option<std::time::Duration>,
+    config_warmup_time: Option<std::time::Duration>,
+    config_noise_threshold: Option<f64>,
 }
 
 impl<'a> BenchmarkGroup<'a> {
     fn ensure_group(&mut self) -> &mut crate::bench::BenchGroup {
         if self.group.is_none() {
-            self.group = Some(crate::bench::BenchGroup::new_public(&self.name));
+            let mut g = crate::bench::BenchGroup::new_public(&self.name);
+            // Apply Criterion-level config
+            if let Some(n) = self.config_max_rounds {
+                g.config().max_rounds(n);
+            }
+            if let Some(d) = self.config_max_time {
+                g.config().max_time(d);
+            }
+            if let Some(d) = self.config_warmup_time {
+                g.config().warmup_time(d);
+            }
+            if let Some(t) = self.config_noise_threshold {
+                g.config().noise_threshold(t);
+            }
+            self.group = Some(g);
         }
         self.group.as_mut().unwrap()
     }

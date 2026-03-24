@@ -410,6 +410,7 @@ mod tests {
             timer_resolution_ns: 10,
             loop_overhead_ns: 0.5,
             testbed: None,
+            calibration: None,
         }
     }
 

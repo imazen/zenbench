@@ -912,6 +912,40 @@ impl Bencher {
         drop(outputs);
     }
 
+    /// Measure an async function using a tokio runtime.
+    ///
+    /// Uses `block_on()` inside the sync iteration loop — the same approach
+    /// as criterion's `to_async()`. The runtime is provided by the caller.
+    ///
+    /// ```rust,ignore
+    /// let rt = tokio::runtime::Runtime::new().unwrap();
+    /// b.iter_async(&rt, || async {
+    ///     tokio::time::sleep(Duration::from_micros(1)).await;
+    ///     42
+    /// });
+    /// ```
+    #[cfg(feature = "async")]
+    #[inline(never)]
+    pub fn iter_async<O, F, Fut>(&mut self, runtime: &tokio::runtime::Runtime, mut f: F)
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = O>,
+    {
+        #[cfg(feature = "alloc-profiling")]
+        let alloc_before = crate::alloc::AllocSnapshot::now();
+
+        let start = std::time::Instant::now();
+        for _ in 0..self.iterations {
+            std::hint::black_box(runtime.block_on(f()));
+        }
+        self.elapsed_ns = start.elapsed().as_nanos() as u64;
+
+        #[cfg(feature = "alloc-profiling")]
+        {
+            self.alloc_delta = Some(crate::alloc::AllocSnapshot::now().delta(alloc_before));
+        }
+    }
+
     /// Create a builder that provides fresh input for each iteration.
     ///
     /// The `setup` closure is called before each iteration to produce input.

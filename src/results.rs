@@ -143,6 +143,9 @@ pub struct SuiteResult {
     /// Used by baseline comparison to detect hardware changes between runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub testbed: Option<crate::platform::Testbed>,
+    /// Hardware calibration results from built-in workloads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calibration: Option<crate::calibration::Calibration>,
 }
 
 impl SuiteResult {
@@ -856,6 +859,7 @@ mod tests {
             timer_resolution_ns: 25,
             loop_overhead_ns: 0.0,
             testbed: None,
+            calibration: None,
         }
     }
 
@@ -988,6 +992,7 @@ mod tests {
             timer_resolution_ns: 25,
             loop_overhead_ns: 0.0,
             testbed: None,
+            calibration: None,
         }
     }
 
