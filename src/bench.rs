@@ -120,6 +120,17 @@ impl Suite {
     pub fn set_group_filter(&mut self, filter: String) {
         self.group_filter = Some(filter);
     }
+
+    /// Merge another suite's groups and standalones into this one.
+    pub fn merge(&mut self, other: Suite) {
+        self.groups.extend(other.groups);
+        self.standalones.extend(other.standalones);
+    }
+
+    /// Push a pre-built group (used by criterion_compat).
+    pub fn push_group(&mut self, group: BenchGroup) {
+        self.groups.push(group);
+    }
 }
 
 impl Default for Suite {
@@ -141,6 +152,11 @@ pub struct BenchGroup {
 }
 
 impl BenchGroup {
+    /// Create a new group (public, for criterion_compat).
+    pub fn new_public(name: impl Into<String>) -> Self {
+        Self::new(name)
+    }
+
     pub(crate) fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),

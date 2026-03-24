@@ -9,6 +9,7 @@
 mod bench;
 mod checks;
 mod ci;
+pub mod criterion_compat;
 pub mod daemon;
 mod engine;
 mod format;
@@ -20,6 +21,12 @@ mod results;
 mod stats;
 
 pub use bench::{BenchGroup, Bencher, GroupConfig, Suite, Throughput};
+
+/// Create an Engine from a Suite (used by criterion_compat macros).
+#[doc(hidden)]
+pub fn engine_new(suite: Suite) -> engine::Engine {
+    engine::Engine::new(suite)
+}
 pub use format::format_ns;
 pub use gate::GateConfig;
 pub use results::{BenchmarkResult, ComparisonResult, RunId, SuiteResult};

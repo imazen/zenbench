@@ -3,7 +3,6 @@
 //! These test the "asinine possibilities": empty groups, zero threads,
 //! conflicting configs, etc. If it compiles, it shouldn't panic.
 
-use std::collections::HashMap;
 use std::sync::Mutex;
 use zenbench::*;
 
