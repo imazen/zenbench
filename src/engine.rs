@@ -54,6 +54,7 @@ impl Engine {
         let run_id = RunId::generate();
         let ci = platform::detect_ci().map(String::from);
         let git_hash = platform::git_commit_hash();
+        let testbed = Some(platform::detect_testbed());
         let timer_res = platform::timer_resolution_ns();
         let loop_overhead_ns = measure_loop_overhead();
 
@@ -174,6 +175,7 @@ impl Engine {
                     unreliable: false,
                     timer_resolution_ns: timer_res,
                     loop_overhead_ns,
+                    testbed: testbed.clone(),
                 };
                 let n_groups = comparisons.len();
                 let mut content =
@@ -215,6 +217,7 @@ impl Engine {
             unreliable: gate_unreliable,
             timer_resolution_ns: timer_res,
             loop_overhead_ns,
+            testbed,
         };
 
         // Write final complete results

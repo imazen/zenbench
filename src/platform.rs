@@ -96,6 +96,55 @@ impl Default for SystemMonitor {
     }
 }
 
+/// Hardware fingerprint for testbed identification.
+///
+/// Stored in `SuiteResult` so baseline comparisons can detect when
+/// the hardware has changed between runs.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[non_exhaustive]
+pub struct Testbed {
+    /// CPU model string (e.g., "AMD EPYC 7763 64-Core Processor").
+    pub cpu_model: String,
+    /// Target architecture (e.g., "x86_64", "aarch64").
+    pub arch: String,
+    /// Operating system (e.g., "linux", "windows", "macos").
+    pub os: String,
+    /// Logical (hyperthreaded) core count.
+    pub logical_cores: usize,
+    /// Physical core count.
+    pub physical_cores: usize,
+}
+
+impl std::fmt::Display for Testbed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} ({}/{} cores, {}/{})",
+            self.cpu_model, self.physical_cores, self.logical_cores, self.arch, self.os,
+        )
+    }
+}
+
+/// Detect the current hardware testbed.
+pub fn detect_testbed() -> Testbed {
+    let sys = System::new_all();
+    let cpu_model = sys
+        .cpus()
+        .first()
+        .map(|c| c.brand().trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let logical_cores = sys.cpus().len().max(1);
+    let physical_cores = sysinfo::System::physical_core_count().unwrap_or(logical_cores);
+
+    Testbed {
+        cpu_model,
+        arch: std::env::consts::ARCH.to_string(),
+        os: std::env::consts::OS.to_string(),
+        logical_cores,
+        physical_cores,
+    }
+}
+
 /// Detect if we're running in a CI environment.
 /// Measure the timer resolution by finding the minimum non-zero delta
 /// between consecutive `Instant::now()` calls.

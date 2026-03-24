@@ -134,6 +134,10 @@ pub struct SuiteResult {
     /// sample times so reported values reflect only the user's code.
     #[serde(default)]
     pub loop_overhead_ns: f64,
+    /// Hardware fingerprint for testbed identification.
+    /// Used by baseline comparison to detect hardware changes between runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub testbed: Option<crate::platform::Testbed>,
 }
 
 impl SuiteResult {
@@ -843,6 +847,7 @@ mod tests {
             unreliable: false,
             timer_resolution_ns: 25,
             loop_overhead_ns: 0.0,
+            testbed: None,
         }
     }
 
@@ -971,6 +976,7 @@ mod tests {
             unreliable: false,
             timer_resolution_ns: 25,
             loop_overhead_ns: 0.0,
+            testbed: None,
         }
     }
 

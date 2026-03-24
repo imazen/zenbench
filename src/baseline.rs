@@ -34,6 +34,8 @@ pub struct BaselineComparison {
     pub new_benchmarks: Vec<String>,
     /// Benchmarks in the baseline but not in the new run.
     pub missing_benchmarks: Vec<String>,
+    /// Warnings about the comparison (staleness, hardware mismatch, etc.).
+    pub warnings: Vec<String>,
 }
 
 /// Comparison result for a single benchmark.
@@ -96,6 +98,27 @@ pub fn list_baselines() -> Vec<String> {
     names
 }
 
+/// Delete baselines older than `max_age_secs`. Returns number deleted.
+pub fn prune_baselines(max_age_secs: u64) -> std::io::Result<usize> {
+    let dir = PathBuf::from(BASELINE_DIR);
+    let mut deleted = 0;
+    let now = std::time::SystemTime::now();
+    let entries = std::fs::read_dir(&dir).into_iter().flatten().flatten();
+    for entry in entries {
+        let path = entry.path();
+        let is_old = path.extension().is_some_and(|e| e == "json")
+            && std::fs::metadata(&path)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| now.duration_since(t).ok())
+                .is_some_and(|age| age.as_secs() > max_age_secs);
+        if is_old && std::fs::remove_file(&path).is_ok() {
+            deleted += 1;
+        }
+    }
+    Ok(deleted)
+}
+
 /// Delete a named baseline.
 pub fn delete_baseline(name: &str) -> std::io::Result<()> {
     let path = PathBuf::from(BASELINE_DIR).join(format!("{name}.json"));
@@ -114,37 +137,86 @@ pub fn compare_against_baseline(
     current: &SuiteResult,
     max_regression_pct: f64,
 ) -> BaselineComparison {
-    // Build a map of (group, bench) → mean_ns from the baseline
-    let mut baseline_map: HashMap<(String, String), f64> = HashMap::new();
+    let mut warnings = Vec::new();
+
+    // Staleness checks
+    if let (Some(base_hash), Some(curr_hash)) = (&baseline.git_hash, &current.git_hash)
+        && base_hash != curr_hash
+    {
+        warnings.push(format!(
+            "git hash differs: baseline={} current={}",
+            &base_hash[..base_hash.len().min(8)],
+            &curr_hash[..curr_hash.len().min(8)],
+        ));
+    }
+
+    if let (Some(base_tb), Some(curr_tb)) = (&baseline.testbed, &current.testbed) {
+        if base_tb.cpu_model != curr_tb.cpu_model {
+            warnings.push(format!(
+                "CPU changed: baseline='{}' current='{}'",
+                base_tb.cpu_model, curr_tb.cpu_model,
+            ));
+        }
+        if base_tb.arch != curr_tb.arch || base_tb.os != curr_tb.os {
+            warnings.push(format!(
+                "platform changed: baseline={}/{} current={}/{}",
+                base_tb.arch, base_tb.os, curr_tb.arch, curr_tb.os,
+            ));
+        }
+    }
+
+    // Per-benchmark data: (mean, variance, n)
+    struct BenchData {
+        mean: f64,
+        variance: f64,
+        n: usize,
+    }
+
+    let mut baseline_map: HashMap<(String, String), BenchData> = HashMap::new();
     for comp in &baseline.comparisons {
         for bench in &comp.benchmarks {
             baseline_map.insert(
                 (comp.group_name.clone(), bench.name.clone()),
-                bench.summary.mean,
+                BenchData {
+                    mean: bench.summary.mean,
+                    variance: bench.summary.variance,
+                    n: bench.summary.n,
+                },
             );
         }
     }
     for bench in &baseline.standalones {
         baseline_map.insert(
             ("_standalone".to_string(), bench.name.clone()),
-            bench.summary.mean,
+            BenchData {
+                mean: bench.summary.mean,
+                variance: bench.summary.variance,
+                n: bench.summary.n,
+            },
         );
     }
 
-    // Build the same map for the current run
-    let mut current_map: HashMap<(String, String), f64> = HashMap::new();
+    let mut current_map: HashMap<(String, String), BenchData> = HashMap::new();
     for comp in &current.comparisons {
         for bench in &comp.benchmarks {
             current_map.insert(
                 (comp.group_name.clone(), bench.name.clone()),
-                bench.summary.mean,
+                BenchData {
+                    mean: bench.summary.mean,
+                    variance: bench.summary.variance,
+                    n: bench.summary.n,
+                },
             );
         }
     }
     for bench in &current.standalones {
         current_map.insert(
             ("_standalone".to_string(), bench.name.clone()),
-            bench.summary.mean,
+            BenchData {
+                mean: bench.summary.mean,
+                variance: bench.summary.variance,
+                n: bench.summary.n,
+            },
         );
     }
 
@@ -155,17 +227,31 @@ pub fn compare_against_baseline(
     let mut new_benchmarks = Vec::new();
     let mut missing_benchmarks = Vec::new();
 
-    // Compare all benchmarks present in both
-    for (key, &baseline_mean) in &baseline_map {
-        if let Some(&new_mean) = current_map.get(key) {
-            let pct_change = if baseline_mean.abs() > f64::EPSILON {
-                (new_mean - baseline_mean) / baseline_mean * 100.0
+    for (key, base) in &baseline_map {
+        if let Some(curr) = current_map.get(key) {
+            let pct_change = if base.mean.abs() > f64::EPSILON {
+                (curr.mean - base.mean) / base.mean * 100.0
             } else {
                 0.0
             };
 
-            let regressed = pct_change > max_regression_pct;
-            let improved = pct_change < -max_regression_pct;
+            // Statistical gating: require BOTH percentage threshold AND
+            // statistical significance (pooled t-test, p < 0.05 ≈ t > 2.0).
+            // This prevents noisy CI runners from triggering false regressions.
+            let statistically_significant = if base.n >= 2 && curr.n >= 2 {
+                let se_sq = base.variance / base.n as f64 + curr.variance / curr.n as f64;
+                if se_sq > 0.0 {
+                    let t = (curr.mean - base.mean).abs() / se_sq.sqrt();
+                    t > 2.0 // approximate p < 0.05
+                } else {
+                    true // zero variance = deterministic = always significant
+                }
+            } else {
+                true // not enough data to gate — trust the percentage
+            };
+
+            let regressed = pct_change > max_regression_pct && statistically_significant;
+            let improved = pct_change < -max_regression_pct && statistically_significant;
 
             if regressed {
                 regressions += 1;
@@ -178,8 +264,8 @@ pub fn compare_against_baseline(
             benchmarks.push(BenchmarkDelta {
                 group: key.0.clone(),
                 name: key.1.clone(),
-                baseline_mean,
-                new_mean,
+                baseline_mean: base.mean,
+                new_mean: curr.mean,
                 pct_change,
                 regressed,
                 improved,
@@ -189,15 +275,17 @@ pub fn compare_against_baseline(
         }
     }
 
-    // Find new benchmarks not in the baseline
     for key in current_map.keys() {
         if !baseline_map.contains_key(key) {
             new_benchmarks.push(format!("{}::{}", key.0, key.1));
         }
     }
 
-    // Sort by regression severity (worst first)
-    benchmarks.sort_by(|a, b| b.pct_change.partial_cmp(&a.pct_change).unwrap_or(std::cmp::Ordering::Equal));
+    benchmarks.sort_by(|a, b| {
+        b.pct_change
+            .partial_cmp(&a.pct_change)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     BaselineComparison {
         benchmarks,
@@ -206,6 +294,7 @@ pub fn compare_against_baseline(
         unchanged,
         new_benchmarks,
         missing_benchmarks,
+        warnings,
     }
 }
 
@@ -214,6 +303,10 @@ pub fn print_comparison_report(comparison: &BaselineComparison) {
     eprintln!();
     eprintln!("  Baseline comparison");
     eprintln!("  ───────────────────");
+
+    for w in &comparison.warnings {
+        eprintln!("  \x1b[33m⚠ {w}\x1b[0m");
+    }
 
     if comparison.benchmarks.is_empty() {
         eprintln!("  No matching benchmarks found.");
@@ -315,6 +408,7 @@ mod tests {
             unreliable: false,
             timer_resolution_ns: 10,
             loop_overhead_ns: 0.5,
+            testbed: None,
         }
     }
 
