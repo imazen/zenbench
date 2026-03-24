@@ -260,14 +260,17 @@ fn print_report_body(result: &SuiteResult) {
                 .map(|(_, cand, analysis)| (cand.as_str(), analysis))
                 .collect();
 
-        // Compute column widths
+        // Compute column widths — cap name to terminal_width/3 to prevent wrapping
+        let term_w = terminal_width().unwrap_or(80);
+        let max_name = term_w / 3;
         let name_w = comp
             .benchmarks
             .iter()
             .map(|b| b.name.len())
             .max()
             .unwrap_or(4)
-            .max(9); // "benchmark"
+            .max(9) // "benchmark" header
+            .min(max_name);
 
         // Footnote collector
         let mut footnotes: Vec<String> = Vec::new();
@@ -340,18 +343,28 @@ fn print_report_body(result: &SuiteResult) {
             let bench = &comp.benchmarks[i];
             let is_fastest = (bench.summary.mean - fastest_mean).abs() < f64::EPSILON
                 && comp.benchmarks.len() > 1;
-            // Throughput: show just the value, unit goes in header
+            // Throughput: compact "4.91G" format — value + SI prefix
             let tp_str = comp
                 .throughput
                 .as_ref()
                 .map(|tp| {
-                    let (val, _unit) = tp.compute(bench.summary.mean, tp_unit);
-                    if val >= 100.0 {
-                        format!("{val:.0}")
-                    } else if val >= 10.0 {
-                        format!("{val:.1}")
+                    let (val, unit) = tp.compute(bench.summary.mean, tp_unit);
+                    // Extract the prefix (G/M/K or empty) from unit like "Gchecks/s"
+                    let prefix = if unit.starts_with('G') {
+                        "G"
+                    } else if unit.starts_with('M') {
+                        "M"
+                    } else if unit.starts_with('K') {
+                        "K"
                     } else {
-                        format!("{val:.2}")
+                        ""
+                    };
+                    if val >= 100.0 {
+                        format!("{val:.0}{prefix}")
+                    } else if val >= 10.0 {
+                        format!("{val:.1}{prefix}")
+                    } else {
+                        format!("{val:.2}{prefix}")
                     }
                 })
                 .unwrap_or_default();
@@ -544,8 +557,14 @@ fn print_report_body(result: &SuiteResult) {
             } else {
                 String::new()
             };
+            // Truncate name if it exceeds the column width
+            let display_name = if bench.name.len() > name_w {
+                format!("{}…", &bench.name[..name_w - 1])
+            } else {
+                bench.name.clone()
+            };
             rows.push(Row {
-                name: bench.name.clone(),
+                name: display_name,
                 min_col,
                 mean_col,
                 sigma_col,
@@ -577,7 +596,7 @@ fn print_report_body(result: &SuiteResult) {
             .max()
             .unwrap_or(1)
             .max(1);
-        // Compute throughput unit from the reference benchmark for the header
+        // Throughput header: strip the SI prefix to get base unit (e.g., "checks/s")
         let tp_unit_str = comp
             .throughput
             .as_ref()
@@ -590,7 +609,9 @@ fn print_report_body(result: &SuiteResult) {
                     .summary
                     .mean;
                 let (_, unit) = tp.compute(ref_mean, tp_unit);
-                unit
+                // Strip SI prefix: "Gchecks/s" → "checks/s", "MiB/s" → "iB/s"
+                let base = unit.trim_start_matches(['G', 'M', 'K', 'T']);
+                if base.is_empty() { unit } else { base.to_string() }
             })
             .unwrap_or_default();
         let tp_w = if has_throughput {
