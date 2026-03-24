@@ -271,7 +271,7 @@ mod tests {
         // Just verify it doesn't panic — actual alloc tracking requires
         // the AllocProfiler to be the global allocator.
         let snap = AllocSnapshot::now();
-        // Counters should be zero or positive
-        assert!(snap.allocs >= 0);
+        // Just verify it returns something (counters are u64, always >= 0)
+        let _ = snap.allocs;
     }
 }

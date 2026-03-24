@@ -46,4 +46,17 @@ cpu-time = { version = "1.0.0", optional = true }
 name = "sorting"
 harness = false
 
+[[bench]]
+name = "divan_compare"
+harness = false
+
+[[bench]]
+name = "divan_compare_ref"
+harness = false
+
+[[bench]]
+name = "alloc_profiling"
+harness = false
+
 [dev-dependencies]
+divan = "0.1"
