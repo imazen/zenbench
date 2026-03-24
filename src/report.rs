@@ -3,20 +3,16 @@ use crate::format::{format_ns, format_ns_range, ns_unit, terminal_width};
 use crate::results::{BenchmarkResult, SuiteResult};
 use std::io::IsTerminal;
 
-/// Detect whether to use ANSI color codes.
+/// Should this stream use ANSI color codes?
 /// Respects NO_COLOR (https://no-color.org/), TERM=dumb, and TTY detection.
-pub(crate) fn should_color() -> bool {
-    use std::sync::OnceLock;
-    static CACHED: OnceLock<bool> = OnceLock::new();
-    *CACHED.get_or_init(|| {
-        if std::env::var("NO_COLOR").is_ok() {
-            return false;
-        }
-        if std::env::var("TERM").as_deref() == Ok("dumb") {
-            return false;
-        }
-        std::io::stderr().is_terminal()
-    })
+pub(crate) fn should_color(stream: &dyn IsTerminal) -> bool {
+    if std::env::var("NO_COLOR").is_ok() {
+        return false;
+    }
+    if std::env::var("TERM").as_deref() == Ok("dumb") {
+        return false;
+    }
+    stream.is_terminal()
 }
 
 /// ANSI code if color enabled, empty string if not.
@@ -61,7 +57,7 @@ struct StandaloneRow {
 /// Print a human-readable report to stderr (with ANSI colors).
 #[allow(non_snake_case)]
 pub fn print_report(result: &SuiteResult) {
-    let c = should_color();
+    let c = should_color(&std::io::stderr());
     let RESET = pick("\x1b[0m", c);
     let BOLD = pick("\x1b[1m", c);
     let DIM = pick("\x1b[2m", c);
