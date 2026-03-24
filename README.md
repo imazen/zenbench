@@ -197,6 +197,125 @@ All comparison statistics are CI-based, not p-value thresholds:
 See [METHODOLOGY.md](METHODOLOGY.md) for the full research cross-reference
 with Mytkowicz, STABILIZER, Chen & Revels, Kalibera & Jones, and others.
 
+## Migrating from Criterion
+
+### Cargo.toml
+
+```diff
+ [dev-dependencies]
+-criterion = "0.5"
++zenbench = "0.1"
+
+ [[bench]]
+ name = "my_bench"
+ harness = false
+```
+
+### Simple benchmark
+
+```diff
+-use criterion::{black_box, criterion_group, criterion_main, Criterion};
++use zenbench::black_box;
+
+-fn bench_fib(c: &mut Criterion) {
+-    c.bench_function("fib 20", |b| {
+-        b.iter(|| fibonacci(black_box(20)))
+-    });
+-}
+-
+-criterion_group!(benches, bench_fib);
+-criterion_main!(benches);
++zenbench::main!(|suite| {
++    suite.compare("fibonacci", |group| {
++        group.bench("fib 20", |b| {
++            b.iter(|| fibonacci(black_box(20)))
++        });
++    });
++});
+```
+
+`b.iter()` works the same way. `black_box` works the same way.
+
+### Comparing functions
+
+```diff
+-fn bench_sorts(c: &mut Criterion) {
+-    let mut group = c.benchmark_group("sorting");
+-    group.bench_function("std_sort", |b| {
+-        b.iter(|| { /* ... */ })
+-    });
+-    group.bench_function("sort_unstable", |b| {
+-        b.iter(|| { /* ... */ })
+-    });
+-    group.finish();
+-}
++suite.compare("sorting", |group| {
++    group.bench("std_sort", |b| {
++        b.iter(|| { /* ... */ })
++    });
++    group.bench("sort_unstable", |b| {
++        b.iter(|| { /* ... */ })
++    });
++});
+```
+
+No `finish()` needed — the closure handles scope.
+Benchmarks are automatically interleaved and compared.
+
+### Throughput
+
+```diff
+-group.throughput(Throughput::Elements(size as u64));
+-group.bench_with_input(BenchmarkId::new("sum", size), &input, |b, i| {
+-    b.iter(|| i.iter().sum::<u64>())
+-});
++group.throughput(Throughput::Elements(size));
++group.bench("sum", |b| {
++    b.with_input(|| input.clone())
++        .run(|data| data.iter().sum::<u64>())
++});
+```
+
+`with_input().run()` separates setup from measurement — setup time
+and drop cost are excluded from timing. In criterion, you'd use
+`iter_batched` for this.
+
+### What changes
+
+| Criterion | Zenbench | Why |
+|---|---|---|
+| Sequential execution | Interleaved (shuffled per round) | Eliminates thermal/load bias |
+| `criterion_group!` + `criterion_main!` | `zenbench::main!` | Single macro |
+| `bench_function` / `bench_with_input` | `bench` + `with_input().run()` | Cleaner separation |
+| `BenchmarkId` | Just a string name | Simpler |
+| `group.finish()` | Automatic (closure scope) | Less boilerplate |
+| Linear regression on samples | Bootstrap CI on paired diffs | More powerful for comparisons |
+| `--baseline` flag | `group.baseline("name")` | In code, not CLI |
+| `sample_size(N)` | `max_rounds(N)` + auto-convergence | Stops early when precise |
+| Fixed sample count | Adaptive convergence | Respects your time |
+| Noise threshold (1%) | CI-based (no hardcoded %) | Statistically valid |
+| `measurement_time` | `max_time` + `max_wall_time` | Separate measurement vs wall |
+| HTML reports | Terminal + LLM + CSV + Markdown + JSON | No gnuplot dependency |
+
+### What you lose
+
+- HTML reports with plots (zenbench has terminal tables and bar charts)
+- `iter_batched_ref` (zenbench's `with_input().run()` always clones)
+- `Criterion::default().configure_from_args()` (use `--format=X` or env vars)
+- Async benchmark support (not yet implemented)
+- Custom measurement types (wall-clock only for now)
+
+### What you gain
+
+- Interleaved execution — fairer comparisons
+- Paired statistics — CI on the actual difference, not separate means
+- Resource gating — waits for quiet system
+- Auto-convergence — stops when results are precise, not after a fixed count
+- Threading APIs — `bench_contended`, `bench_parallel`, `bench_scaling`
+- Cold-start mode — `config().cold_start(true)`
+- LLM-friendly output — `--format=llm` for AI-assisted workflows
+- Auto-save — results in temp file, no re-running
+
 ## License
 
 MIT OR Apache-2.0
