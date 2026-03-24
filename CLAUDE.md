@@ -94,12 +94,12 @@ Don't mix bench_parallel/bench_contended with rayon — competing thread pools.
 ### Statistical gaps (from comparative analysis — see METHODOLOGY.md "Gaps" section)
 - ~~**Overhead compensation** (HIGH)~~: DONE — `measure_loop_overhead()` at startup, subtracted from all samples
 - **Slope regression / linear sampling** (HIGH): Vary iteration counts linearly within rounds, fit OLS through origin to separate per-iteration cost from constant overhead. Most impactful for <100ns benchmarks.
-- **Practical significance gate** (MEDIUM): Add `noise_threshold` to GroupConfig (default 1%). Suppress significance flag when entire CI falls within ±threshold.
-- **Per-benchmark CIs** (MEDIUM): Bootstrap individual benchmark means/medians, not just paired diffs. Report in JSON/LLM, display for standalone benchmarks.
+- ~~**Practical significance gate** (MEDIUM)~~: DONE — `noise_threshold` in GroupConfig (default 1%), suppresses significance for sub-threshold changes
+- ~~**Per-benchmark CIs** (MEDIUM)~~: DONE — `MeanCi` struct, bootstrapped per-benchmark, in JSON/LLM/BenchmarkResult
 - ~~**TSC / hardware timer** (MEDIUM)~~: DONE — `precise-timing` feature (default on), rdtsc/rdtscp x86_64, cntvct_el0 aarch64, auto-calibration, invariant TSC detection
 - ~~**asm fences**~~: DONE — `asm!("")` fences around all timing windows, stronger than `black_box` alone
 - **Stack alignment jitter** (MEDIUM): alloca-based random stack offset per sample (à la criterion/tango). Feature-gated, opt-in.
-- **Configurable bootstrap resamples** (LOW): Allow 10K→100K via GroupConfig for tighter tail CIs.
+- ~~**Configurable bootstrap resamples** (LOW)~~: DONE — `bootstrap_resamples` in GroupConfig (default 10K, min 100)
 - **Explicit warmup phase** (LOW): `warmup_time` in GroupConfig. Low priority since iteration estimation already warms caches.
 - ~~**Deferred drop** (LOW)~~: DONE — `iter_deferred_drop()` collects outputs during timing, drops after
 
