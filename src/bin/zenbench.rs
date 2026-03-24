@@ -129,6 +129,30 @@ enum Commands {
         #[arg(long, default_value = "168")]
         max_age_hours: u64,
     },
+
+    /// Manage saved baselines for CI regression testing.
+    Baseline {
+        #[command(subcommand)]
+        action: BaselineAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum BaselineAction {
+    /// List all saved baselines.
+    List,
+
+    /// Show details of a baseline.
+    Show {
+        /// Baseline name.
+        name: String,
+    },
+
+    /// Delete a baseline.
+    Delete {
+        /// Baseline name.
+        name: String,
+    },
 }
 
 fn main() {
@@ -165,6 +189,48 @@ fn main() {
             project,
             max_age_hours,
         } => cmd_clean(&project, max_age_hours),
+        Commands::Baseline { action } => match action {
+            BaselineAction::List => {
+                let names = zenbench::baseline::list_baselines();
+                if names.is_empty() {
+                    println!("No baselines saved. Use: cargo bench -- --save-baseline=<name>");
+                } else {
+                    for name in &names {
+                        let path = format!(".zenbench/baselines/{name}.json");
+                        let meta = std::fs::metadata(&path);
+                        let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+                        println!("  {name:<20} ({size} bytes)");
+                    }
+                }
+            }
+            BaselineAction::Show { name } => match zenbench::baseline::load_baseline(&name) {
+                Ok(result) => {
+                    println!("Baseline: {name}");
+                    println!("  git: {}", result.git_hash.as_deref().unwrap_or("unknown"));
+                    println!("  timestamp: {}", result.timestamp);
+                    for comp in &result.comparisons {
+                        println!("  group: {}", comp.group_name);
+                        for bench in &comp.benchmarks {
+                            println!(
+                                "    {}: mean={:.1}ns min={:.1}ns",
+                                bench.name, bench.summary.mean, bench.summary.min
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("{e}");
+                    std::process::exit(1);
+                }
+            },
+            BaselineAction::Delete { name } => match zenbench::baseline::delete_baseline(&name) {
+                Ok(()) => println!("Deleted baseline '{name}'"),
+                Err(e) => {
+                    eprintln!("Failed to delete baseline '{name}': {e}");
+                    std::process::exit(1);
+                }
+            },
+        },
     }
 }
 

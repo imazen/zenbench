@@ -714,6 +714,155 @@ fn standalone_benchmark_has_ci() {
     );
 }
 
+// ── Baseline persistence ────────────────────────────────────────────
+
+#[test]
+fn baseline_save_load_compare() {
+    // Run a benchmark, save as baseline, run again, compare
+    let result1 = run_gated(disabled_gate(), |suite| {
+        suite.compare("base_test", |group| {
+            group.config().max_rounds(10).auto_rounds(false);
+            group.bench("work_a", |b| {
+                b.iter(|| {
+                    let mut v = 0u64;
+                    for i in 0..100 {
+                        v = v.wrapping_add(black_box(i));
+                    }
+                    black_box(v)
+                })
+            });
+            group.bench("work_b", |b| {
+                b.iter(|| {
+                    let mut v = 0u64;
+                    for i in 0..200 {
+                        v = v.wrapping_add(black_box(i));
+                    }
+                    black_box(v)
+                })
+            });
+        });
+    });
+
+    // Save as baseline
+    let path = zenbench::baseline::save_baseline(&result1, "test_integration")
+        .expect("should save baseline");
+    assert!(path.exists(), "baseline file should exist");
+
+    // Load it back
+    let loaded = zenbench::baseline::load_baseline("test_integration")
+        .expect("should load baseline");
+    assert_eq!(loaded.comparisons[0].group_name, "base_test");
+
+    // Run again (same workload — should be similar)
+    let result2 = run_gated(disabled_gate(), |suite| {
+        suite.compare("base_test", |group| {
+            group.config().max_rounds(10).auto_rounds(false);
+            group.bench("work_a", |b| {
+                b.iter(|| {
+                    let mut v = 0u64;
+                    for i in 0..100 {
+                        v = v.wrapping_add(black_box(i));
+                    }
+                    black_box(v)
+                })
+            });
+            group.bench("work_b", |b| {
+                b.iter(|| {
+                    let mut v = 0u64;
+                    for i in 0..200 {
+                        v = v.wrapping_add(black_box(i));
+                    }
+                    black_box(v)
+                })
+            });
+        });
+    });
+
+    // Compare: same workload should not regress
+    let comparison = zenbench::baseline::compare_against_baseline(&loaded, &result2, 50.0);
+    assert_eq!(
+        comparison.regressions, 0,
+        "same workload should not regress at 50% threshold"
+    );
+    assert_eq!(comparison.benchmarks.len(), 2);
+    assert!(comparison.new_benchmarks.is_empty());
+    assert!(comparison.missing_benchmarks.is_empty());
+
+    // Clean up
+    let _ = zenbench::baseline::delete_baseline("test_integration");
+}
+
+#[test]
+fn baseline_detects_regression_with_different_workload() {
+    // Save a fast baseline, then compare against a slower run
+    let fast = run_gated(disabled_gate(), |suite| {
+        suite.compare("regress_test", |group| {
+            group.config().max_rounds(10).auto_rounds(false);
+            group.bench("func", |b| {
+                b.iter(|| {
+                    let mut v = 0u64;
+                    for i in 0..50 {
+                        v = v.wrapping_add(black_box(i));
+                    }
+                    black_box(v)
+                })
+            });
+        });
+    });
+    zenbench::baseline::save_baseline(&fast, "test_regression").unwrap();
+
+    // Now run something much slower
+    let slow = run_gated(disabled_gate(), |suite| {
+        suite.compare("regress_test", |group| {
+            group.config().max_rounds(10).auto_rounds(false);
+            group.bench("func", |b| {
+                b.iter(|| {
+                    let mut v = 0u64;
+                    for i in 0..500 {
+                        v = v.wrapping_add(black_box(i));
+                    }
+                    black_box(v)
+                })
+            });
+        });
+    });
+
+    let comparison = zenbench::baseline::compare_against_baseline(
+        &zenbench::baseline::load_baseline("test_regression").unwrap(),
+        &slow,
+        20.0, // 20% threshold — 10x slowdown should easily trigger
+    );
+    assert!(
+        comparison.regressions > 0,
+        "10x slower workload should be detected as regression"
+    );
+
+    // Clean up
+    let _ = zenbench::baseline::delete_baseline("test_regression");
+}
+
+#[test]
+fn baseline_list_and_delete() {
+    let result = run_gated(disabled_gate(), |suite| {
+        suite.compare("list_test", |group| {
+            group.config().max_rounds(5).auto_rounds(false);
+            group.bench("x", |b| b.iter(|| black_box(1u64)));
+        });
+    });
+    zenbench::baseline::save_baseline(&result, "test_list_a").unwrap();
+    zenbench::baseline::save_baseline(&result, "test_list_b").unwrap();
+
+    let names = zenbench::baseline::list_baselines();
+    assert!(names.contains(&"test_list_a".to_string()));
+    assert!(names.contains(&"test_list_b".to_string()));
+
+    zenbench::baseline::delete_baseline("test_list_a").unwrap();
+    zenbench::baseline::delete_baseline("test_list_b").unwrap();
+
+    let names_after = zenbench::baseline::list_baselines();
+    assert!(!names_after.contains(&"test_list_a".to_string()));
+}
+
 // ── Configurable bootstrap resamples ────────────────────────────────
 
 #[test]

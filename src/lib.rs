@@ -17,6 +17,7 @@
 //! and fire-and-forget subprocess mode.
 
 mod bench;
+pub mod baseline;
 mod checks;
 mod ci;
 pub mod criterion_compat;
@@ -152,7 +153,7 @@ pub fn run_and_save<F: FnOnce(&mut Suite)>(f: F) -> SuiteResult {
 macro_rules! main {
     (|$suite:ident| $body:block) => {
         fn main() {
-            // Parse args (cargo bench -- --format=llm --group=sorting)
+            // Parse args (cargo bench -- --format=llm --group=sorting --baseline=main)
             let args: Vec<String> = std::env::args().collect();
             let format = args
                 .iter()
@@ -161,6 +162,16 @@ macro_rules! main {
             let group_filter: Option<String> = args
                 .iter()
                 .find_map(|a| a.strip_prefix("--group=").map(String::from));
+            let save_baseline: Option<String> = args
+                .iter()
+                .find_map(|a| a.strip_prefix("--save-baseline=").map(String::from));
+            let baseline: Option<String> = args
+                .iter()
+                .find_map(|a| a.strip_prefix("--baseline=").map(String::from));
+            let max_regression: f64 = args
+                .iter()
+                .find_map(|a| a.strip_prefix("--max-regression=").and_then(|v| v.parse().ok()))
+                .unwrap_or(5.0); // default: 5% threshold
 
             let result = $crate::run(|$suite: &mut $crate::Suite| {
                 // Set group filter before user code runs — groups are
@@ -182,6 +193,45 @@ macro_rules! main {
                     }
                 }
                 _ => {} // default: terminal report already printed to stderr
+            }
+
+            // Save as named baseline
+            if let Some(ref name) = save_baseline {
+                match $crate::baseline::save_baseline(&result, name) {
+                    Ok(path) => eprintln!("[zenbench] baseline '{}' saved to {}", name, path.display()),
+                    Err(e) => {
+                        eprintln!("[zenbench] error saving baseline '{}': {}", name, e);
+                        std::process::exit(2);
+                    }
+                }
+            }
+
+            // Compare against named baseline
+            if let Some(ref name) = baseline {
+                match $crate::baseline::load_baseline(name) {
+                    Ok(saved) => {
+                        let comparison = $crate::baseline::compare_against_baseline(
+                            &saved,
+                            &result,
+                            max_regression,
+                        );
+                        $crate::baseline::print_comparison_report(&comparison);
+
+                        if comparison.regressions > 0 {
+                            eprintln!(
+                                "\n[zenbench] FAIL: {} regression(s) exceed {}% threshold",
+                                comparison.regressions, max_regression,
+                            );
+                            std::process::exit(1);
+                        } else {
+                            eprintln!("\n[zenbench] PASS: no regressions exceed {}% threshold", max_regression);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[zenbench] {e}");
+                        std::process::exit(2);
+                    }
+                }
             }
 
             // Save results if in fire-and-forget mode
