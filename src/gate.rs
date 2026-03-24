@@ -211,6 +211,7 @@ impl ResourceGate {
         };
 
         let start = Instant::now();
+        let mut last_status = Instant::now() - Duration::from_secs(10); // force first update
         loop {
             let state = self.monitor.snapshot();
             match self.check_state(&state) {
@@ -223,11 +224,15 @@ impl ResourceGate {
                         crate::report::clear_status();
                         return false;
                     }
-                    let elapsed = start.elapsed().as_secs_f64();
-                    let max = effective_max.as_secs_f64();
-                    crate::report::status(&format!(
-                        "[zenbench] waiting ({elapsed:.0}s/{max:.0}s): {reason}"
-                    ));
+                    // Throttle status updates to every 5 seconds
+                    if last_status.elapsed() >= Duration::from_secs(5) {
+                        let elapsed = start.elapsed().as_secs_f64();
+                        let max = effective_max.as_secs_f64();
+                        crate::report::status(&format!(
+                            "[zenbench] waiting ({elapsed:.0}s/{max:.0}s): {reason}"
+                        ));
+                        last_status = Instant::now();
+                    }
                     self.total_waits += 1;
                     std::thread::sleep(self.config.poll_interval);
                     self.total_wait_time += self.config.poll_interval;
