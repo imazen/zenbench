@@ -40,10 +40,10 @@ pub struct GateConfig {
 impl Default for GateConfig {
     fn default() -> Self {
         Self {
-            max_cpu_load: 0.15,
+            max_cpu_load: 0.20,
             min_available_ram_bytes: 512 * 1024 * 1024,
             max_cpu_temp_c: Some(85.0),
-            max_heavy_processes: 0,
+            max_heavy_processes: 1, // Allow 1 background process (IDE, browser)
             max_wait: Duration::from_secs(30),
             poll_interval: Duration::from_millis(500),
             strict: false,

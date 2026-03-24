@@ -148,8 +148,13 @@ impl Engine {
                 self.gate_config.clone()
             };
             let mut gate = ResourceGate::new(group_gate_config);
-            let result =
-                run_comparison_group(group, &mut gate, loop_overhead_ns, tsc_ticks_per_ns);
+            let result = run_comparison_group(
+                group,
+                &mut gate,
+                loop_overhead_ns,
+                tsc_ticks_per_ns,
+                timer_res,
+            );
             total_gate_waits += gate.total_waits();
             total_gate_wait_time += gate.total_wait_time();
             comparisons.push(result);
@@ -187,6 +192,7 @@ impl Engine {
                 &GroupConfig::default(),
                 loop_overhead_ns,
                 tsc_ticks_per_ns,
+                timer_res,
             );
             total_gate_waits += standalone_gate.total_waits();
             total_gate_wait_time += standalone_gate.total_wait_time();
@@ -246,6 +252,7 @@ fn run_comparison_group(
     gate: &mut ResourceGate,
     loop_overhead_ns: f64,
     tsc_ticks_per_ns: Option<f64>,
+    timer_resolution_ns: u64,
 ) -> ComparisonResult {
     let config = &group.config;
     let n_benchmarks = group.benchmarks.len();
@@ -256,7 +263,7 @@ fn run_comparison_group(
     let mut estimates = Vec::with_capacity(n_benchmarks);
     let mut cold_starts = Vec::with_capacity(n_benchmarks);
     for bench in group.benchmarks.iter_mut() {
-        let (est, cold_ns) = estimate_iterations(&mut bench.func, config);
+        let (est, cold_ns) = estimate_iterations(&mut bench.func, config, timer_resolution_ns);
         estimates.push(est);
         cold_starts.push(cold_ns);
     }
@@ -655,10 +662,11 @@ fn run_standalone(
     config: &GroupConfig,
     loop_overhead_ns: f64,
     tsc_ticks_per_ns: Option<f64>,
+    timer_resolution_ns: u64,
 ) -> BenchmarkResult {
     gate.wait_for_clear();
 
-    let (iterations, _cold_start_ns) = estimate_iterations(&mut bench.func, config);
+    let (iterations, _cold_start_ns) = estimate_iterations(&mut bench.func, config, timer_resolution_ns);
     let mut samples = Vec::with_capacity(config.max_rounds);
     let mut cpu_samples_vec = Vec::with_capacity(config.max_rounds);
 
@@ -742,12 +750,26 @@ fn streaming_mean_stddev(raw_samples: &[u64], iters_per_round: &[usize]) -> (f64
     (mean, variance.max(0.0).sqrt())
 }
 
-/// Estimate how many iterations fit in the target sample duration.
+/// Estimate iteration count for each sample.
+///
+/// Strategy: use the LARGER of two targets:
+/// 1. **Timer precision floor**: enough iterations so each sample is ≥ 1000×
+///    the timer resolution. This ensures the per-iteration time is well above
+///    measurement noise. With TSC (~0.2ns), this is easy. With Instant (~25ns),
+///    it requires more iterations.
+/// 2. **User's sample_target_ns**: a time budget (default 1ms) that caps how
+///    long each sample takes, limiting noise exposure from context switches.
+///
+/// On a quiet system, the precision floor dominates (short samples, many rounds).
+/// On a noisy system, the time target caps sample duration (preventing unbounded
+/// contamination).
+///
 /// Returns (iterations, cold_start_ns).
-/// cold_start_ns is the first single-iteration call — the coldest measurement
-/// we can capture without process isolation.
-fn estimate_iterations(func: &mut crate::bench::BenchFn, config: &GroupConfig) -> (usize, u64) {
-    let target_ns = config.sample_target_ns;
+fn estimate_iterations(
+    func: &mut crate::bench::BenchFn,
+    config: &GroupConfig,
+    timer_resolution_ns: u64,
+) -> (usize, u64) {
     let mut iters = 1;
     let mut cold_start_ns = 0u64;
 
@@ -761,14 +783,28 @@ fn estimate_iterations(func: &mut crate::bench::BenchFn, config: &GroupConfig) -
         }
 
         let elapsed = bencher.elapsed_ns.max(1_000); // Don't trust < 1µs
-        let per_iter = elapsed / iters as u64;
-        let per_iter = per_iter.max(1);
-        let new_iters = (target_ns / per_iter) as usize;
+        let per_iter_ns = elapsed / iters as u64;
+        let per_iter_ns = per_iter_ns.max(1);
+
+        // Target 1: timer precision floor — sample should be ≥ 1000× timer resolution
+        // so per-iteration time has ≥ 3 significant digits.
+        let precision_target_ns = timer_resolution_ns.saturating_mul(1000).max(10_000); // at least 10µs
+        let iters_for_precision = (precision_target_ns / per_iter_ns) as usize;
+
+        // Target 2: user's sample_target_ns (default 1ms) — caps noise exposure
+        let iters_for_target = (config.sample_target_ns / per_iter_ns) as usize;
+
+        // Use the LARGER of the two: precision floor OR time target.
+        // But never exceed the time target by more than 2× (don't let the precision
+        // floor make samples excessively long for slow benchmarks).
+        let new_iters = iters_for_precision
+            .max(iters_for_target)
+            .min(iters_for_target.saturating_mul(2).max(iters_for_precision));
 
         if new_iters <= 2 * iters {
             // Converged
             return (
-                new_iters.clamp(config.min_iterations, config.max_iterations),
+                new_iters.max(1).clamp(config.min_iterations, config.max_iterations),
                 cold_start_ns,
             );
         }
@@ -776,7 +812,7 @@ fn estimate_iterations(func: &mut crate::bench::BenchFn, config: &GroupConfig) -
     }
 
     (
-        iters.clamp(config.min_iterations, config.max_iterations),
+        iters.max(1).clamp(config.min_iterations, config.max_iterations),
         cold_start_ns,
     )
 }
