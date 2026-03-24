@@ -322,8 +322,8 @@ impl SuiteResult {
             struct RawRow {
                 bench_idx: usize,
                 is_fastest: bool,
+                min_str: String,
                 mean_str: String,
-                ci_str: String,
                 vs_vals: [String; 3], // values with unit (e.g. "260ns" or "+1.5%")
                 vs_base_color: &'static str,
                 throughput: String,
@@ -354,11 +354,11 @@ impl SuiteResult {
                     })
                     .unwrap_or_default();
 
-                // Raw mean and CI strings (no padding yet)
-                let m = bench.summary.mean / mean_divisor;
-                let c = (bench.summary.std_err() * 1.96) / mean_divisor;
-                let mean_str = format!("{:.*}", mean_dp, m);
-                let ci_str = format!("{:.*}", mean_dp, c);
+                // Raw min and mean strings (no padding yet)
+                // min = fastest observed run (real floor, not parametric)
+                // mean = typical performance
+                let min_str = format!("{:.*}", mean_dp, bench.summary.min / mean_divisor);
+                let mean_str = format!("{:.*}", mean_dp, bench.summary.mean / mean_divisor);
 
                 // vs baseline column: unit inside brackets, shared width
                 // Baseline: [260ns  262ns  265ns]
@@ -461,8 +461,8 @@ impl SuiteResult {
                 raw_rows.push(RawRow {
                     bench_idx: i,
                     is_fastest,
+                    min_str,
                     mean_str,
-                    ci_str,
                     vs_vals,
                     vs_base_color,
                     throughput: tp_str,
@@ -472,8 +472,8 @@ impl SuiteResult {
             }
 
             // Pass 2b: compute column-wide max widths
+            let min_val_w = raw_rows.iter().map(|r| r.min_str.len()).max().unwrap_or(1);
             let mean_val_w = raw_rows.iter().map(|r| r.mean_str.len()).max().unwrap_or(1);
-            let ci_val_w = raw_rows.iter().map(|r| r.ci_str.len()).max().unwrap_or(1);
             // vs_val_w from ALL rows (ns and % share the same inner width)
             let vs_val_w = raw_rows
                 .iter()
@@ -488,8 +488,8 @@ impl SuiteResult {
             for raw in raw_rows {
                 let bench = &comp.benchmarks[raw.bench_idx];
                 let mean_ci = format!(
-                    "{:>mean_val_w$} ±{:>ci_val_w$} {mean_unit}",
-                    raw.mean_str, raw.ci_str,
+                    "{:>min_val_w$} · {:>mean_val_w$} {mean_unit}",
+                    raw.min_str, raw.mean_str,
                 );
                 let vs_base = if !raw.vs_vals[0].is_empty() {
                     format!(
@@ -559,7 +559,7 @@ impl SuiteResult {
 
             // Mean ±CI column
             add_col(&mut top, mean_w, '┬');
-            hdr.push_str(&format!(" │ {:>mean_w$}", "mean ±95ci"));
+            hdr.push_str(&format!(" │ {:>mean_w$}", "min · mean"));
             add_col(&mut mid, mean_w, '┼');
 
             // vs base column
