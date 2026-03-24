@@ -324,9 +324,8 @@ impl SuiteResult {
                 is_fastest: bool,
                 mean_str: String,
                 ci_str: String,
-                vs_vals: [String; 3], // pct values (empty for baseline)
+                vs_vals: [String; 3], // values with unit (e.g. "260ns" or "+1.5%")
                 vs_base_color: &'static str,
-                pre_vs_base: Option<String>, // pre-formatted baseline string
                 throughput: String,
                 cpu: String,
                 markers: String,
@@ -361,23 +360,23 @@ impl SuiteResult {
                 let mean_str = format!("{:.*}", mean_dp, m);
                 let ci_str = format!("{:.*}", mean_dp, c);
 
-                // vs baseline column:
-                // Baseline row: format independently as [lo  mean  hi]unit
-                // Comparison rows: [lo  mid  hi]% with shared pct width
+                // vs baseline column: unit inside brackets, shared width
+                // Baseline: [260ns  262ns  265ns]
+                // Comparison: [-1.5%  -1.3%  -1.0%]
+                // All values (ns and %) share the same inner width for alignment.
                 let is_baseline = bench.name == baseline_name;
-                // pre_vs_base: Some(formatted string) for baseline, None for comparison rows
-                let (vs_vals, vs_base_color, pre_vs_base) = if is_baseline {
+                let (vs_vals, vs_base_color) = if is_baseline {
                     let ci_half = bench.summary.std_err() * 1.96;
                     let lo = (bench.summary.mean - ci_half).max(0.0);
                     let hi = bench.summary.mean + ci_half;
-                    let v0 = format!("{:.*}", mean_dp, lo / mean_divisor);
-                    let v1 = format!("{:.*}", mean_dp, bench.summary.mean / mean_divisor);
-                    let v2 = format!("{:.*}", mean_dp, hi / mean_divisor);
-                    // Format baseline independently — don't pollute pct widths
-                    let w = [&v0, &v1, &v2].iter().map(|s| s.len()).max().unwrap_or(1);
-                    let s = format!("[{:>w$}  {:>w$}  {:>w$}]{mean_unit}", v0, v1, v2,);
-                    // Baseline: normal color (not dim — it's the reference point)
-                    ([String::new(), String::new(), String::new()], "", Some(s))
+                    let v0 = format!("{:.*}{mean_unit}", mean_dp, lo / mean_divisor);
+                    let v1 = format!(
+                        "{:.*}{mean_unit}",
+                        mean_dp,
+                        bench.summary.mean / mean_divisor
+                    );
+                    let v2 = format!("{:.*}{mean_unit}", mean_dp, hi / mean_divisor);
+                    ([v0, v1, v2], "")
                 } else if let Some(analysis) = baseline_analyses.get(bench.name.as_str()) {
                     let base_mean = analysis.baseline.mean;
                     if base_mean.abs() > f64::EPSILON {
@@ -389,16 +388,16 @@ impl SuiteResult {
                         } else {
                             DIM
                         };
-                        let v0 = pct_fmt(lo_pct);
-                        let v1 = pct_fmt(mid_pct);
-                        let v2 = pct_fmt(hi_pct);
-                        ([v0, v1, v2], color, None)
+                        let v0 = format!("{}%", pct_fmt(lo_pct));
+                        let v1 = format!("{}%", pct_fmt(mid_pct));
+                        let v2 = format!("{}%", pct_fmt(hi_pct));
+                        ([v0, v1, v2], color)
                     } else {
                         let v = format!("{}%", pct_fmt(analysis.pct_change));
-                        ([v, String::new(), String::new()], DIM, None)
+                        ([v, String::new(), String::new()], DIM)
                     }
                 } else {
-                    ([String::new(), String::new(), String::new()], DIM, None)
+                    ([String::new(), String::new(), String::new()], DIM)
                 };
 
                 // Footnotes and markers (collected in this pass)
@@ -466,7 +465,6 @@ impl SuiteResult {
                     ci_str,
                     vs_vals,
                     vs_base_color,
-                    pre_vs_base,
                     throughput: tp_str,
                     cpu: cpu_str,
                     markers,
@@ -476,11 +474,11 @@ impl SuiteResult {
             // Pass 2b: compute column-wide max widths
             let mean_val_w = raw_rows.iter().map(|r| r.mean_str.len()).max().unwrap_or(1);
             let ci_val_w = raw_rows.iter().map(|r| r.ci_str.len()).max().unwrap_or(1);
-            // vs_val_w only from comparison rows (not baseline — it formats independently)
+            // vs_val_w from ALL rows (ns and % share the same inner width)
             let vs_val_w = raw_rows
                 .iter()
-                .filter(|r| r.pre_vs_base.is_none())
                 .flat_map(|r| r.vs_vals.iter())
+                .filter(|s| !s.is_empty())
                 .map(|s| s.len())
                 .max()
                 .unwrap_or(1);
@@ -493,13 +491,9 @@ impl SuiteResult {
                     "{:>mean_val_w$} ±{:>ci_val_w$} {mean_unit}",
                     raw.mean_str, raw.ci_str,
                 );
-                let vs_base = if let Some(pre) = raw.pre_vs_base {
-                    // Baseline: pre-formatted with its own alignment
-                    pre
-                } else if !raw.vs_vals[0].is_empty() {
-                    // Comparison: use column-wide pct width
+                let vs_base = if !raw.vs_vals[0].is_empty() {
                     format!(
-                        "[{:>vs_val_w$}  {:>vs_val_w$}  {:>vs_val_w$}]%",
+                        "[{:>vs_val_w$}  {:>vs_val_w$}  {:>vs_val_w$}]",
                         raw.vs_vals[0], raw.vs_vals[1], raw.vs_vals[2],
                     )
                 } else {
