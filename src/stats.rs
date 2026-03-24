@@ -149,6 +149,93 @@ impl MeanCi {
     }
 }
 
+/// OLS slope estimate through the origin: `time = slope × iterations`.
+///
+/// Used with linear sampling mode. Separates per-iteration cost from
+/// constant overhead (timer calls, function dispatch, black_box).
+pub fn slope_estimate(iter_counts: &[f64], elapsed_ns: &[f64]) -> Option<(f64, f64)> {
+    if iter_counts.len() != elapsed_ns.len() || iter_counts.len() < 3 {
+        return None;
+    }
+
+    // OLS through origin: slope = Σ(x·y) / Σ(x²)
+    let mut sum_xy = 0.0_f64;
+    let mut sum_xx = 0.0_f64;
+    let mut sum_yy = 0.0_f64;
+    let n = iter_counts.len();
+
+    for i in 0..n {
+        let x = iter_counts[i];
+        let y = elapsed_ns[i];
+        sum_xy += x * y;
+        sum_xx += x * x;
+        sum_yy += y * y;
+    }
+
+    if sum_xx < f64::EPSILON {
+        return None;
+    }
+
+    let slope = sum_xy / sum_xx;
+
+    // R² = 1 - SS_res / SS_tot (through origin)
+    let ss_res: f64 = (0..n)
+        .map(|i| {
+            let pred = slope * iter_counts[i];
+            (elapsed_ns[i] - pred).powi(2)
+        })
+        .sum();
+    let r_squared = if sum_yy > f64::EPSILON {
+        1.0 - ss_res / sum_yy
+    } else {
+        1.0
+    };
+
+    Some((slope, r_squared))
+}
+
+/// Bootstrap CI for the slope estimate.
+#[allow(dead_code)] // Public API for future use
+pub fn slope_ci(
+    iter_counts: &[f64],
+    elapsed_ns: &[f64],
+    n_resamples: usize,
+) -> Option<(f64, f64, f64)> {
+    if iter_counts.len() != elapsed_ns.len() || iter_counts.len() < 3 {
+        return None;
+    }
+
+    let n = iter_counts.len();
+    let mut rng = Xoshiro256SS::seed(0x534C_4F50_4500_0001); // "SLOPE"
+    let mut slopes = Vec::with_capacity(n_resamples);
+
+    for _ in 0..n_resamples {
+        let mut sum_xy = 0.0_f64;
+        let mut sum_xx = 0.0_f64;
+        for _ in 0..n {
+            let idx = (rng.next_u64() as usize) % n;
+            let x = iter_counts[idx];
+            let y = elapsed_ns[idx];
+            sum_xy += x * y;
+            sum_xx += x * x;
+        }
+        if sum_xx > f64::EPSILON {
+            slopes.push(sum_xy / sum_xx);
+        }
+    }
+
+    if slopes.len() < 10 {
+        return None;
+    }
+
+    slopes.sort_unstable_by(|a, b| a.total_cmp(b));
+    let lo = slopes[slopes.len() * 25 / 1000]; // 2.5th percentile
+    let mid = slopes[slopes.len() / 2];
+    let hi = slopes[slopes.len() * 975 / 1000]; // 97.5th percentile
+
+    Some((lo, mid, hi))
+}
+
 /// Result of paired statistical analysis between two interleaved benchmarks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]

@@ -371,6 +371,7 @@ mod tests {
                 tags: vec![],
                 subgroup: None,
                 cold_start_ns: 0.0,
+                slope_ns: None,
                 mean_ci: None,
                 #[cfg(feature = "alloc-profiling")]
                 alloc_stats: None,

@@ -538,6 +538,17 @@ pub struct GroupConfig {
     /// enough that context switches typically fall between samples, not
     /// within them.
     pub sample_target_ns: u64,
+    /// Linear sampling mode for slope regression (default: false).
+    ///
+    /// When enabled, iteration counts vary across rounds (0.2×–2.0× base,
+    /// cycling every 10 rounds). This enables OLS regression through the
+    /// origin to separate per-iteration cost from constant overhead — the
+    /// same technique criterion uses in its Linear sampling mode.
+    ///
+    /// Most impactful for sub-100ns benchmarks where timer/black_box overhead
+    /// is a significant fraction of the measurement. For slower benchmarks
+    /// (> 1µs), overhead compensation alone is sufficient.
+    pub linear_sampling: bool,
     /// Stack alignment jitter (default: true when `precise-timing` enabled).
     ///
     /// Shifts the stack pointer by a random offset (0..4096 bytes, 16-byte
@@ -572,6 +583,7 @@ impl Default for GroupConfig {
             bootstrap_resamples: 10_000,
             cold_start: false,
             sample_target_ns: 1_000_000, // 1ms — short enough to dodge context switches
+            linear_sampling: false,
             stack_jitter: cfg!(feature = "precise-timing"), // on by default with precise-timing
         }
     }
@@ -672,6 +684,12 @@ impl GroupConfig {
     /// Higher = better timer overhead amortization (good for sub-ns benchmarks).
     pub fn sample_target_ns(&mut self, ns: u64) -> &mut Self {
         self.sample_target_ns = ns.max(1_000); // minimum 1µs
+        self
+    }
+
+    /// Enable linear sampling mode for slope regression.
+    pub fn linear_sampling(&mut self, enabled: bool) -> &mut Self {
+        self.linear_sampling = enabled;
         self
     }
 

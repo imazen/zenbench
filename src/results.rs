@@ -53,6 +53,11 @@ pub struct BenchmarkResult {
     /// 245 ± 3ns" rather than just "245ns."
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mean_ci: Option<crate::stats::MeanCi>,
+    /// OLS slope estimate (ns/iter) from linear sampling mode.
+    /// More accurate than mean for sub-100ns benchmarks — separates per-iteration
+    /// cost from constant overhead (timer, black_box, dispatch).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slope_ns: Option<f64>,
     /// Allocation statistics (when `alloc-profiling` feature is active and
     /// `AllocProfiler` is installed as the global allocator).
     #[cfg(feature = "alloc-profiling")]
@@ -787,6 +792,7 @@ mod tests {
             ],
             subgroup: None,
             cold_start_ns: 0.0,
+                        slope_ns: None,
             mean_ci: None,
             #[cfg(feature = "alloc-profiling")]
             alloc_stats: None,
@@ -812,6 +818,7 @@ mod tests {
                         tags: vec![("library".to_string(), "zenflate".to_string())],
                         subgroup: None,
                         cold_start_ns: 0.0,
+                        slope_ns: None,
                         mean_ci: None,
                         #[cfg(feature = "alloc-profiling")]
                         alloc_stats: None,
@@ -823,6 +830,7 @@ mod tests {
                         tags: vec![("library".to_string(), "libdeflate".to_string())],
                         subgroup: None,
                         cold_start_ns: 0.0,
+                        slope_ns: None,
                         mean_ci: None,
                         #[cfg(feature = "alloc-profiling")]
                         alloc_stats: None,
@@ -930,7 +938,8 @@ mod tests {
                         cpu_summary: None,
                         tags: vec![],
                         subgroup: None,
-                        cold_start_ns: 12_500.0, // 12.5µs cold start
+                        cold_start_ns: 12_500.0,
+                        slope_ns: None, // 12.5µs cold start
                         mean_ci: None,
                         #[cfg(feature = "alloc-profiling")]
                         alloc_stats: None,
@@ -942,6 +951,7 @@ mod tests {
                         tags: vec![],
                         subgroup: None,
                         cold_start_ns: 0.0,
+                        slope_ns: None,
                         mean_ci: None,
                         #[cfg(feature = "alloc-profiling")]
                         alloc_stats: None,
@@ -966,6 +976,7 @@ mod tests {
                 tags: vec![],
                 subgroup: None,
                 cold_start_ns: 5_000.0,
+                slope_ns: None,
                 mean_ci: None,
                 #[cfg(feature = "alloc-profiling")]
                 alloc_stats: None,

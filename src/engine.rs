@@ -261,8 +261,22 @@ fn run_comparison_group(
     let n_benchmarks = group.benchmarks.len();
     let group_start = Instant::now();
 
-    // Phase 1: Warmup — run each benchmark to fill caches and estimate iteration count
+    // Phase 1: Warmup + iteration estimation
     eprintln!("[zenbench] warming up group '{}'...", group.name);
+
+    // Explicit warmup phase: run each benchmark for warmup_time to fill
+    // icache, branch predictors, and allocator free lists.
+    if config.warmup_time > std::time::Duration::ZERO {
+        for bench in group.benchmarks.iter_mut() {
+            let warmup_start = Instant::now();
+            while warmup_start.elapsed() < config.warmup_time {
+                let mut b = Bencher::new(1);
+                bench.func.call(&mut b);
+            }
+        }
+    }
+
+    // Estimate iteration count for each benchmark
     let mut estimates = Vec::with_capacity(n_benchmarks);
     let mut cold_starts = Vec::with_capacity(n_benchmarks);
     for bench in group.benchmarks.iter_mut() {
@@ -362,13 +376,22 @@ fn run_comparison_group(
         // Randomize benchmark order for this round
         let order = random_permutation(n_benchmarks, &mut rng);
 
-        // Anti-aliasing jitter: vary iteration count ±20% per round.
-        // Prevents synchronization with periodic system events (timer
-        // interrupts, scheduling quanta). Inspired by nanobench.
-        let jitter = (rng.next_u64() % 41) as i64 - 20; // -20..+20
-        let round_iters = ((iterations_per_sample as i64
-            + iterations_per_sample as i64 * jitter / 100)
-            .max(1)) as usize;
+        // Iteration count per round: two modes.
+        //
+        // Normal mode: ±20% anti-aliasing jitter (nanobench-inspired).
+        // Linear sampling: sweep 0.2×–2.0× base (criterion-inspired)
+        //   for OLS slope regression.
+        let round_iters = if config.linear_sampling {
+            // Sweep: round 0→0.2×, round 4→1.0×, round 9→2.0×, cycling every 10
+            let phase = (round % 10) as f64;
+            let factor = 0.2 + 1.8 * phase / 9.0;
+            (iterations_per_sample as f64 * factor).max(1.0) as usize
+        } else {
+            let jitter = (rng.next_u64() % 41) as i64 - 20; // -20..+20
+            ((iterations_per_sample as i64
+                + iterations_per_sample as i64 * jitter / 100)
+                .max(1)) as usize
+        };
         iters_per_round.push(round_iters);
 
         let round_start = Instant::now();
@@ -652,6 +675,15 @@ fn run_comparison_group(
             }
         };
 
+        // Slope regression: if linear_sampling is enabled, compute OLS slope
+        let slope_ns = if config.linear_sampling {
+            let xs: Vec<f64> = iters_per_round.iter().map(|&n| n as f64).collect();
+            let ys: Vec<f64> = samples[i].iter().map(|&v| v as f64).collect();
+            crate::stats::slope_estimate(&xs, &ys).map(|(slope, _r2)| slope)
+        } else {
+            None
+        };
+
         individual_results.push(BenchmarkResult {
             name: bench.name.clone(),
             summary,
@@ -659,6 +691,7 @@ fn run_comparison_group(
             tags: bench.tags.clone(),
             subgroup: bench.subgroup.clone(),
             cold_start_ns: cold_starts[i] as f64,
+            slope_ns,
             mean_ci,
             #[cfg(feature = "alloc-profiling")]
             alloc_stats,
@@ -744,9 +777,10 @@ fn run_standalone(
         tags: bench.tags.clone(),
         subgroup: bench.subgroup.clone(),
         cold_start_ns: _cold_start_ns as f64,
+        slope_ns: None,
         mean_ci,
         #[cfg(feature = "alloc-profiling")]
-        alloc_stats: None, // Standalone benchmarks don't track allocs yet
+        alloc_stats: None,
     }
 }
 
