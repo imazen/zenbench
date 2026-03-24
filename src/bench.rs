@@ -440,8 +440,6 @@ pub struct GroupConfig {
     pub cache_firewall: bool,
     /// Cache firewall size in bytes (default: 2 MiB, enough to spoil L2).
     pub cache_firewall_bytes: usize,
-    /// Whether to yield to OS scheduler between samples.
-    pub yield_between_samples: bool,
     /// Only compare against the baseline (first benchmark) in reports.
     ///
     /// When `false` (default for <= 3 benchmarks), shows all pairwise comparisons.
@@ -502,8 +500,7 @@ impl Default for GroupConfig {
             max_iterations: 10_000_000,
             cache_firewall: false,
             cache_firewall_bytes: 2 * 1024 * 1024, // 2 MiB — enough to spoil L2 on most modern CPUs
-            yield_between_samples: false,
-            baseline_only: None, // auto: true when > 3 benchmarks
+            baseline_only: None,                   // auto: true when > 3 benchmarks
             expect_sub_ns: false,
             sort_by_speed: false,
             auto_rounds: true,
@@ -557,11 +554,6 @@ impl GroupConfig {
 
     pub fn expect_sub_ns(&mut self, enabled: bool) -> &mut Self {
         self.expect_sub_ns = enabled;
-        self
-    }
-
-    pub fn yield_between_samples(&mut self, enabled: bool) -> &mut Self {
-        self.yield_between_samples = enabled;
         self
     }
 

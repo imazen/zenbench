@@ -533,8 +533,8 @@ fn tool_compare_results(args: &Value) -> Result<String, String> {
                         "baseline_mean_ns": base_bench.summary.mean,
                         "candidate_mean_ns": cand_bench.summary.mean,
                         "pct_change": pct,
-                        "baseline_formatted": crate::format_ns(base_bench.summary.mean),
-                        "candidate_formatted": crate::format_ns(cand_bench.summary.mean),
+                        "baseline_formatted": crate::format::format_ns(base_bench.summary.mean),
+                        "candidate_formatted": crate::format::format_ns(cand_bench.summary.mean),
                     }));
                 }
             }
@@ -559,8 +559,8 @@ fn tool_compare_results(args: &Value) -> Result<String, String> {
                 "baseline_mean_ns": base_bench.summary.mean,
                 "candidate_mean_ns": cand_bench.summary.mean,
                 "pct_change": pct,
-                "baseline_formatted": crate::format_ns(base_bench.summary.mean),
-                "candidate_formatted": crate::format_ns(cand_bench.summary.mean),
+                "baseline_formatted": crate::format::format_ns(base_bench.summary.mean),
+                "candidate_formatted": crate::format::format_ns(cand_bench.summary.mean),
             }));
         }
     }

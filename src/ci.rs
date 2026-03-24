@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Used by bin targets, not the lib
+
 use serde::{Deserialize, Serialize};
 
 /// Detected CI environment information.

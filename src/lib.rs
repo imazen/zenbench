@@ -19,11 +19,10 @@ mod report;
 mod results;
 mod stats;
 
-pub use bench::{BenchFn, BenchGroup, Bencher, Benchmark, GroupConfig, Suite, Throughput};
-pub use ci::CiEnvironment;
-pub use engine::Engine;
-pub use gate::{GateConfig, ResourceGate};
-pub use results::{BenchmarkResult, ComparisonResult, RunId, SuiteResult, format_ns};
+pub use bench::{BenchGroup, Bencher, GroupConfig, Suite, Throughput};
+pub use format::format_ns;
+pub use gate::GateConfig;
+pub use results::{BenchmarkResult, ComparisonResult, RunId, SuiteResult};
 pub use stats::{PairedAnalysis, Summary};
 
 /// Re-export `black_box` from std for convenience.
@@ -61,7 +60,7 @@ pub mod prelude {
 pub fn run<F: FnOnce(&mut Suite)>(f: F) -> SuiteResult {
     let mut suite = Suite::new();
     f(&mut suite);
-    let engine = Engine::new(suite);
+    let engine = engine::Engine::new(suite);
     engine.run()
 }
 
@@ -69,7 +68,7 @@ pub fn run<F: FnOnce(&mut Suite)>(f: F) -> SuiteResult {
 pub fn run_gated<F: FnOnce(&mut Suite)>(gate: GateConfig, f: F) -> SuiteResult {
     let mut suite = Suite::new();
     f(&mut suite);
-    let engine = Engine::with_gate(suite, gate);
+    let engine = engine::Engine::with_gate(suite, gate);
     engine.run()
 }
 

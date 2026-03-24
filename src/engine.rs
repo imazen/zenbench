@@ -42,6 +42,7 @@ impl Engine {
 
     /// Set the directory for the cross-process lock file.
     /// Other zenbench processes using the same lock dir will wait their turn.
+    #[allow(dead_code)] // Used by bin targets
     pub fn lock_dir(mut self, dir: PathBuf) -> Self {
         self.lock_dir = Some(dir);
         self
@@ -308,11 +309,6 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
             // Cache firewall between benchmarks
             if let Some(fw) = &firewall {
                 fw.spoil();
-            }
-
-            // Yield to OS if configured
-            if config.yield_between_samples {
-                std::thread::yield_now();
             }
 
             // Run the benchmark

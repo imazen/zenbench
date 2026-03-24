@@ -165,6 +165,7 @@ impl ResourceGate {
     }
 
     /// Check if conditions are favorable. Returns None if OK, or the blocking reason.
+    #[allow(dead_code)] // Used by bin targets
     pub fn check(&self) -> Option<GateReason> {
         if !self.config.enabled {
             return None;
