@@ -109,6 +109,9 @@ pub struct SuiteResult {
     #[serde(with = "duration_serde")]
     pub gate_wait_time: Duration,
     pub unreliable: bool,
+    /// Timer resolution in nanoseconds (measured at startup).
+    #[serde(default)]
+    pub timer_resolution_ns: u64,
 }
 
 impl SuiteResult {
@@ -776,6 +779,7 @@ mod tests {
             gate_waits: 0,
             gate_wait_time: Duration::ZERO,
             unreliable: false,
+            timer_resolution_ns: 25,
         }
     }
 

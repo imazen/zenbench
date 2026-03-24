@@ -52,6 +52,8 @@ impl Engine {
         let run_id = RunId::generate();
         let ci = platform::detect_ci().map(String::from);
         let git_hash = platform::git_commit_hash();
+        let timer_res = platform::timer_resolution_ns();
+        eprintln!("[zenbench] timer resolution: {timer_res}ns");
         let start = Instant::now();
 
         // Auto-save: write results to a temp file so LLMs/tools can re-read
@@ -119,6 +121,7 @@ impl Engine {
                     gate_waits: self.gate.total_waits(),
                     gate_wait_time: self.gate.total_wait_time(),
                     unreliable: false,
+                    timer_resolution_ns: timer_res,
                 };
                 let n_groups = comparisons.len();
                 let mut content =
@@ -148,6 +151,7 @@ impl Engine {
             gate_waits: self.gate.total_waits(),
             gate_wait_time: self.gate.total_wait_time(),
             unreliable: gate_unreliable,
+            timer_resolution_ns: timer_res,
         };
 
         // Write final complete results

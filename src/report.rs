@@ -353,6 +353,27 @@ pub fn print_report(result: &SuiteResult) {
                 );
                 markers.push_str(&format!("[{n}]"));
             }
+            // Timer resolution check — only flags when the SAMPLE time
+            // (mean × iterations) is near timer resolution, not the per-iter time.
+            // A 0.2ns per-iter with 10M iters = 2s per sample, which is fine.
+            let timer_res = result.timer_resolution_ns as f64;
+            let sample_time = bench.summary.mean * comp.iterations_per_sample as f64;
+            if timer_res > 0.0 && sample_time > 0.0 && sample_time < timer_res * 100.0 {
+                let n = add_footnote(format!(
+                    "sample time ({}) near timer resolution ({:.0}ns) \u{2014} increase iterations",
+                    crate::format::format_ns(sample_time),
+                    timer_res,
+                ));
+                markers.push_str(&format!("[{n}]"));
+            }
+            // Cold start below timer resolution
+            if bench.cold_start_ns > 0.0 && bench.cold_start_ns < timer_res * 5.0 {
+                let n = add_footnote(format!(
+                    "cold start ({:.0}ns) near timer resolution \u{2014} unreliable",
+                    bench.cold_start_ns,
+                ));
+                markers.push_str(&format!("[{n}]"));
+            }
 
             raw_rows.push(RawRow {
                 bench_idx: i,

@@ -370,21 +370,29 @@ impl BenchGroup {
         let logical_cores = sys.cpus().len().max(1);
         let physical_cores = sysinfo::System::physical_core_count().unwrap_or(logical_cores);
 
-        // Build thread counts: 1, 2, 4, ..., physical_cores, logical_cores
+        // Build thread counts: powers of 2 + intermediate points around physical cores.
+        // Optimal thread count often isn't a power of 2 (e.g., 6 on an 8-core,
+        // 12 on a 16-core where memory bandwidth saturates before all cores are used).
         let mut counts = vec![1];
+        // Powers of 2
         let mut t = 2;
-        while t < physical_cores {
+        while t <= logical_cores {
             counts.push(t);
             t *= 2;
         }
-        if physical_cores > 1 && !counts.contains(&physical_cores) {
-            counts.push(physical_cores);
+        // Physical core count and fractions: 1/2, 3/4, full
+        if physical_cores > 2 {
+            counts.push(physical_cores / 2);
+            counts.push(physical_cores * 3 / 4);
         }
-        if logical_cores > physical_cores && !counts.contains(&logical_cores) {
+        counts.push(physical_cores);
+        // Logical cores (SMT) if different
+        if logical_cores > physical_cores {
             counts.push(logical_cores);
         }
         counts.sort_unstable();
         counts.dedup();
+        counts.retain(|&c| c >= 1 && c <= logical_cores);
 
         eprintln!(
             "[zenbench] scaling '{}': probing {} thread counts on {}/{} cores (physical/logical)",

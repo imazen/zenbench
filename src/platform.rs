@@ -97,6 +97,27 @@ impl Default for SystemMonitor {
 }
 
 /// Detect if we're running in a CI environment.
+/// Measure the timer resolution by finding the minimum non-zero delta
+/// between consecutive `Instant::now()` calls.
+///
+/// Returns the resolution in nanoseconds. Typical values:
+/// - Linux TSC: ~25ns
+/// - macOS: ~40ns
+/// - Windows QPC: ~300ns
+pub fn timer_resolution_ns() -> u64 {
+    let mut min_delta = u64::MAX;
+    for _ in 0..1000 {
+        let a = std::time::Instant::now();
+        let b = std::time::Instant::now();
+        let delta = b.duration_since(a).as_nanos() as u64;
+        if delta > 0 && delta < min_delta {
+            min_delta = delta;
+        }
+    }
+    // Fallback: if all deltas were 0 (very fast timer), assume 1ns
+    if min_delta == u64::MAX { 1 } else { min_delta }
+}
+
 pub fn detect_ci() -> Option<&'static str> {
     if std::env::var("GITHUB_ACTIONS").is_ok() {
         return Some("github-actions");
