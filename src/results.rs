@@ -126,6 +126,126 @@ impl SuiteResult {
         crate::report::print_report(self);
     }
 
+    /// Generate key-value format optimized for LLM consumption and grep.
+    ///
+    /// One line per benchmark. Every field explicitly named. No positional
+    /// parsing, no ANSI, no box drawing. Greppable:
+    /// ```text
+    /// cargo bench -- --format=llm | grep 'benchmark="my_func"'
+    /// ```
+    pub fn to_llm(&self) -> String {
+        let mut out = String::new();
+
+        for comp in &self.comparisons {
+            let baseline_name = comp
+                .analyses
+                .first()
+                .map(|(base, _, _)| base.as_str())
+                .unwrap_or_else(|| {
+                    comp.benchmarks
+                        .first()
+                        .map(|b| b.name.as_str())
+                        .unwrap_or("")
+                });
+
+            // Build analysis lookup
+            let analyses: std::collections::HashMap<&str, &PairedAnalysis> = comp
+                .analyses
+                .iter()
+                .filter(|(base, _, _)| base == baseline_name)
+                .map(|(_, cand, a)| (cand.as_str(), a))
+                .collect();
+
+            for bench in &comp.benchmarks {
+                let s = &bench.summary;
+                let mut kv = vec![format!("group={}", llm_quote(&comp.group_name))];
+                if let Some(sg) = &bench.subgroup {
+                    kv.push(format!("subgroup={}", llm_quote(sg)));
+                }
+                kv.push(format!("benchmark={}", llm_quote(&bench.name)));
+                kv.push(format!("median_ns={:.2}", s.median));
+                kv.push(format!("mean_ns={:.2}", s.mean));
+                kv.push(format!("min_ns={:.2}", s.min));
+                kv.push(format!("max_ns={:.2}", s.max));
+                kv.push(format!("stddev_ns={:.2}", s.std_dev()));
+                kv.push(format!("mad_ns={:.2}", s.mad));
+                kv.push(format!("n={}", s.n));
+                kv.push(format!("cv_pct={:.1}", s.cv() * 100.0));
+
+                if bench.cold_start_ns > 0.0 {
+                    kv.push(format!("cold_start_ns={:.2}", bench.cold_start_ns));
+                }
+
+                // Comparison data
+                if bench.name == baseline_name {
+                    kv.push("vs_base=baseline".to_string());
+                } else if let Some(analysis) = analyses.get(bench.name.as_str()) {
+                    let base_mean = analysis.baseline.mean;
+                    kv.push(format!("vs_base_pct={:+.2}", analysis.pct_change));
+                    kv.push(format!("vs_base_ci_lo_ns={:.2}", analysis.ci_lower));
+                    kv.push(format!("vs_base_ci_median_ns={:.2}", analysis.ci_median));
+                    kv.push(format!("vs_base_ci_hi_ns={:.2}", analysis.ci_upper));
+                    if base_mean.abs() > f64::EPSILON {
+                        kv.push(format!(
+                            "vs_base_ci_lo_pct={:+.2}",
+                            analysis.ci_lower / base_mean * 100.0,
+                        ));
+                        kv.push(format!(
+                            "vs_base_ci_hi_pct={:+.2}",
+                            analysis.ci_upper / base_mean * 100.0,
+                        ));
+                    }
+                    kv.push(format!("significant={}", analysis.significant));
+                    kv.push(format!("cohens_d={:.2}", analysis.cohens_d));
+                    kv.push(format!("wilcoxon_p={:.6}", analysis.wilcoxon_p));
+                    kv.push(format!("drift_r={:.2}", analysis.drift_correlation));
+                }
+
+                // Throughput
+                if let Some(tp) = &comp.throughput {
+                    let (val, unit) = tp.compute_named(s.mean, comp.throughput_unit.as_deref());
+                    kv.push(format!("throughput={:.2}", val));
+                    kv.push(format!("throughput_unit={unit}"));
+                }
+
+                // Tags
+                for (k, v) in &bench.tags {
+                    kv.push(format!("tag_{k}={}", llm_quote(v)));
+                }
+
+                // Config context
+                kv.push(format!("rounds={}", comp.completed_rounds));
+                kv.push(format!("iters_per_sample={}", comp.iterations_per_sample));
+
+                out.push_str(&kv.join(" "));
+                out.push('\n');
+            }
+        }
+
+        // Standalone benchmarks
+        for bench in &self.standalones {
+            let s = &bench.summary;
+            let mut kv = vec![
+                format!("benchmark={}", llm_quote(&bench.name)),
+                format!("median_ns={:.2}", s.median),
+                format!("mean_ns={:.2}", s.mean),
+                format!("min_ns={:.2}", s.min),
+                format!("max_ns={:.2}", s.max),
+                format!("stddev_ns={:.2}", s.std_dev()),
+                format!("mad_ns={:.2}", s.mad),
+                format!("n={}", s.n),
+                format!("cv_pct={:.1}", s.cv() * 100.0),
+            ];
+            if bench.cold_start_ns > 0.0 {
+                kv.push(format!("cold_start_ns={:.2}", bench.cold_start_ns));
+            }
+            out.push_str(&kv.join(" "));
+            out.push('\n');
+        }
+
+        out
+    }
+
     /// Generate a markdown report with tables.
     pub fn to_markdown(&self) -> String {
         let mut out = String::new();
@@ -392,6 +512,16 @@ impl SuiteResult {
 
 // Re-export format_ns so that `results::format_ns` still resolves.
 pub use crate::format::format_ns;
+
+/// Quote a value for LLM key-value format. Wraps in double quotes if it
+/// contains spaces, quotes, or equals signs.
+fn llm_quote(s: &str) -> String {
+    if s.contains(' ') || s.contains('"') || s.contains('=') {
+        format!("\"{}\"", s.replace('"', "\\\""))
+    } else {
+        s.to_string()
+    }
+}
 
 #[cfg(test)]
 mod tests {

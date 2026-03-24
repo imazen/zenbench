@@ -132,6 +132,19 @@ macro_rules! main {
         fn main() {
             let result = $crate::run(|$suite: &mut $crate::Suite| $body);
 
+            // Check ZENBENCH_FORMAT env var for output format
+            match std::env::var("ZENBENCH_FORMAT").as_deref() {
+                Ok("llm") => print!("{}", result.to_llm()),
+                Ok("csv") => print!("{}", result.to_csv()),
+                Ok("markdown" | "md") => print!("{}", result.to_markdown()),
+                Ok("json") => {
+                    if let Err(e) = result.save("/dev/stdout") {
+                        eprintln!("[zenbench] error writing JSON: {e}");
+                    }
+                }
+                _ => {} // default: terminal report already printed
+            }
+
             // Save results if in fire-and-forget mode
             if let Some(path) = $crate::daemon::result_path_from_env() {
                 if let Err(e) = result.save(&path) {
