@@ -841,13 +841,23 @@ pub fn print_report(result: &SuiteResult) {
         result.gate_waits,
         result.gate_wait_time.as_secs_f64(),
     );
+    // Warn if gate waits dominated the run
+    let gate_pct = if result.total_time.as_secs_f64() > 0.0 {
+        result.gate_wait_time.as_secs_f64() / result.total_time.as_secs_f64() * 100.0
+    } else {
+        0.0
+    };
+    if gate_pct > 50.0 {
+        eprintln!(
+            "  {YELLOW}\u{26a0} {:.0}% of time spent waiting for quiet system \
+             \u{2014} results may be unreliable. \
+             Try: GateConfig::disabled() or a quieter machine.{RESET}",
+            gate_pct,
+        );
+    }
     if result.unreliable {
         eprintln!("  {RED}{BOLD}\u{26a0} UNRELIABLE: too many resource gate waits{RESET}");
     }
-    eprintln!("  {DIM}gate checks: CPU load, free RAM, CPU temp, heavy processes{RESET}",);
-    eprintln!(
-        "  {DIM}not checked: disk I/O, network, frequency scaling, VM/container noise{RESET}",
-    );
     eprintln!("{BOLD_WHITE}═══════════════════════════════════════════════════════════════{RESET}");
     // Usage hints for LLMs and humans
     eprintln!(

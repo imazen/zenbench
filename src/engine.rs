@@ -118,10 +118,12 @@ impl Engine {
                 .max()
                 .unwrap_or(0);
             if max_threads > 1 {
-                // Disable gate for threaded groups — our own threads ARE the load
-                self.gate.set_thread_allowance(usize::MAX);
+                // Disable gate entirely for threaded groups — our own threads
+                // spike CPU load and process count. Gating on our own work
+                // wastes time (83% gate waits observed on noisy systems).
+                self.gate.disable();
             } else {
-                self.gate.set_thread_allowance(0);
+                self.gate.enable();
             }
             let result = run_comparison_group(group, &mut self.gate);
             comparisons.push(result);
