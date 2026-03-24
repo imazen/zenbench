@@ -863,6 +863,203 @@ fn baseline_list_and_delete() {
     assert!(!names_after.contains(&"test_list_a".to_string()));
 }
 
+// ── Slope regression ────────────────────────────────────────────────
+
+#[test]
+fn slope_regression_produces_result() {
+    let result = run_gated(disabled_gate(), |suite| {
+        suite.compare("slope_test", |group| {
+            group
+                .config()
+                .max_rounds(30)
+                .auto_rounds(false)
+                .linear_sampling(true);
+            group.bench("work", |b| {
+                b.iter(|| {
+                    let mut v = 0u64;
+                    for i in 0..100 {
+                        v = v.wrapping_add(black_box(i));
+                    }
+                    black_box(v)
+                })
+            });
+        });
+    });
+    let bench = &result.comparisons[0].benchmarks[0];
+    assert!(
+        bench.slope_ns.is_some(),
+        "linear_sampling should produce a slope estimate"
+    );
+    let slope = bench.slope_ns.unwrap();
+    assert!(slope > 0.0, "slope should be positive, got {slope}");
+    // Slope should be similar to mean (within 5x)
+    let ratio = slope / bench.summary.mean;
+    assert!(
+        ratio > 0.2 && ratio < 5.0,
+        "slope ({slope:.1}ns) should be similar to mean ({:.1}ns), ratio={ratio:.2}",
+        bench.summary.mean,
+    );
+}
+
+#[test]
+fn slope_not_computed_without_linear_sampling() {
+    let result = run_gated(disabled_gate(), |suite| {
+        suite.compare("no_slope", |group| {
+            group.config().max_rounds(10).auto_rounds(false);
+            group.bench("work", |b| b.iter(|| black_box(42u64)));
+        });
+    });
+    assert!(
+        result.comparisons[0].benchmarks[0].slope_ns.is_none(),
+        "slope_ns should be None without linear_sampling"
+    );
+}
+
+// ── Warmup ──────────────────────────────────────────────────────────
+
+#[test]
+fn warmup_time_zero_skips_warmup() {
+    // Default warmup is 500ms but we override to 0 — should be fast
+    let start = std::time::Instant::now();
+    let _result = run_gated(disabled_gate(), |suite| {
+        suite.compare("no_warmup", |group| {
+            group
+                .config()
+                .warmup_time(std::time::Duration::ZERO)
+                .max_rounds(5)
+                .auto_rounds(false);
+            group.bench("a", |b| b.iter(|| black_box(1u64)));
+        });
+    });
+    // With 0 warmup and 5 rounds, should complete within wall time
+    // (gate waits can add time on busy systems, so be generous)
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(120),
+        "zero warmup should complete within wall time limit"
+    );
+}
+
+// ── Testbed detection ───────────────────────────────────────────────
+
+#[test]
+fn testbed_is_populated_in_results() {
+    let result = run_gated(disabled_gate(), |suite| {
+        suite.compare("tb", |group| {
+            group.config().max_rounds(5).auto_rounds(false);
+            group.bench("a", |b| b.iter(|| black_box(1u64)));
+        });
+    });
+    let testbed = result.testbed.as_ref().expect("testbed should be populated");
+    assert!(!testbed.cpu_model.is_empty(), "cpu_model should not be empty");
+    assert!(!testbed.arch.is_empty(), "arch should not be empty");
+    assert!(!testbed.os.is_empty(), "os should not be empty");
+    assert!(testbed.logical_cores > 0, "logical_cores should be > 0");
+    assert!(testbed.physical_cores > 0, "physical_cores should be > 0");
+}
+
+#[test]
+fn testbed_survives_json_roundtrip() {
+    let result = run_gated(disabled_gate(), |suite| {
+        suite.compare("tb_rt", |group| {
+            group.config().max_rounds(5).auto_rounds(false);
+            group.bench("a", |b| b.iter(|| black_box(1u64)));
+        });
+    });
+    let path = std::env::temp_dir().join("zenbench_test_testbed_rt.json");
+    result.save(&path).unwrap();
+    let loaded = SuiteResult::load(&path).unwrap();
+    assert_eq!(result.testbed, loaded.testbed);
+    let _ = std::fs::remove_file(&path);
+}
+
+// ── Baseline staleness warnings ─────────────────────────────────────
+
+#[test]
+fn baseline_comparison_warns_on_git_hash_mismatch() {
+    let mut result1 = run_gated(disabled_gate(), |suite| {
+        suite.compare("stale", |group| {
+            group.config().max_rounds(5).auto_rounds(false);
+            group.bench("x", |b| b.iter(|| black_box(1u64)));
+        });
+    });
+    let mut result2 = result1.clone();
+    result1.git_hash = Some("aaaa1111".to_string());
+    result2.git_hash = Some("bbbb2222".to_string());
+
+    let comparison = zenbench::baseline::compare_against_baseline(&result1, &result2, 50.0);
+    assert!(
+        comparison.warnings.iter().any(|w| w.contains("git hash")),
+        "should warn about git hash mismatch: {:?}",
+        comparison.warnings,
+    );
+}
+
+#[test]
+fn baseline_comparison_warns_on_testbed_mismatch() {
+    let mut result1 = run_gated(disabled_gate(), |suite| {
+        suite.compare("hw", |group| {
+            group.config().max_rounds(5).auto_rounds(false);
+            group.bench("x", |b| b.iter(|| black_box(1u64)));
+        });
+    });
+    let mut result2 = result1.clone();
+
+    // Modify the testbed to simulate hardware change
+    if let Some(tb) = result2.testbed.as_mut() {
+        tb.cpu_model = "Different CPU Model".to_string();
+    }
+
+    let comparison = zenbench::baseline::compare_against_baseline(&result1, &result2, 50.0);
+    assert!(
+        comparison.warnings.iter().any(|w| w.contains("CPU changed")),
+        "should warn about CPU change: {:?}",
+        comparison.warnings,
+    );
+}
+
+#[test]
+fn baseline_statistical_gating_prevents_false_positive() {
+    // Two runs of the same workload: pct_change may exceed threshold by noise,
+    // but the t-test should gate it because variance is high relative to diff.
+    let result1 = run_gated(disabled_gate(), |suite| {
+        suite.compare("gate_test", |group| {
+            group.config().max_rounds(10).auto_rounds(false);
+            group.bench("noisy", |b| {
+                b.iter(|| {
+                    let mut v = 0u64;
+                    for i in 0..100 {
+                        v = v.wrapping_add(black_box(i));
+                    }
+                    black_box(v)
+                })
+            });
+        });
+    });
+    let result2 = run_gated(disabled_gate(), |suite| {
+        suite.compare("gate_test", |group| {
+            group.config().max_rounds(10).auto_rounds(false);
+            group.bench("noisy", |b| {
+                b.iter(|| {
+                    let mut v = 0u64;
+                    for i in 0..100 {
+                        v = v.wrapping_add(black_box(i));
+                    }
+                    black_box(v)
+                })
+            });
+        });
+    });
+
+    // With a tiny threshold (0.1%), statistical gating should prevent
+    // false positives from the same workload
+    let comparison = zenbench::baseline::compare_against_baseline(&result1, &result2, 0.1);
+    // The same workload shouldn't show as a regression (t-test gates it)
+    assert_eq!(
+        comparison.regressions, 0,
+        "same workload should not regress even with tiny threshold (statistical gating)"
+    );
+}
+
 // ── Configurable bootstrap resamples ────────────────────────────────
 
 #[test]

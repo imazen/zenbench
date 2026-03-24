@@ -908,4 +908,75 @@ mod tests {
             result.ci_median
         );
     }
+
+    // ── Slope regression tests ──────────────────────────────────────
+
+    #[test]
+    fn slope_estimate_linear_relationship() {
+        // Perfect linear: y = 10 * x (10ns per iteration)
+        let xs: Vec<f64> = (1..=20).map(|x| x as f64).collect();
+        let ys: Vec<f64> = xs.iter().map(|&x| 10.0 * x).collect();
+        let (slope, r2) = slope_estimate(&xs, &ys).unwrap();
+        assert!((slope - 10.0).abs() < 0.001, "slope should be ~10, got {slope}");
+        assert!((r2 - 1.0).abs() < 0.001, "R² should be ~1.0 for perfect fit, got {r2}");
+    }
+
+    #[test]
+    fn slope_estimate_with_noise() {
+        // y = 5 * x + noise
+        let mut rng = Xoshiro256SS::seed(42);
+        let xs: Vec<f64> = (1..=100).map(|x| x as f64).collect();
+        let ys: Vec<f64> = xs
+            .iter()
+            .map(|&x| {
+                let noise = (rng.next_u64() % 100) as f64 / 100.0 - 0.5; // ±0.5ns
+                5.0 * x + noise
+            })
+            .collect();
+        let (slope, r2) = slope_estimate(&xs, &ys).unwrap();
+        assert!((slope - 5.0).abs() < 0.5, "slope should be ~5, got {slope}");
+        assert!(r2 > 0.99, "R² should be > 0.99, got {r2}");
+    }
+
+    #[test]
+    fn slope_estimate_too_few_points() {
+        let xs = vec![1.0, 2.0];
+        let ys = vec![10.0, 20.0];
+        assert!(slope_estimate(&xs, &ys).is_none(), "need >= 3 points");
+    }
+
+    #[test]
+    fn slope_ci_brackets_true_slope() {
+        // y = 7.5 * x + noise
+        let mut rng = Xoshiro256SS::seed(123);
+        let xs: Vec<f64> = (1..=50).map(|x| x as f64).collect();
+        let ys: Vec<f64> = xs
+            .iter()
+            .map(|&x| {
+                let noise = (rng.next_u64() % 200) as f64 / 100.0 - 1.0;
+                7.5 * x + noise
+            })
+            .collect();
+        let (lo, mid, hi) = slope_ci(&xs, &ys, 5000).unwrap();
+        assert!(lo <= mid && mid <= hi, "CI ordering: {lo} <= {mid} <= {hi}");
+        assert!(lo < 7.5 && hi > 7.5, "CI [{lo}, {hi}] should contain true slope 7.5");
+    }
+
+    // ── Wilcoxon edge cases ─────────────────────────────────────────
+
+    #[test]
+    fn wilcoxon_small_n_returns_one() {
+        // n < 10 should return p = 1.0
+        let diffs = vec![1.0, 2.0, 3.0];
+        let p = wilcoxon_signed_rank(&diffs);
+        assert!((p - 1.0).abs() < f64::EPSILON, "p should be 1.0 for n<10, got {p}");
+    }
+
+    #[test]
+    fn spearman_inverse_correlation() {
+        // Perfectly decreasing: should give r ≈ -1
+        let values: Vec<f64> = (0..20).rev().map(|x| x as f64).collect();
+        let r = spearman_correlation(&values);
+        assert!(r < -0.9, "inverse correlation should give r < -0.9, got {r}");
+    }
 }
