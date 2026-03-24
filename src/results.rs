@@ -266,7 +266,9 @@ impl SuiteResult {
 
             struct Row {
                 name: String,
-                mean_ci: String,
+                min_col: String,
+                mean_col: String,
+                sigma_col: String, // σ (stddev)
                 throughput: String,
                 cpu: String,
                 vs_base: String,
@@ -324,6 +326,7 @@ impl SuiteResult {
                 is_fastest: bool,
                 min_str: String,
                 mean_str: String,
+                sigma_str: String,
                 vs_vals: [String; 3], // values with unit (e.g. "260ns" or "+1.5%")
                 vs_base_color: &'static str,
                 throughput: String,
@@ -359,6 +362,7 @@ impl SuiteResult {
                 // mean = typical performance
                 let min_str = format!("{:.*}", mean_dp, bench.summary.min / mean_divisor);
                 let mean_str = format!("{:.*}", mean_dp, bench.summary.mean / mean_divisor);
+                let sigma_str = format!("{:.*}", mean_dp, bench.summary.std_dev() / mean_divisor);
 
                 // vs baseline column: unit inside brackets, shared width
                 // Baseline: [260ns  262ns  265ns]
@@ -463,6 +467,7 @@ impl SuiteResult {
                     is_fastest,
                     min_str,
                     mean_str,
+                    sigma_str,
                     vs_vals,
                     vs_base_color,
                     throughput: tp_str,
@@ -474,6 +479,13 @@ impl SuiteResult {
             // Pass 2b: compute column-wide max widths
             let min_val_w = raw_rows.iter().map(|r| r.min_str.len()).max().unwrap_or(1);
             let mean_val_w = raw_rows.iter().map(|r| r.mean_str.len()).max().unwrap_or(1);
+            let sigma_val_w = raw_rows
+                .iter()
+                .map(|r| r.sigma_str.len())
+                .max()
+                .unwrap_or(1);
+            // Show σ column when there's room (no throughput), or always if no comparisons
+            let show_sigma = !has_throughput || !has_comparisons;
             // vs_val_w from ALL rows (ns and % share the same inner width)
             let vs_val_w = raw_rows
                 .iter()
@@ -487,10 +499,9 @@ impl SuiteResult {
             let mut rows: Vec<Row> = Vec::with_capacity(raw_rows.len());
             for raw in raw_rows {
                 let bench = &comp.benchmarks[raw.bench_idx];
-                let mean_ci = format!(
-                    "{:>min_val_w$} · {:>mean_val_w$} {mean_unit}",
-                    raw.min_str, raw.mean_str,
-                );
+                let min_col = format!("{:>min_val_w$}{mean_unit}", raw.min_str);
+                let mean_col = format!("{:>mean_val_w$}{mean_unit}", raw.mean_str);
+                let sigma_col = format!("±{:>sigma_val_w$}{mean_unit}", raw.sigma_str);
                 let vs_base = if !raw.vs_vals[0].is_empty() {
                     format!(
                         "[{:>vs_val_w$}  {:>vs_val_w$}  {:>vs_val_w$}]",
@@ -501,7 +512,9 @@ impl SuiteResult {
                 };
                 rows.push(Row {
                     name: bench.name.clone(),
-                    mean_ci,
+                    min_col,
+                    mean_col,
+                    sigma_col,
                     throughput: raw.throughput,
                     cpu: raw.cpu,
                     vs_base,
@@ -512,12 +525,24 @@ impl SuiteResult {
                 });
             }
 
+            let min_w = rows
+                .iter()
+                .map(|r| r.min_col.len())
+                .max()
+                .unwrap_or(3)
+                .max(3);
             let mean_w = rows
                 .iter()
-                .map(|r| r.mean_ci.len())
+                .map(|r| r.mean_col.len())
                 .max()
-                .unwrap_or(8)
-                .max(8);
+                .unwrap_or(4)
+                .max(4);
+            let sigma_w = rows
+                .iter()
+                .map(|r| r.sigma_col.len())
+                .max()
+                .unwrap_or(1)
+                .max(1);
             let tp_w = if has_throughput {
                 rows.iter()
                     .map(|r| r.throughput.len())
@@ -557,15 +582,27 @@ impl SuiteResult {
             hdr.push_str(&format!("│ {:<name_w$}", "benchmark"));
             add_col(&mut mid, name_w, '├');
 
-            // Mean ±CI column
+            // Min column
+            add_col(&mut top, min_w, '┬');
+            hdr.push_str(&format!(" │ {:>min_w$}", "min"));
+            add_col(&mut mid, min_w, '┼');
+
+            // Mean column
             add_col(&mut top, mean_w, '┬');
-            hdr.push_str(&format!(" │ {:>mean_w$}", "min · mean"));
+            hdr.push_str(&format!(" │ {:>mean_w$}", "mean"));
             add_col(&mut mid, mean_w, '┼');
+
+            // σ column
+            if show_sigma {
+                add_col(&mut top, sigma_w, '┬');
+                hdr.push_str(&format!(" │ {:>sigma_w$}", "σ"));
+                add_col(&mut mid, sigma_w, '┼');
+            }
 
             // vs base column
             if has_comparisons {
                 add_col(&mut top, vs_w, '┬');
-                hdr.push_str(&format!(" │ {:^vs_w$}", "[low · mean · high] vs base"));
+                hdr.push_str(&format!(" │ {:^vs_w$}", "[lo · mean · hi] 95%ci"));
                 add_col(&mut mid, vs_w, '┼');
             }
 
@@ -621,7 +658,16 @@ impl SuiteResult {
                     row.name,
                 );
 
-                line.push_str(&format!(" {DIM}│{RESET} {:>mean_w$}", row.mean_ci));
+                line.push_str(&format!(
+                    " {DIM}│{RESET} {:>min_w$} {DIM}│{RESET} {:>mean_w$}",
+                    row.min_col, row.mean_col,
+                ));
+                if show_sigma {
+                    line.push_str(&format!(
+                        " {DIM}│{RESET} {DIM}{:>sigma_w$}{RESET}",
+                        row.sigma_col,
+                    ));
+                }
 
                 if has_comparisons {
                     let vc = row.vs_base_color;
@@ -650,7 +696,11 @@ impl SuiteResult {
             // Bottom border
             let mut bot = String::from("  └");
             bot.push_str(&"─".repeat(name_w + 2));
+            bot.push_str(&format!("┴{}", "─".repeat(min_w + 2)));
             bot.push_str(&format!("┴{}", "─".repeat(mean_w + 2)));
+            if show_sigma {
+                bot.push_str(&format!("┴{}", "─".repeat(sigma_w + 2)));
+            }
             if has_comparisons {
                 bot.push_str(&format!("┴{}", "─".repeat(vs_w + 2)));
             }
