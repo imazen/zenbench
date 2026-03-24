@@ -478,7 +478,49 @@ doesn't reflect production.
   adds wall-clock overhead between samples. For benchmarks where thread
   creation cost matters, use rayon's persistent pool instead.
 
-### Future work
+### Future: automatic scaling analysis — `bench_scaling()`
+
+The `bench_parallel` loop (`for threads in [1, 2, 4] { ... }`) is
+boilerplate. Zenbench should handle this automatically:
+
+```rust,ignore
+group.bench_scaling("sqrt_work", |b, _tid| {
+    b.iter(|| expensive_computation())
+});
+// Automatically probes 1, 2, 4, ..., physical_cores, logical_cores
+```
+
+What it should report:
+
+```
+│ threads │     throughput │ scaling │ efficiency │
+│       1 │ 2.49 Gitems/s │   1.00x │       100% │
+│       2 │ 4.80 Gitems/s │   1.93x │        96% │  ← near-linear
+│       4 │ 7.10 Gitems/s │   2.85x │        71% │  ← diminishing
+│       8 │ 7.20 Gitems/s │   2.89x │        36% │  ← wasting cores
+│      16 │ 6.90 Gitems/s │   2.77x │        17% │  ← SMT hurts
+```
+
+Where:
+- **scaling** = throughput_N / throughput_1
+- **efficiency** = scaling / N × 100% (perfect = 100%)
+- Detect physical vs logical cores (SMT/HT) via `sysinfo`
+- Flag the sweet spot: best throughput-per-core
+- Flag when adding threads *hurts* (SMT contention)
+- Consider "CPU time waste" tolerance: 71% efficiency means 29%
+  of CPU time is coordination overhead, not useful work
+
+Design considerations:
+- Thread counts should include powers of 2 up to logical cores,
+  plus the physical core count if it's not a power of 2
+- Each thread count is a separate benchmark in the comparison group
+  so they get interleaved and compared properly
+- The single-thread run is the baseline for scaling metrics
+- Throughput must be set on the group for scaling to be meaningful
+- The gate needs thread-count awareness so it doesn't flag the
+  benchmark's own threads as "heavy processes"
+
+### Other future work
 
 - **Resource gating thread awareness**: The gate should know a
   benchmark's thread count so it doesn't flag the benchmark's own
