@@ -115,6 +115,13 @@ pub struct SuiteResult {
     /// Timer resolution in nanoseconds (measured at startup).
     #[serde(default)]
     pub timer_resolution_ns: u64,
+    /// Per-iteration loop overhead in nanoseconds (subtracted from measurements).
+    ///
+    /// Measures the cost of the benchmark harness itself: loop control flow,
+    /// `black_box` barrier, branch prediction overhead. Subtracted from all
+    /// sample times so reported values reflect only the user's code.
+    #[serde(default)]
+    pub loop_overhead_ns: f64,
 }
 
 impl SuiteResult {
@@ -780,6 +787,7 @@ mod tests {
             gate_wait_time: Duration::ZERO,
             unreliable: false,
             timer_resolution_ns: 25,
+            loop_overhead_ns: 0.0,
         }
     }
 
@@ -898,6 +906,7 @@ mod tests {
             gate_wait_time: Duration::from_millis(250),
             unreliable: false,
             timer_resolution_ns: 25,
+            loop_overhead_ns: 0.0,
         }
     }
 

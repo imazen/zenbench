@@ -685,6 +685,50 @@ impl Bencher {
         }
     }
 
+    /// Measure a function, deferring drop of outputs until after timing.
+    ///
+    /// Like [`iter`](Self::iter), but outputs are collected in a pre-allocated
+    /// buffer during the timed loop and dropped only after timing ends. Use when
+    /// the return type has an expensive [`Drop`] (e.g., `Vec`, `String`, file
+    /// handles, database connections).
+    ///
+    /// For types where `Drop` is trivial (integers, small structs, `Copy` types),
+    /// prefer [`iter`](Self::iter) — it avoids the buffer allocation and has less
+    /// per-iteration overhead.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// b.iter_deferred_drop(|| {
+    ///     let mut v = Vec::with_capacity(1024);
+    ///     v.extend(0..1024);
+    ///     v  // Drop of this Vec is excluded from timing
+    /// });
+    /// ```
+    #[inline(never)]
+    pub fn iter_deferred_drop<O, F: FnMut() -> O>(&mut self, mut f: F) {
+        let mut outputs: Vec<O> = Vec::with_capacity(self.iterations);
+
+        #[cfg(feature = "cpu-time")]
+        let cpu_start = cpu_time::ThreadTime::now();
+
+        let start = std::time::Instant::now();
+        for _ in 0..self.iterations {
+            outputs.push(std::hint::black_box(f()));
+        }
+        self.elapsed_ns = start.elapsed().as_nanos() as u64;
+
+        #[cfg(feature = "cpu-time")]
+        {
+            self.cpu_ns = cpu_start.elapsed().as_nanos() as u64;
+        }
+
+        // Prevent the compiler from seeing the writes as dead stores.
+        // Without this, LLVM could reason that outputs is only dropped
+        // and remove the pushes entirely.
+        std::hint::black_box(&outputs);
+        drop(outputs);
+    }
+
     /// Create a builder that provides fresh input for each iteration.
     ///
     /// The `setup` closure is called before each iteration to produce input.

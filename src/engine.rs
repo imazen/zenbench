@@ -55,7 +55,11 @@ impl Engine {
         let ci = platform::detect_ci().map(String::from);
         let git_hash = platform::git_commit_hash();
         let timer_res = platform::timer_resolution_ns();
-        eprintln!("[zenbench] timer resolution: {timer_res}ns");
+        let loop_overhead_ns = measure_loop_overhead();
+        eprintln!(
+            "[zenbench] timer resolution: {timer_res}ns, loop overhead: {:.2}ns/iter",
+            loop_overhead_ns
+        );
         let start = Instant::now();
 
         // Auto-save: write results to a temp file so LLMs/tools can re-read
@@ -118,7 +122,7 @@ impl Engine {
                 self.gate_config.clone()
             };
             let mut gate = ResourceGate::new(group_gate_config);
-            let result = run_comparison_group(group, &mut gate);
+            let result = run_comparison_group(group, &mut gate, loop_overhead_ns);
             total_gate_waits += gate.total_waits();
             total_gate_wait_time += gate.total_wait_time();
             comparisons.push(result);
@@ -137,6 +141,7 @@ impl Engine {
                     gate_wait_time: total_gate_wait_time,
                     unreliable: false,
                     timer_resolution_ns: timer_res,
+                    loop_overhead_ns,
                 };
                 let n_groups = comparisons.len();
                 let mut content =
@@ -149,7 +154,8 @@ impl Engine {
         // Run standalone benchmarks
         for bench in &mut self.suite.standalones {
             let mut standalone_gate = ResourceGate::new(self.gate_config.clone());
-            let result = run_standalone(bench, &mut standalone_gate, &GroupConfig::default());
+            let result =
+                run_standalone(bench, &mut standalone_gate, &GroupConfig::default(), loop_overhead_ns);
             total_gate_waits += standalone_gate.total_waits();
             total_gate_wait_time += standalone_gate.total_wait_time();
             standalones.push(result);
@@ -170,6 +176,7 @@ impl Engine {
             gate_wait_time: total_gate_wait_time,
             unreliable: gate_unreliable,
             timer_resolution_ns: timer_res,
+            loop_overhead_ns,
         };
 
         // Write final complete results
@@ -202,7 +209,11 @@ impl Engine {
 }
 
 /// Run a comparison group with interleaved execution.
-fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> ComparisonResult {
+fn run_comparison_group(
+    group: &mut BenchGroup,
+    gate: &mut ResourceGate,
+    loop_overhead_ns: f64,
+) -> ComparisonResult {
     let config = &group.config;
     let n_benchmarks = group.benchmarks.len();
     let group_start = Instant::now();
@@ -325,7 +336,11 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
             let mut bencher = Bencher::new(round_iters);
             bench.func.call(&mut bencher);
 
-            samples[bench_idx].push(bencher.elapsed_ns);
+            // Subtract loop overhead (black_box + iteration control flow).
+            // Clamp to 1ns to avoid negative/zero times.
+            let overhead_total = (loop_overhead_ns * round_iters as f64) as u64;
+            let compensated = bencher.elapsed_ns.saturating_sub(overhead_total).max(1);
+            samples[bench_idx].push(compensated);
             cpu_samples[bench_idx].push(bencher.cpu_ns);
         }
 
@@ -559,6 +574,7 @@ fn run_standalone(
     bench: &mut crate::bench::Benchmark,
     gate: &mut ResourceGate,
     config: &GroupConfig,
+    loop_overhead_ns: f64,
 ) -> BenchmarkResult {
     gate.wait_for_clear();
 
@@ -591,7 +607,9 @@ fn run_standalone(
         let mut bencher = Bencher::new(iterations);
         bench.func.call(&mut bencher);
         measurement_time += sample_start.elapsed();
-        samples.push(bencher.elapsed_ns as f64 / iterations as f64);
+        let overhead_total = (loop_overhead_ns * iterations as f64) as u64;
+        let compensated = bencher.elapsed_ns.saturating_sub(overhead_total).max(1);
+        samples.push(compensated as f64 / iterations as f64);
         cpu_samples_vec.push(bencher.cpu_ns as f64 / iterations as f64);
     }
 
@@ -676,6 +694,37 @@ fn estimate_iterations(func: &mut crate::bench::BenchFn, config: &GroupConfig) -
         iters.clamp(config.min_iterations, config.max_iterations),
         cold_start_ns,
     )
+}
+
+/// Measure the per-iteration overhead of the benchmark loop.
+///
+/// Runs an empty loop (`for i in 0..N { black_box(i); }`) many times and
+/// returns the minimum observed per-iteration cost in nanoseconds. This
+/// overhead — loop control flow, `black_box` barrier, branch prediction —
+/// is subtracted from all measurements so reported times reflect only the
+/// user's code.
+///
+/// Uses minimum as the estimator: noise is additive (OS interrupts, cache
+/// misses only add time), so the fastest run is closest to the true cost.
+fn measure_loop_overhead() -> f64 {
+    let n_samples = 200;
+    let iters: usize = 10_000;
+    let mut min_per_iter = f64::MAX;
+
+    for _ in 0..n_samples {
+        let start = Instant::now();
+        for i in 0..iters {
+            std::hint::black_box(i);
+        }
+        let elapsed_ns = start.elapsed().as_nanos() as f64;
+        let per_iter = elapsed_ns / iters as f64;
+        if per_iter < min_per_iter {
+            min_per_iter = per_iter;
+        }
+    }
+
+    // Clamp: overhead should be non-negative and sane (< 100ns on any platform)
+    min_per_iter.clamp(0.0, 100.0)
 }
 
 /// Generate a random permutation of 0..n.
