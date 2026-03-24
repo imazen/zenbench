@@ -175,7 +175,7 @@ impl Engine {
             total_gate_wait_time += gate.total_wait_time();
 
             // Clear any status line and print this group's report immediately
-            eprint!("\r\x1b[K");
+            crate::report::clear_status();
             crate::report::print_group(&result, timer_res);
 
             comparisons.push(result);
@@ -289,7 +289,7 @@ fn run_comparison_group(
     let group_start = Instant::now();
 
     // Phase 1: Warmup + iteration estimation
-    eprint!("\r\x1b[K[zenbench] warming up '{}'...", group.name);
+    crate::report::status(&format!("[zenbench] warming up '{}'...", group.name));
 
     // Explicit warmup phase: run each benchmark for warmup_time to fill
     // icache, branch predictors, and allocator free lists.
@@ -341,10 +341,10 @@ fn run_comparison_group(
     } else {
         format!("{:.0}s", eta_secs)
     };
-    eprint!(
-        "\r\x1b[K[zenbench] measuring '{}' (~{} iters/sample, est. {eta_str})...",
+    crate::report::status(&format!(
+        "[zenbench] measuring '{}' (~{} iters/sample, est. {eta_str})...",
         group.name, iterations_per_sample,
-    );
+    ));
 
     // Storage: samples[bench_idx] = vec of raw elapsed_ns per round
     let mut samples: Vec<Vec<u64>> = vec![Vec::with_capacity(config.max_rounds); n_benchmarks];
@@ -371,7 +371,7 @@ fn run_comparison_group(
     for round in 0..config.max_rounds {
         // Hard wall-clock limit — includes gate waits. Safety net.
         if group_start.elapsed() >= config.max_wall_time {
-            eprint!("\r\x1b[K"); // clear status line
+            crate::report::clear_status(); // clear status line
             break;
         }
         // Check time limit against measurement time only (excludes gate waits).
@@ -591,7 +591,7 @@ fn run_comparison_group(
             };
 
             if converged {
-                eprint!("\r\x1b[K"); // clear status line
+                crate::report::clear_status(); // clear status line
                 break;
             }
         }

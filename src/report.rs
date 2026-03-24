@@ -5,6 +5,26 @@ use std::io::IsTerminal;
 
 /// Should this stream use ANSI color codes?
 /// Respects NO_COLOR (https://no-color.org/), TERM=dumb, and TTY detection.
+/// Whether stderr is an interactive terminal (supports \r cursor control).
+pub fn stderr_is_tty() -> bool {
+    std::io::stderr().is_terminal()
+}
+
+/// Print a transient status message on stderr. On a TTY, uses \r to
+/// overwrite the previous line. When piped, suppresses entirely.
+pub fn status(msg: &str) {
+    if stderr_is_tty() {
+        eprint!("\r\x1b[K{msg}");
+    }
+}
+
+/// Clear any transient status line. No-op when piped.
+pub fn clear_status() {
+    if stderr_is_tty() {
+        eprint!("\r\x1b[K");
+    }
+}
+
 pub(crate) fn should_color(stream: &dyn IsTerminal) -> bool {
     if std::env::var("NO_COLOR").is_ok() {
         return false;
