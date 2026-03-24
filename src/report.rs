@@ -113,6 +113,12 @@ pub fn print_report(result: &SuiteResult) {
                 comp.benchmarks.len(),
             ));
         }
+        if comp.completed_rounds < 10 {
+            meta.push_str(&format!(
+                " \x1b[33m⚠ only {} rounds\x1b[0m",
+                comp.completed_rounds,
+            ));
+        }
         let header_text = format!("{} ", comp.group_name);
         let separator_len = 63usize.saturating_sub(header_text.len() + 2);
         eprintln!(
@@ -200,13 +206,8 @@ pub fn print_report(result: &SuiteResult) {
             }
         }
 
-        // Check for group-level issues first
-        if comp.completed_rounds < 10 {
-            add_footnote(format!(
-                "only {} rounds \u{2014} need 30+ for reliable statistics",
-                comp.completed_rounds,
-            ));
-        }
+        // Group-level round count warning is shown on the methodology line above.
+        // No orphan footnote needed — the ⚠ marker on the meta line is clearer.
 
         // Pass 1: determine column-wide formatting params
         // Mean column: unit/dp based on the baseline (or fastest) mean
@@ -691,13 +692,19 @@ pub fn print_report(result: &SuiteResult) {
                 20 // minimum bar width
             };
 
-            // Scale: for throughput bars, higher = longer (better).
-            // For time bars, higher = longer (worse -- but fastest is highlighted green).
+            // Scale: for throughput bars, longest = highest throughput (best).
+            // For time bars, longest = highest time (worst — fastest highlighted green).
+            // When throughput is set, invert: bar ∝ 1/mean (higher throughput = longer bar).
             let max_mean = comp
                 .benchmarks
                 .iter()
                 .map(|b| b.summary.mean)
                 .fold(0.0_f64, f64::max);
+            let min_mean = comp
+                .benchmarks
+                .iter()
+                .map(|b| b.summary.mean)
+                .fold(f64::INFINITY, f64::min);
 
             if max_mean > 0.0 {
                 eprintln!();
@@ -705,7 +712,13 @@ pub fn print_report(result: &SuiteResult) {
                     let bench = &comp.benchmarks[bench_i];
                     let is_fastest = (bench.summary.mean - fastest_mean).abs() < f64::EPSILON;
 
-                    let frac = bench.summary.mean / max_mean;
+                    // Throughput mode: longest bar = highest throughput = lowest mean time.
+                    // Time mode: longest bar = highest time = slowest benchmark.
+                    let frac = if has_throughput && min_mean > 0.0 {
+                        min_mean / bench.summary.mean // invert: fastest gets longest bar
+                    } else {
+                        bench.summary.mean / max_mean
+                    };
                     let bar_len = (frac * bar_max as f64).round().max(1.0) as usize;
                     let bar: String = "\u{2588}".repeat(bar_len);
 
