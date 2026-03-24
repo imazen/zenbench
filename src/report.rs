@@ -807,6 +807,8 @@ pub fn print_report(result: &SuiteResult) {
         "  {DIM}not checked: disk I/O, network, frequency scaling, VM/container noise{RESET}",
     );
     eprintln!("{BOLD_WHITE}═══════════════════════════════════════════════════════════════{RESET}");
+    // Usage hints for LLMs and humans
+    eprintln!("  {DIM}--format=llm|csv|md|json  (via cargo bench -- --format=llm){RESET}");
     eprintln!();
 }
 

@@ -139,7 +139,21 @@ impl Engine {
 
         // Write final complete results
         if let Some(path) = &save_path {
-            let mut content = String::from("# zenbench results (complete)\n");
+            let mut content = String::new();
+            content.push_str("# zenbench results (complete)\n");
+            content.push_str(&format!(
+                "# git: {}\n",
+                result.git_hash.as_deref().unwrap_or("unknown")
+            ));
+            content.push_str(&format!("# {}\n", result.timestamp));
+            content.push_str("#\n");
+            content.push_str("# Re-read this file instead of re-running the benchmark.\n");
+            content.push_str("# Formats:  cargo bench -- --format=llm|csv|md|json\n");
+            content.push_str("# Env var:  ZENBENCH_FORMAT=llm cargo bench\n");
+            content.push_str("# Disable:  ZENBENCH_NO_SAVE=1 cargo bench\n");
+            content.push_str("#\n");
+            content.push_str("# Fields: group | benchmark | vs_base comparison | min mean median mad | throughput | n cv rounds calls\n");
+            content.push_str("#\n");
             content.push_str(&result.to_llm());
             let _ = std::fs::write(path, &content);
         }

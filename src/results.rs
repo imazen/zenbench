@@ -148,7 +148,6 @@ impl SuiteResult {
                         .unwrap_or("")
                 });
 
-            // Build analysis lookup
             let analyses: std::collections::HashMap<&str, &PairedAnalysis> = comp
                 .analyses
                 .iter()
@@ -158,66 +157,78 @@ impl SuiteResult {
 
             for bench in &comp.benchmarks {
                 let s = &bench.summary;
-                let mut kv = vec![format!("group={}", llm_quote(&comp.group_name))];
+
+                // Section 1: Identity
+                let mut identity = vec![format!("group={}", llm_quote(&comp.group_name))];
                 if let Some(sg) = &bench.subgroup {
-                    kv.push(format!("subgroup={}", llm_quote(sg)));
+                    identity.push(format!("subgroup={}", llm_quote(sg)));
                 }
-                kv.push(format!("benchmark={}", llm_quote(&bench.name)));
-                kv.push(format!("median_ns={:.2}", s.median));
-                kv.push(format!("mean_ns={:.2}", s.mean));
-                kv.push(format!("min_ns={:.2}", s.min));
-                kv.push(format!("max_ns={:.2}", s.max));
-                kv.push(format!("stddev_ns={:.2}", s.std_dev()));
-                kv.push(format!("mad_ns={:.2}", s.mad));
-                kv.push(format!("n={}", s.n));
-                kv.push(format!("cv_pct={:.1}", s.cv() * 100.0));
+                identity.push(format!("benchmark={}", llm_quote(&bench.name)));
 
-                if bench.cold_start_ns > 0.0 {
-                    kv.push(format!("cold_start_ns={:.2}", bench.cold_start_ns));
-                }
-
-                // Comparison data
+                // Section 2: Comparison (the number you care about most)
+                let mut comparison = Vec::new();
                 if bench.name == baseline_name {
-                    kv.push("vs_base=baseline".to_string());
+                    comparison.push("vs_base=baseline".to_string());
                 } else if let Some(analysis) = analyses.get(bench.name.as_str()) {
                     let base_mean = analysis.baseline.mean;
-                    kv.push(format!("vs_base_pct={:+.2}", analysis.pct_change));
-                    kv.push(format!("vs_base_ci_lo_ns={:.2}", analysis.ci_lower));
-                    kv.push(format!("vs_base_ci_median_ns={:.2}", analysis.ci_median));
-                    kv.push(format!("vs_base_ci_hi_ns={:.2}", analysis.ci_upper));
+                    comparison.push(format!("vs_base_pct={:+.2}", analysis.pct_change));
                     if base_mean.abs() > f64::EPSILON {
-                        kv.push(format!(
-                            "vs_base_ci_lo_pct={:+.2}",
+                        comparison.push(format!(
+                            "ci=[{:+.2}% {:+.2}%]",
                             analysis.ci_lower / base_mean * 100.0,
-                        ));
-                        kv.push(format!(
-                            "vs_base_ci_hi_pct={:+.2}",
                             analysis.ci_upper / base_mean * 100.0,
                         ));
                     }
-                    kv.push(format!("significant={}", analysis.significant));
-                    kv.push(format!("cohens_d={:.2}", analysis.cohens_d));
-                    kv.push(format!("wilcoxon_p={:.6}", analysis.wilcoxon_p));
-                    kv.push(format!("drift_r={:.2}", analysis.drift_correlation));
+                    comparison.push(format!("significant={}", analysis.significant));
+                    comparison.push(format!("effect={:.2}", analysis.cohens_d));
+                    comparison.push(format!("p={:.4}", analysis.wilcoxon_p));
                 }
 
-                // Throughput
+                // Section 3: Measurement
+                let mut measurement = vec![
+                    format!("min={}", crate::format::format_ns(s.min)),
+                    format!("mean={}", crate::format::format_ns(s.mean)),
+                    format!("median={}", crate::format::format_ns(s.median)),
+                    format!("mad={}", crate::format::format_ns(s.mad)),
+                ];
+
+                // Section 4: Throughput (if set)
+                let mut throughput = Vec::new();
                 if let Some(tp) = &comp.throughput {
                     let (val, unit) = tp.compute_named(s.mean, comp.throughput_unit.as_deref());
-                    kv.push(format!("throughput={:.2}", val));
-                    kv.push(format!("throughput_unit={unit}"));
+                    throughput.push(format!("throughput={val:.2} {unit}"));
                 }
 
-                // Tags
+                // Section 5: Metadata
+                let mut meta = vec![
+                    format!("n={}", s.n),
+                    format!("cv={:.1}%", s.cv() * 100.0),
+                    format!("rounds={}", comp.completed_rounds),
+                    format!("calls={}", comp.iterations_per_sample),
+                ];
+                if bench.cold_start_ns > 0.0 {
+                    meta.push(format!(
+                        "cold={}",
+                        crate::format::format_ns(bench.cold_start_ns),
+                    ));
+                }
                 for (k, v) in &bench.tags {
-                    kv.push(format!("tag_{k}={}", llm_quote(v)));
+                    meta.push(format!("{k}={}", llm_quote(v)));
                 }
 
-                // Config context
-                kv.push(format!("rounds={}", comp.completed_rounds));
-                kv.push(format!("iters_per_sample={}", comp.iterations_per_sample));
+                // Join sections with " | " for visual grouping
+                let mut sections: Vec<String> = Vec::new();
+                sections.push(identity.join(" "));
+                if !comparison.is_empty() {
+                    sections.push(comparison.join(" "));
+                }
+                sections.push(measurement.join(" "));
+                if !throughput.is_empty() {
+                    sections.push(throughput.join(" "));
+                }
+                sections.push(meta.join(" "));
 
-                out.push_str(&kv.join(" "));
+                out.push_str(&sections.join("  |  "));
                 out.push('\n');
             }
         }
@@ -225,22 +236,22 @@ impl SuiteResult {
         // Standalone benchmarks
         for bench in &self.standalones {
             let s = &bench.summary;
-            let mut kv = vec![
-                format!("benchmark={}", llm_quote(&bench.name)),
-                format!("median_ns={:.2}", s.median),
-                format!("mean_ns={:.2}", s.mean),
-                format!("min_ns={:.2}", s.min),
-                format!("max_ns={:.2}", s.max),
-                format!("stddev_ns={:.2}", s.std_dev()),
-                format!("mad_ns={:.2}", s.mad),
-                format!("n={}", s.n),
-                format!("cv_pct={:.1}", s.cv() * 100.0),
-            ];
+            let identity = format!("benchmark={}", llm_quote(&bench.name));
+            let measurement = format!(
+                "min={} mean={} median={} mad={}",
+                crate::format::format_ns(s.min),
+                crate::format::format_ns(s.mean),
+                crate::format::format_ns(s.median),
+                crate::format::format_ns(s.mad),
+            );
+            let mut meta = format!("n={} cv={:.1}%", s.n, s.cv() * 100.0);
             if bench.cold_start_ns > 0.0 {
-                kv.push(format!("cold_start_ns={:.2}", bench.cold_start_ns));
+                meta.push_str(&format!(
+                    " cold={}",
+                    crate::format::format_ns(bench.cold_start_ns),
+                ));
             }
-            out.push_str(&kv.join(" "));
-            out.push('\n');
+            out.push_str(&format!("{identity}  |  {measurement}  |  {meta}\n"));
         }
 
         out
