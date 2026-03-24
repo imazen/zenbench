@@ -742,12 +742,12 @@ fn streaming_mean_stddev(raw_samples: &[u64], iters_per_round: &[usize]) -> (f64
     (mean, variance.max(0.0).sqrt())
 }
 
-/// Estimate how many iterations fit in ~10ms.
+/// Estimate how many iterations fit in the target sample duration.
 /// Returns (iterations, cold_start_ns).
 /// cold_start_ns is the first single-iteration call — the coldest measurement
 /// we can capture without process isolation.
 fn estimate_iterations(func: &mut crate::bench::BenchFn, config: &GroupConfig) -> (usize, u64) {
-    let target_ns = 10_000_000u64; // 10ms
+    let target_ns = config.sample_target_ns;
     let mut iters = 1;
     let mut cold_start_ns = 0u64;
 

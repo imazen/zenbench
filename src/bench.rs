@@ -525,6 +525,19 @@ pub struct GroupConfig {
     ///
     /// Use for: CLI tools, serverless cold starts, first-request latency.
     pub cold_start: bool,
+    /// Target time per sample in nanoseconds (default: 1,000,000 = 1ms).
+    ///
+    /// The engine estimates how many iterations fit in this duration and
+    /// uses that count for all samples. Lower values = shorter samples =
+    /// less exposure to system noise per sample, but more timer overhead
+    /// per iteration. Higher values = better amortization of timer overhead,
+    /// but more context switches per sample on noisy systems.
+    ///
+    /// The default of 1ms balances these concerns: at 10ns timer resolution,
+    /// 1ms gives 100,000× resolution headroom while keeping samples short
+    /// enough that context switches typically fall between samples, not
+    /// within them.
+    pub sample_target_ns: u64,
 }
 
 impl Default for GroupConfig {
@@ -547,6 +560,7 @@ impl Default for GroupConfig {
             noise_threshold: 0.01, // 1% — suppress sub-1% differences
             bootstrap_resamples: 10_000,
             cold_start: false,
+            sample_target_ns: 1_000_000, // 1ms — short enough to dodge context switches
         }
     }
 }
@@ -637,6 +651,15 @@ impl GroupConfig {
             self.max_iterations = 1;
             self.cache_firewall = true;
         }
+        self
+    }
+
+    /// Set the target sample duration in nanoseconds (default: 1,000,000 = 1ms).
+    ///
+    /// Lower = less noise exposure per sample (good for noisy systems).
+    /// Higher = better timer overhead amortization (good for sub-ns benchmarks).
+    pub fn sample_target_ns(&mut self, ns: u64) -> &mut Self {
+        self.sample_target_ns = ns.max(1_000); // minimum 1µs
         self
     }
 }
