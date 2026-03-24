@@ -156,16 +156,6 @@ impl ResourceGate {
     /// When benchmarks spawn N threads, those threads may appear as
     /// "heavy processes" in the post-round gate check (CPU load lingers).
     /// This allowance raises the heavy_process threshold to compensate.
-    /// Temporarily disable all gate checks for the current group.
-    pub fn disable(&mut self) {
-        self.config.enabled = false;
-    }
-
-    /// Re-enable gate checks.
-    pub fn enable(&mut self) {
-        self.config.enabled = true;
-    }
-
     /// Check if conditions are favorable. Returns None if OK, or the blocking reason.
     #[allow(dead_code)] // Used by bin targets
     pub fn check(&self) -> Option<GateReason> {
@@ -247,6 +237,7 @@ impl ResourceGate {
 
     /// Whether the benchmark results should be considered unreliable due to
     /// excessive waiting (indicates a noisy system).
+    #[allow(dead_code)] // May be used by bin targets
     pub fn is_unreliable(&self) -> bool {
         self.config.strict && self.total_waits > self.config.max_wait_count
     }

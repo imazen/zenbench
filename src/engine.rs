@@ -12,7 +12,7 @@ use std::time::Instant;
 /// coordination, and result collection.
 pub struct Engine {
     suite: Suite,
-    gate: ResourceGate,
+    gate_config: GateConfig,
     /// Directory for the cross-process lock file.
     lock_dir: Option<PathBuf>,
 }
@@ -27,15 +27,16 @@ impl Engine {
         };
         Self {
             suite,
-            gate: ResourceGate::new(gate_config),
+            gate_config,
             lock_dir: default_lock_dir(),
         }
     }
 
     pub fn with_gate(suite: Suite, gate_config: GateConfig) -> Self {
+        // with_gate uses the user's config as-is
         Self {
             suite,
-            gate: ResourceGate::new(gate_config),
+            gate_config,
             lock_dir: default_lock_dir(),
         }
     }
@@ -87,6 +88,8 @@ impl Engine {
 
         let mut comparisons = Vec::new();
         let mut standalones = Vec::new();
+        let mut total_gate_waits = 0usize;
+        let mut total_gate_wait_time = std::time::Duration::ZERO;
 
         let group_filter = self.suite.group_filter.as_deref();
 
@@ -102,30 +105,22 @@ impl Engine {
             {
                 continue;
             }
-            // For threaded benchmarks: the gate fights itself — each round
-            // creates a CPU load spike that triggers a gate wait before the
-            // next round. Disable gate checks for groups with threaded benchmarks.
-            // The benchmark IS the load; gating on it is counterproductive.
-            let max_threads = group
-                .benchmarks
-                .iter()
-                .filter_map(|b| {
-                    b.tags
-                        .iter()
-                        .find(|(k, _)| k == "threads")
-                        .and_then(|(_, v)| v.parse::<usize>().ok())
-                })
-                .max()
-                .unwrap_or(0);
-            if max_threads > 1 {
-                // Disable gate entirely for threaded groups — our own threads
-                // spike CPU load and process count. Gating on our own work
-                // wastes time (83% gate waits observed on noisy systems).
-                self.gate.disable();
+            // Fresh gate per group — no state leaks between groups.
+            // Threaded groups get gate disabled (their own threads spike CPU).
+            let has_threads = group.benchmarks.iter().any(|b| {
+                b.tags
+                    .iter()
+                    .any(|(k, v)| k == "threads" && v.parse::<usize>().unwrap_or(0) > 1)
+            });
+            let group_gate_config = if has_threads {
+                GateConfig::disabled()
             } else {
-                self.gate.enable();
-            }
-            let result = run_comparison_group(group, &mut self.gate);
+                self.gate_config.clone()
+            };
+            let mut gate = ResourceGate::new(group_gate_config);
+            let result = run_comparison_group(group, &mut gate);
+            total_gate_waits += gate.total_waits();
+            total_gate_wait_time += gate.total_wait_time();
             comparisons.push(result);
 
             // Stream: append completed group's LLM lines to the save file
@@ -138,8 +133,8 @@ impl Engine {
                     comparisons: comparisons.clone(),
                     standalones: Vec::new(),
                     total_time: start.elapsed(),
-                    gate_waits: self.gate.total_waits(),
-                    gate_wait_time: self.gate.total_wait_time(),
+                    gate_waits: total_gate_waits,
+                    gate_wait_time: total_gate_wait_time,
                     unreliable: false,
                     timer_resolution_ns: timer_res,
                 };
@@ -153,12 +148,15 @@ impl Engine {
 
         // Run standalone benchmarks
         for bench in &mut self.suite.standalones {
-            let result = run_standalone(bench, &mut self.gate, &GroupConfig::default());
+            let mut standalone_gate = ResourceGate::new(self.gate_config.clone());
+            let result = run_standalone(bench, &mut standalone_gate, &GroupConfig::default());
+            total_gate_waits += standalone_gate.total_waits();
+            total_gate_wait_time += standalone_gate.total_wait_time();
             standalones.push(result);
         }
 
         let total_time = start.elapsed();
-        let gate_unreliable = self.gate.is_unreliable();
+        let gate_unreliable = false; // Per-group gates, no global unreliable state
 
         let result = SuiteResult {
             run_id,
@@ -168,8 +166,8 @@ impl Engine {
             comparisons,
             standalones,
             total_time,
-            gate_waits: self.gate.total_waits(),
-            gate_wait_time: self.gate.total_wait_time(),
+            gate_waits: total_gate_waits,
+            gate_wait_time: total_gate_wait_time,
             unreliable: gate_unreliable,
             timer_resolution_ns: timer_res,
         };
