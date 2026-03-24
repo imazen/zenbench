@@ -91,41 +91,32 @@ Don't mix bench_parallel/bench_contended with rayon — competing thread pools.
 - `bench_scaling` efficiency/scaling columns (currently just uses throughput)
 - Add scaling/efficiency metrics to the LLM format output
 
-### Statistical gaps (from comparative analysis — see METHODOLOGY.md "Gaps" section)
-- ~~**Overhead compensation** (HIGH)~~: DONE — `measure_loop_overhead()` at startup, subtracted from all samples
-- **Slope regression / linear sampling** (HIGH): Vary iteration counts linearly within rounds, fit OLS through origin to separate per-iteration cost from constant overhead. Most impactful for <100ns benchmarks.
-- ~~**Practical significance gate** (MEDIUM)~~: DONE — `noise_threshold` in GroupConfig (default 1%), suppresses significance for sub-threshold changes
-- ~~**Per-benchmark CIs** (MEDIUM)~~: DONE — `MeanCi` struct, bootstrapped per-benchmark, in JSON/LLM/BenchmarkResult
-- ~~**TSC / hardware timer** (MEDIUM)~~: DONE — `precise-timing` feature (default on), rdtsc/rdtscp x86_64, cntvct_el0 aarch64, auto-calibration, invariant TSC detection
-- ~~**asm fences**~~: DONE — `asm!("")` fences around all timing windows, stronger than `black_box` alone
-- ~~**Stack alignment jitter** (MEDIUM)~~: DONE — safe recursive trampoline, 0..4096 byte random offset per sample, on by default with precise-timing
-- ~~**Configurable bootstrap resamples** (LOW)~~: DONE — `bootstrap_resamples` in GroupConfig (default 10K, min 100)
-- **Explicit warmup phase** (LOW): `warmup_time` in GroupConfig. Low priority since iteration estimation already warms caches.
-- ~~**Deferred drop** (LOW)~~: DONE — `iter_deferred_drop()` collects outputs during timing, drops after
+### All statistical/methodology gaps — DONE
+- ~~Overhead compensation~~, ~~slope regression~~, ~~noise threshold~~, ~~per-benchmark CIs~~
+- ~~TSC timer~~, ~~asm fences~~, ~~stack jitter~~, ~~configurable resamples~~
+- ~~Warmup phase~~, ~~deferred drop~~, ~~precision-driven iteration estimation~~
 
-### CI regression testing (see METHODOLOGY.md "Baseline persistence" section)
-- ~~**Named baseline save/load**~~: DONE — `--save-baseline=<name>` / `--baseline=<name>`, `.zenbench/baselines/`
-- ~~**Threshold-based CI exit codes**~~: DONE — exit 0/1/2, `--max-regression=<pct>` (default 5%)
-- ~~**CLI management**~~: DONE — `zenbench baseline list/show/delete`
-- ~~**`--update-on-pass`**~~: DONE — auto-ratchets baseline when comparison passes
-- **Cross-run variance inflation**: Widen CIs for non-interleaved (saved baseline) comparisons.
-- **Hardware fingerprint in SuiteResult**: CPU model, cache sizes, cores, arch for testbed identification.
-- **Testbed comparison guards**: Warn or refuse when comparing across different hardware.
+### All CI regression features — DONE
+- ~~Baselines~~, ~~exit codes~~, ~~CLI management~~, ~~update-on-pass~~
+- ~~Cross-run variance inflation~~, ~~hardware fingerprint~~, ~~testbed guards~~
+- ~~Calibration workloads~~
 
-### Cross-machine comparability (MEDIUM — see METHODOLOGY.md "Cross-machine" section)
-- **Calibration workloads**: Built-in integer/memory-bw/memory-latency/branch microbenchmarks. Run before real benchmarks, store in SuiteResult. Normalize scores by calibration.
-- **Calibration-normalized output**: Additional column/field showing hardware-adjusted scores.
+### All framework parity features — DONE
+- ~~Criterion config forwarding~~ (sample_size, measurement_time, etc.)
+- ~~Async support~~ (iter_async with tokio block_on, feature = "async")
+- ~~Allocation profiling~~ (AllocProfiler, feature = "alloc-profiling")
 
-### Medium-term
-- Asymptotic complexity analysis (Big O fitting, like Google Benchmark)
-- Manual timing mode for GPU/custom hardware
-- Process-level CPU time for threading efficiency analysis
-- Custom counters (user-defined per-iteration metrics)
-- Change point detection (E-Divisive) for time-series regression tracking on main
-- Instruction counting mode (Cachegrind integration or iai-callgrind interop)
+### Remaining (future work)
+- Change point detection (E-Divisive) — design documented in METHODOLOGY.md
+- Asymptotic complexity analysis (Big O fitting)
+- `iter_custom` for externally-timed operations (GPU, etc.)
+- Instruction counting mode (iai-callgrind interop)
+- Calibration-normalized output columns
+- `--compare-ref` from bench binary macros (CLI self-compare works)
 
 ### Known bugs / tech debt
-- No tests for the terminal report, LLM format, or bar chart output
+- No tests for terminal report rendering (report.rs, 948 lines)
+- No tests for daemon.rs (486 lines) or mcp.rs (634 lines)
 - Markdown bar chart doesn't sort by speed like terminal bar chart does
 - `sysinfo::System::new_all()` in bench_scaling is heavy — consider caching
 

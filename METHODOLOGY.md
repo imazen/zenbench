@@ -1217,23 +1217,50 @@ than reimplementing.
 - ✅ Stack alignment jitter, per-benchmark CIs, configurable resamples
 - ✅ Allocation profiling, precision-driven iteration estimation
 
-**Phase 2 — Cross-run robustness (MEDIUM)**:
-- Cross-run variance inflation for non-interleaved comparisons
-- Hardware fingerprint in SuiteResult (testbed identification)
-- Testbed comparison guards (warn when hardware changes)
-- `--compare-ref=<commit>` from bench binaries (self-compare via macro)
+**Phase 2 — DONE:**
+- ✅ Cross-run variance inflation (pooled t-test gating)
+- ✅ Hardware fingerprint (Testbed struct in SuiteResult)
+- ✅ Testbed comparison guards (warn on CPU/platform change)
+- ✅ Calibration workloads (integer, memory BW, memory latency)
+- ✅ Slope regression (OLS, linear sampling mode)
+- ✅ Warmup phase (GroupConfig::warmup_time now functional)
+- ✅ Async support (iter_async with tokio block_on)
+- ✅ Criterion compat config forwarding (sample_size, measurement_time, etc.)
 
-**Phase 3 — Calibration and normalization (FUTURE)**:
-- Built-in calibration workloads (integer, memory BW, memory latency)
-- Calibration-normalized scores in output
-- Cross-machine trend tracking
+**Phase 3 — Time series and change point detection (FUTURE)**:
 
-**Phase 4 — Time series and change point detection (FUTURE)**:
-- Time-series storage format (append-only, per-benchmark)
-- E-Divisive change point detection (windowed t-test variant)
-- Advisory alerts for gradual regressions on main
+Design (not yet implemented):
 
-**Phase 5 — Instruction counting integration (FUTURE, OPTIONAL)**:
+**Storage**: Append each run's per-benchmark means to
+`.zenbench/history/<group>__<bench>.csv`:
+```csv
+timestamp,git_hash,mean_ns,variance,n
+2026-03-24T12:00:00Z,abc1234,245.3,12.5,200
+2026-03-24T13:00:00Z,def5678,312.4,15.2,200
+```
+
+**Algorithm**: Windowed t-test (Apache Otava approach):
+- Window size: 30 data points (configurable)
+- For each new data point: split history at that point, compare
+  the 30-point window before vs the 30-point window after
+- Welch's t-test on the two windows; if t > 3.0 AND the shift
+  persists for 3+ consecutive commits → flag as change point
+- O(1) per new data point via running mean/variance
+
+**CLI**: `zenbench history analyze`
+- Scans all CSV files in `.zenbench/history/`
+- Reports change points with commit ranges and magnitude
+- Advisory only — doesn't block CI
+
+**Integration**:
+- `postprocess_result()` auto-appends to history CSV after each run
+- `zenbench history analyze` is the query tool
+- Complements `--baseline` (blocking point comparison) with
+  time-series trend detection (advisory drift detection)
+
+**Estimated scope**: ~400 lines (CSV append, windowed t-test, CLI)
+
+**Phase 4 — Instruction counting integration (FUTURE, OPTIONAL)**:
 - `--mode=cachegrind` for hardware-independent metrics
 - Interop with iai-callgrind output format
 
