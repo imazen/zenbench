@@ -640,6 +640,20 @@ fn print_report_body(result: &SuiteResult) {
             0
         };
 
+        // Adaptive column dropping: estimate total width and drop min column
+        // if the table would exceed terminal width.
+        let col_overhead = 3; // " │ " between each column
+        let estimated_width = 2 // indent
+            + name_w + col_overhead
+            + min_w + col_overhead
+            + mean_w + col_overhead
+            + if show_sigma { sigma_w + col_overhead } else { 0 }
+            + if has_comparisons { vs_w + col_overhead } else { 0 }
+            + if has_throughput { tp_w + col_overhead } else { 0 }
+            + if has_cpu { cpu_w + col_overhead } else { 0 }
+            + 2; // closing " │"
+        let show_min = estimated_width <= term_w;
+
         // Helper to build a table line with consistent column structure
         let add_col = |line: &mut String, width: usize, corner: char| {
             line.push_str(&format!("{corner}{}", "\u{2500}".repeat(width + 2)));
@@ -655,10 +669,12 @@ fn print_report_body(result: &SuiteResult) {
         hdr.push_str(&format!("\u{2502} {:<name_w$}", "benchmark"));
         add_col(&mut mid, name_w, '\u{251c}');
 
-        // Min column
-        add_col(&mut top, min_w, '\u{252c}');
-        hdr.push_str(&format!(" \u{2502} {:>min_w$}", "min"));
-        add_col(&mut mid, min_w, '\u{253c}');
+        // Min column (dropped if table too wide for terminal)
+        if show_min {
+            add_col(&mut top, min_w, '\u{252c}');
+            hdr.push_str(&format!(" \u{2502} {:>min_w$}", "min"));
+            add_col(&mut mid, min_w, '\u{253c}');
+        }
 
         // Mean column
         add_col(&mut top, mean_w, '\u{252c}');
@@ -731,9 +747,15 @@ fn print_report_body(result: &SuiteResult) {
                 row.name,
             );
 
+            if show_min {
+                line.push_str(&format!(
+                    " {DIM}\u{2502}{RESET} {:>min_w$}",
+                    row.min_col,
+                ));
+            }
             line.push_str(&format!(
-                " {DIM}\u{2502}{RESET} {:>min_w$} {DIM}\u{2502}{RESET} {:>mean_w$}",
-                row.min_col, row.mean_col,
+                " {DIM}\u{2502}{RESET} {:>mean_w$}",
+                row.mean_col,
             ));
             if show_sigma {
                 line.push_str(&format!(
@@ -775,7 +797,9 @@ fn print_report_body(result: &SuiteResult) {
         // Bottom border
         let mut bot = String::from("  \u{2514}");
         bot.push_str(&"\u{2500}".repeat(name_w + 2));
-        bot.push_str(&format!("\u{2534}{}", "\u{2500}".repeat(min_w + 2)));
+        if show_min {
+            bot.push_str(&format!("\u{2534}{}", "\u{2500}".repeat(min_w + 2)));
+        }
         bot.push_str(&format!("\u{2534}{}", "\u{2500}".repeat(mean_w + 2)));
         if show_sigma {
             bot.push_str(&format!("\u{2534}{}", "\u{2500}".repeat(sigma_w + 2)));

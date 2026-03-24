@@ -44,6 +44,7 @@ sysinfo = "0.38"
 fs4 = { version = "0.13", features = ["sync"] }
 clap = { version = "4", features = ["derive"], optional = true }
 cpu-time = { version = "1.0.0", optional = true }
+terminal_size = "0.4"
 tokio = { version = "1", features = ["rt"], optional = true }
 
 [[bench]]

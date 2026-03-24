@@ -1028,6 +1028,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sysinfo",
+ "terminal_size",
  "tokio",
 ]
 
