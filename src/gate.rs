@@ -182,10 +182,9 @@ impl ResourceGate {
             return Some(GateReason::LowRam(state.available_ram_bytes));
         }
         if let (Some(max_temp), Some(current_temp)) = (self.config.max_cpu_temp_c, state.cpu_temp_c)
+            && current_temp > max_temp
         {
-            if current_temp > max_temp {
-                return Some(GateReason::CpuTemp(current_temp));
-            }
+            return Some(GateReason::CpuTemp(current_temp));
         }
         let effective_max_heavy = self.config.max_heavy_processes + self.benchmark_thread_allowance;
         if state.heavy_process_count > effective_max_heavy {
@@ -232,7 +231,7 @@ impl ResourceGate {
                         );
                         return false;
                     }
-                    if self.total_waits == 0 || self.total_waits % 10 == 0 {
+                    if self.total_waits == 0 || self.total_waits.is_multiple_of(10) {
                         eprintln!("[zenbench] waiting: {}", reason);
                     }
                     self.total_waits += 1;

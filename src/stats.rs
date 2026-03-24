@@ -95,7 +95,7 @@ impl Summary {
 
             // Median
             let n = sorted.len();
-            s.median = if n % 2 == 0 {
+            s.median = if n.is_multiple_of(2) {
                 (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0
             } else {
                 sorted[n / 2]
@@ -104,7 +104,7 @@ impl Summary {
             // MAD: median of |x_i - median|, scaled by 1.4826
             let mut deviations: Vec<f64> = sorted.iter().map(|&x| (x - s.median).abs()).collect();
             deviations.sort_unstable_by(|a, b| a.total_cmp(b));
-            let raw_mad = if n % 2 == 0 {
+            let raw_mad = if n.is_multiple_of(2) {
                 (deviations[n / 2 - 1] + deviations[n / 2]) / 2.0
             } else {
                 deviations[n / 2]

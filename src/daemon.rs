@@ -90,17 +90,15 @@ pub fn list_runs(project_root: &Path) -> std::io::Result<Vec<RunState>> {
             && !path
                 .file_name()
                 .is_some_and(|n| n.to_string_lossy().contains(".results."))
+            && let Ok(data) = std::fs::read_to_string(&path)
+            && let Ok(mut state) = serde_json::from_str::<RunState>(&data)
         {
-            if let Ok(data) = std::fs::read_to_string(&path) {
-                if let Ok(mut state) = serde_json::from_str::<RunState>(&data) {
-                    // Reconcile: detect processes that finished without updating state
-                    if reconcile_state(project_root, &mut state) {
-                        // Save the updated state back to disk
-                        let _ = save_run_state(project_root, &state);
-                    }
-                    runs.push(state);
-                }
+            // Reconcile: detect processes that finished without updating state
+            if reconcile_state(project_root, &mut state) {
+                // Save the updated state back to disk
+                let _ = save_run_state(project_root, &state);
             }
+            runs.push(state);
         }
     }
 

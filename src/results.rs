@@ -194,7 +194,7 @@ impl SuiteResult {
                 }
 
                 // Section 3: Measurement
-                let measurement = vec![
+                let measurement = [
                     format!("min={}", crate::format::format_ns(s.min)),
                     format!("mean={}", crate::format::format_ns(s.mean)),
                     format!("median={}", crate::format::format_ns(s.median)),

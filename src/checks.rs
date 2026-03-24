@@ -1,6 +1,10 @@
 //! Common benchmarking warning types.
 //!
 //! These types represent issues that may be flagged during post-run analysis.
+//! Currently unused — the footnote system in report.rs handles warnings inline.
+//! Kept for future programmatic warning API.
+
+#![allow(dead_code)]
 
 /// Warnings produced by post-run analysis.
 #[derive(Debug, Clone)]

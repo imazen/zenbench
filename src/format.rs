@@ -44,6 +44,26 @@ pub(crate) fn format_ns_range(lo: f64, mean: f64, hi: f64) -> String {
     format!("[{:>w$}  {:>w$}  {:>w$}]{unit}", vals[0], vals[1], vals[2],)
 }
 
+/// Detect terminal width. Checks `COLUMNS` env var, falls back to None.
+pub(crate) fn terminal_width() -> Option<usize> {
+    if let Ok(cols) = std::env::var("COLUMNS")
+        && let Ok(w) = cols.parse::<usize>()
+        && w > 0
+    {
+        return Some(w);
+    }
+    None
+}
+
+/// Escape a string for CSV (double-quote if it contains comma, quote, or newline).
+pub(crate) fn csv_escape(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,26 +265,5 @@ mod tests {
     #[test]
     fn csv_escape_empty() {
         assert_eq!(csv_escape(""), "");
-    }
-}
-
-/// Detect terminal width. Checks `COLUMNS` env var, falls back to None.
-pub(crate) fn terminal_width() -> Option<usize> {
-    if let Ok(cols) = std::env::var("COLUMNS") {
-        if let Ok(w) = cols.parse::<usize>() {
-            if w > 0 {
-                return Some(w);
-            }
-        }
-    }
-    None
-}
-
-/// Escape a string for CSV (double-quote if it contains comma, quote, or newline).
-pub(crate) fn csv_escape(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
     }
 }

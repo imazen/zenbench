@@ -255,7 +255,7 @@ impl BenchGroup {
     /// or SMT contention.
     ///
     /// Each thread gets its own thread index (0..threads) but no shared state.
-    /// For shared-state contention testing, use [`bench_contended`] instead.
+    /// For shared-state contention testing, use [`BenchGroup::bench_contended`] instead.
     ///
     /// ```rust,ignore
     /// // Compare 1, 2, 4 threads doing independent work
