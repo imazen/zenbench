@@ -88,9 +88,18 @@ impl Engine {
         let mut comparisons = Vec::new();
         let mut standalones = Vec::new();
 
+        let group_filter = self.suite.group_filter.as_deref();
+
         // Run comparison groups (interleaved), streaming results to file
         for group in &mut self.suite.groups {
             if group.benchmarks.is_empty() {
+                continue;
+            }
+            // Skip groups that don't match the filter
+            if let Some(filter) = group_filter
+                && group.name != filter
+                && !group.name.contains(filter)
+            {
                 continue;
             }
             // For threaded benchmarks: the gate fights itself — each round

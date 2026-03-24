@@ -129,13 +129,24 @@ pub fn run_and_save<F: FnOnce(&mut Suite)>(f: F) -> SuiteResult {
 macro_rules! main {
     (|$suite:ident| $body:block) => {
         fn main() {
-            // Parse --format=X from args (cargo bench -- --format=llm)
-            // or fall back to ZENBENCH_FORMAT env var.
-            let format = std::env::args()
+            // Parse args (cargo bench -- --format=llm --group=sorting)
+            let args: Vec<String> = std::env::args().collect();
+            let format = args
+                .iter()
                 .find_map(|a| a.strip_prefix("--format=").map(String::from))
                 .or_else(|| std::env::var("ZENBENCH_FORMAT").ok());
+            let group_filter: Option<String> = args
+                .iter()
+                .find_map(|a| a.strip_prefix("--group=").map(String::from));
 
-            let result = $crate::run(|$suite: &mut $crate::Suite| $body);
+            let result = $crate::run(|$suite: &mut $crate::Suite| {
+                // Set group filter before user code runs — groups are
+                // skipped during execution, not filtered from output.
+                if let Some(ref filter) = group_filter {
+                    $suite.set_group_filter(filter.clone());
+                }
+                $body
+            });
 
             // Output in requested format (to stdout)
             match format.as_deref() {

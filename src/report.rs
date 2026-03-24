@@ -831,7 +831,10 @@ pub fn print_report(result: &SuiteResult) {
     );
     eprintln!("{BOLD_WHITE}═══════════════════════════════════════════════════════════════{RESET}");
     // Usage hints for LLMs and humans
-    eprintln!("  {DIM}--format=llm|csv|md|json  (via cargo bench -- --format=llm){RESET}");
+    eprintln!(
+        "  {DIM}filter: cargo bench -- --group=NAME  \
+         format: --format=llm|csv|md|json{RESET}",
+    );
     eprintln!();
 }
 

@@ -76,6 +76,7 @@ impl Throughput {
 pub struct Suite {
     pub(crate) groups: Vec<BenchGroup>,
     pub(crate) standalones: Vec<Benchmark>,
+    pub(crate) group_filter: Option<String>,
 }
 
 impl Suite {
@@ -83,6 +84,7 @@ impl Suite {
         Self {
             groups: Vec::new(),
             standalones: Vec::new(),
+            group_filter: None,
         }
     }
 
@@ -111,6 +113,12 @@ impl Suite {
             subgroup: None,
             func: BenchFn::new(f),
         });
+    }
+
+    /// Set a group filter — only groups whose name matches or contains
+    /// the filter string will be executed. Set via `--group=NAME`.
+    pub fn set_group_filter(&mut self, filter: String) {
+        self.group_filter = Some(filter);
     }
 }
 
