@@ -192,16 +192,16 @@ compiler from optimizing away benchmark code.
 | Outlier handling | None built-in | IQR filtering on paired diffs |
 | Output | Console/JSON/CSV | Console + JSON + Markdown + CSV |
 
-**What Google Benchmark does that we don't**:
+**What Google Benchmark does that we don't yet**:
 - Asymptotic complexity analysis (Big O fitting across input sizes)
 - Manual timing mode (for GPU/custom hardware)
-- Thread-aware benchmarking with synchronization barriers
 - Custom counters (user-defined per-iteration metrics)
 - Memory manager integration for allocation tracking
 - PauseTiming/ResumeTiming within a benchmark
 
-These are features worth considering for future development, particularly
-complexity analysis and manual timing mode.
+Thread-aware benchmarking is implemented via `bench_contended()` and
+`bench_parallel()`. Complexity analysis and manual timing are the most
+valuable remaining gaps.
 
 ### Criterion.rs
 
