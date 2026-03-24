@@ -232,7 +232,7 @@ pub fn print_report(result: &SuiteResult) {
             let tp_str = comp
                 .throughput
                 .as_ref()
-                .map(|tp| tp.format_named(bench.summary.mean, tp_unit))
+                .map(|tp| tp.format(bench.summary.mean, tp_unit))
                 .unwrap_or_default();
             let cpu_str = bench
                 .cpu_summary
@@ -654,7 +654,7 @@ pub fn print_report(result: &SuiteResult) {
                         let b = &comp.benchmarks[i];
                         comp.throughput
                             .as_ref()
-                            .map(|tp| tp.format_named(b.summary.mean, tp_unit))
+                            .map(|tp| tp.format(b.summary.mean, tp_unit))
                             .unwrap_or_default()
                     })
                     .collect()
@@ -859,7 +859,7 @@ pub(crate) fn format_bar_chart(
         benchmarks
             .iter()
             .map(|b| {
-                let (val, unit) = tp.compute_named(b.summary.mean, throughput_unit);
+                let (val, unit) = tp.compute(b.summary.mean, throughput_unit);
                 (val, format!("{val:.1} {unit}"))
             })
             .unzip()

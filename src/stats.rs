@@ -162,7 +162,7 @@ impl PairedAnalysis {
     ///
     /// `baseline` and `candidate` are per-iteration times in nanoseconds,
     /// from interleaved rounds. They must have the same length.
-    pub fn compute(
+    pub(crate) fn compute(
         baseline: &[f64],
         candidate: &[f64],
         iterations_per_sample: &[usize],

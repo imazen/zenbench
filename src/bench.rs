@@ -16,42 +16,11 @@ pub enum Throughput {
 
 impl Throughput {
     /// Compute throughput from mean time in nanoseconds.
-    /// Returns (value, unit_string).
-    pub fn compute(&self, mean_ns: f64) -> (f64, &'static str) {
-        if mean_ns <= 0.0 {
-            return (0.0, "?/s");
-        }
-        let seconds = mean_ns / 1e9;
-        match self {
-            Throughput::Bytes(n) => {
-                let bytes_per_sec = *n as f64 / seconds;
-                let gib = bytes_per_sec / (1024.0 * 1024.0 * 1024.0);
-                if gib >= 1.0 {
-                    (gib, "GiB/s")
-                } else {
-                    (bytes_per_sec / (1024.0 * 1024.0), "MiB/s")
-                }
-            }
-            Throughput::Elements(n) => {
-                let ops_per_sec = *n as f64 / seconds;
-                if ops_per_sec >= 1e9 {
-                    (ops_per_sec / 1e9, "Gops/s")
-                } else if ops_per_sec >= 1e6 {
-                    (ops_per_sec / 1e6, "Mops/s")
-                } else if ops_per_sec >= 1e3 {
-                    (ops_per_sec / 1e3, "Kops/s")
-                } else {
-                    (ops_per_sec, "ops/s")
-                }
-            }
-        }
-    }
-
-    /// Compute throughput with a custom unit name for Elements.
     ///
-    /// When `unit` is provided and this is `Elements`, the unit suffix
-    /// uses the custom name (e.g., "checks" → "Gchecks/s").
-    pub fn compute_named(&self, mean_ns: f64, unit: Option<&str>) -> (f64, String) {
+    /// Returns (value, unit_string). When `unit` is provided and this
+    /// is `Elements`, the unit suffix uses the custom name
+    /// (e.g., "checks" → "Gchecks/s").
+    pub fn compute(&self, mean_ns: f64, unit: Option<&str>) -> (f64, String) {
         if mean_ns <= 0.0 {
             return (0.0, "?/s".to_string());
         }
@@ -90,14 +59,9 @@ impl Throughput {
         }
     }
 
-    /// Format throughput from mean time in nanoseconds.
-    pub fn format(&self, mean_ns: f64) -> String {
-        self.format_named(mean_ns, None)
-    }
-
-    /// Format throughput with an optional custom unit name.
-    pub fn format_named(&self, mean_ns: f64, unit: Option<&str>) -> String {
-        let (val, unit_str) = self.compute_named(mean_ns, unit);
+    /// Format throughput as human-readable string.
+    pub fn format(&self, mean_ns: f64, unit: Option<&str>) -> String {
+        let (val, unit_str) = self.compute(mean_ns, unit);
         if val >= 100.0 {
             format!("{val:.0} {unit_str}")
         } else if val >= 10.0 {

@@ -204,7 +204,7 @@ impl SuiteResult {
                 // Section 4: Throughput (if set)
                 let mut throughput = Vec::new();
                 if let Some(tp) = &comp.throughput {
-                    let (val, unit) = tp.compute_named(s.mean, comp.throughput_unit.as_deref());
+                    let (val, unit) = tp.compute(s.mean, comp.throughput_unit.as_deref());
                     throughput.push(format!("throughput={val:.2} {unit}"));
                 }
 
@@ -386,9 +386,7 @@ impl SuiteResult {
                 let tp_str = if has_throughput {
                     comp.throughput
                         .as_ref()
-                        .map(|t| {
-                            t.format_named(bench.summary.mean, comp.throughput_unit.as_deref())
-                        })
+                        .map(|t| t.format(bench.summary.mean, comp.throughput_unit.as_deref()))
                         .unwrap_or_default()
                 } else {
                     String::new()
@@ -486,8 +484,7 @@ impl SuiteResult {
                     .throughput
                     .as_ref()
                     .map(|t| {
-                        let (v, u) =
-                            t.compute_named(bench.summary.mean, comp.throughput_unit.as_deref());
+                        let (v, u) = t.compute(bench.summary.mean, comp.throughput_unit.as_deref());
                         (format!("{v:.4}"), u)
                     })
                     .unwrap_or_else(|| (String::new(), String::new()));
@@ -689,7 +686,7 @@ mod tests {
     fn throughput_bytes_mibs() {
         let tp = Throughput::Bytes(1_048_576); // 1 MiB
         // 1 MiB in 1ms = 1000 MiB/s -> should show GiB/s
-        let (val, unit) = tp.compute(1_000_000.0); // 1ms in ns
+        let (val, unit) = tp.compute(1_000_000.0, None); // 1ms in ns
         assert_eq!(unit, "MiB/s");
         assert!((val - 1000.0).abs() < 0.1);
     }
@@ -698,7 +695,7 @@ mod tests {
     fn throughput_bytes_gibs() {
         let tp = Throughput::Bytes(1_073_741_824); // 1 GiB
         // 1 GiB in 1ms = 1000 GiB/s
-        let (val, unit) = tp.compute(1_000_000.0); // 1ms in ns
+        let (val, unit) = tp.compute(1_000_000.0, None); // 1ms in ns
         assert_eq!(unit, "GiB/s");
         assert!((val - 1000.0).abs() < 0.1);
     }
@@ -707,7 +704,7 @@ mod tests {
     fn throughput_elements() {
         let tp = Throughput::Elements(1000);
         // 1000 elements in 1ms = 1M ops/s
-        let (val, unit) = tp.compute(1_000_000.0);
+        let (val, unit) = tp.compute(1_000_000.0, None);
         assert_eq!(unit, "Mops/s");
         assert!((val - 1.0).abs() < 0.001);
     }
@@ -716,7 +713,7 @@ mod tests {
     fn throughput_format() {
         let tp = Throughput::Bytes(153 * 1024 * 1024); // 153 MiB
         // 153 MiB in 531ms = 288 MiB/s
-        let s = tp.format(531_000_000.0);
+        let s = tp.format(531_000_000.0, None);
         assert!(s.contains("MiB/s"), "Expected MiB/s, got: {s}");
         assert!(s.contains("288"), "Expected ~288, got: {s}");
     }

@@ -7,7 +7,7 @@
 //! and fire-and-forget subprocess mode.
 
 mod bench;
-pub mod checks;
+mod checks;
 mod ci;
 pub mod daemon;
 mod engine;
