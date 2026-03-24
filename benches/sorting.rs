@@ -111,20 +111,16 @@ zenbench::main!(|suite| {
         );
     });
 
-    // Group 5: parallel scaling — same work, more threads
-    suite.compare("parallel_scaling", |group| {
+    // Group 5: automatic scaling analysis
+    suite.compare("scaling", |group| {
         group.throughput(Throughput::Elements(10_000));
         group.throughput_unit("items");
-
-        for &threads in &[1, 2, 4] {
-            let label = format!("{threads}t_independent");
-            group.bench_parallel(label, threads, |b, _tid| {
-                b.iter(|| {
-                    let v: Vec<f64> = (0..2500).map(|i| (i as f64).sqrt()).collect();
-                    black_box(v)
-                })
-            });
-        }
+        group.bench_scaling("sqrt", |b, _tid| {
+            b.iter(|| {
+                let v: Vec<f64> = (0..2500).map(|i| (i as f64).sqrt()).collect();
+                black_box(v)
+            })
+        });
     });
 
     // Group 6: sort sizes

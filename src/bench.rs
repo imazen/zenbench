@@ -345,6 +345,61 @@ impl BenchGroup {
         });
     }
 
+    /// Automatic thread scaling analysis.
+    ///
+    /// Probes thread counts from 1 up to the system's logical core count
+    /// (powers of 2 plus the physical core count). Each thread count becomes
+    /// a separate benchmark in the group, interleaved and compared.
+    ///
+    /// Use with `Throughput::Elements(N)` to see scaling and efficiency:
+    /// ```rust,ignore
+    /// group.throughput(Throughput::Elements(10_000));
+    /// group.bench_scaling("sqrt_work", |b, _tid| {
+    ///     b.iter(|| expensive_computation())
+    /// });
+    /// ```
+    ///
+    /// The 1-thread benchmark is the baseline. The report shows how
+    /// throughput scales (or doesn't) with more threads.
+    pub fn bench_scaling<F>(&mut self, name: impl Into<String>, work: F)
+    where
+        F: Fn(&mut Bencher, usize) + Send + Sync + Clone + 'static,
+    {
+        let name = name.into();
+        let sys = sysinfo::System::new_all();
+        let logical_cores = sys.cpus().len().max(1);
+        let physical_cores = sysinfo::System::physical_core_count().unwrap_or(logical_cores);
+
+        // Build thread counts: 1, 2, 4, ..., physical_cores, logical_cores
+        let mut counts = vec![1];
+        let mut t = 2;
+        while t < physical_cores {
+            counts.push(t);
+            t *= 2;
+        }
+        if physical_cores > 1 && !counts.contains(&physical_cores) {
+            counts.push(physical_cores);
+        }
+        if logical_cores > physical_cores && !counts.contains(&logical_cores) {
+            counts.push(logical_cores);
+        }
+        counts.sort_unstable();
+        counts.dedup();
+
+        eprintln!(
+            "[zenbench] scaling '{}': probing {} thread counts on {}/{} cores (physical/logical)",
+            name,
+            counts.len(),
+            physical_cores,
+            logical_cores,
+        );
+
+        for threads in counts {
+            let label = format!("{name}_{threads}t");
+            self.bench_parallel(label, threads, work.clone());
+        }
+    }
+
     /// Declare the throughput for this group.
     ///
     /// All benchmarks in the group process the same amount of data,
