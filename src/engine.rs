@@ -117,9 +117,11 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
     // Phase 1: Warmup — run each benchmark to fill caches and estimate iteration count
     eprintln!("[zenbench] warming up group '{}'...", group.name);
     let mut estimates = Vec::with_capacity(n_benchmarks);
+    let mut cold_starts = Vec::with_capacity(n_benchmarks);
     for bench in group.benchmarks.iter_mut() {
-        let est = estimate_iterations(&mut bench.func, config);
+        let (est, cold_ns) = estimate_iterations(&mut bench.func, config);
         estimates.push(est);
+        cold_starts.push(cold_ns);
     }
     let iterations_per_sample = estimates.iter().copied().min().unwrap_or(1).max(1);
 
@@ -416,6 +418,7 @@ fn run_comparison_group(group: &mut BenchGroup, gate: &mut ResourceGate) -> Comp
             cpu_summary,
             tags: bench.tags.clone(),
             subgroup: bench.subgroup.clone(),
+            cold_start_ns: cold_starts[i] as f64,
         });
     }
 
@@ -443,7 +446,7 @@ fn run_standalone(
 ) -> BenchmarkResult {
     gate.wait_for_clear();
 
-    let iterations = estimate_iterations(&mut bench.func, config);
+    let (iterations, _cold_start_ns) = estimate_iterations(&mut bench.func, config);
     let mut samples = Vec::with_capacity(config.max_rounds);
     let mut cpu_samples_vec = Vec::with_capacity(config.max_rounds);
 
@@ -486,6 +489,7 @@ fn run_standalone(
         cpu_summary,
         tags: bench.tags.clone(),
         subgroup: bench.subgroup.clone(),
+        cold_start_ns: _cold_start_ns as f64,
     }
 }
 
@@ -508,13 +512,23 @@ fn streaming_mean_stddev(raw_samples: &[u64], iters_per_round: &[usize]) -> (f64
 }
 
 /// Estimate how many iterations fit in ~10ms.
-fn estimate_iterations(func: &mut crate::bench::BenchFn, config: &GroupConfig) -> usize {
+/// Returns (iterations, cold_start_ns).
+/// cold_start_ns is the first single-iteration call — the coldest measurement
+/// we can capture without process isolation.
+fn estimate_iterations(func: &mut crate::bench::BenchFn, config: &GroupConfig) -> (usize, u64) {
     let target_ns = 10_000_000u64; // 10ms
     let mut iters = 1;
+    let mut cold_start_ns = 0u64;
 
-    for _ in 0..5 {
+    for round in 0..5 {
         let mut bencher = Bencher::new(iters);
         func.call(&mut bencher);
+
+        // Capture the very first single-iteration call as cold start
+        if round == 0 && iters == 1 {
+            cold_start_ns = bencher.elapsed_ns;
+        }
+
         let elapsed = bencher.elapsed_ns.max(1_000); // Don't trust < 1µs
         let per_iter = elapsed / iters as u64;
         let per_iter = per_iter.max(1);
@@ -522,12 +536,18 @@ fn estimate_iterations(func: &mut crate::bench::BenchFn, config: &GroupConfig) -
 
         if new_iters <= 2 * iters {
             // Converged
-            return new_iters.clamp(config.min_iterations, config.max_iterations);
+            return (
+                new_iters.clamp(config.min_iterations, config.max_iterations),
+                cold_start_ns,
+            );
         }
         iters = new_iters;
     }
 
-    iters.clamp(config.min_iterations, config.max_iterations)
+    (
+        iters.clamp(config.min_iterations, config.max_iterations),
+        cold_start_ns,
+    )
 }
 
 /// Generate a random permutation of 0..n.

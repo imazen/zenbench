@@ -40,6 +40,10 @@ pub struct BenchmarkResult {
     /// Visual subgroup label (display-only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subgroup: Option<String>,
+    /// Cold-start time in nanoseconds (first single-iteration call during warmup).
+    /// This is the coldest measurement we can capture without process isolation.
+    #[serde(default)]
+    pub cold_start_ns: f64,
 }
 
 impl BenchmarkResult {
@@ -1389,6 +1393,7 @@ mod tests {
                 ("level".to_string(), "L6".to_string()),
             ],
             subgroup: None,
+            cold_start_ns: 0.0,
         };
         assert_eq!(br.tag("library"), Some("zenflate"));
         assert_eq!(br.tag("level"), Some("L6"));
@@ -1410,6 +1415,7 @@ mod tests {
                         cpu_summary: None,
                         tags: vec![("library".to_string(), "zenflate".to_string())],
                         subgroup: None,
+                        cold_start_ns: 0.0,
                     },
                     BenchmarkResult {
                         name: "libdeflate".to_string(),
@@ -1417,6 +1423,7 @@ mod tests {
                         cpu_summary: None,
                         tags: vec![("library".to_string(), "libdeflate".to_string())],
                         subgroup: None,
+                        cold_start_ns: 0.0,
                     },
                 ],
                 analyses: vec![],

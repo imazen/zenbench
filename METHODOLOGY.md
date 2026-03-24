@@ -332,6 +332,56 @@ b.with_input(|| load_file())
 This doesn't cover mid-benchmark I/O exclusion but handles most cases
 without timer overhead.
 
+## Cold-start measurement
+
+### What we capture now
+
+During warmup, the very first single-iteration call for each benchmark
+is recorded as `cold_start_ns` in the JSON output. This is the coldest
+measurement we can get without process isolation — caches are cold,
+branch predictors haven't learned the function's patterns, TLBs aren't
+populated.
+
+It's not a *perfect* cold start: the binary is already loaded, page
+tables are set up, and earlier benchmarks in the group may have warmed
+shared caches. But it's the coldest data point available for free.
+
+### When cold start matters
+
+- **CLI tools**: First invocation performance is what users feel
+- **Serverless**: Lambda cold starts dominate tail latency
+- **Request handlers**: First request after deploy
+- **Infrequent code paths**: Error handlers, config parsers
+
+For these use cases, the hot-loop mean is misleading — nobody runs
+your CLI tool 10,000 times in a tight loop.
+
+### Future: dedicated cold-start mode
+
+True cold-start measurement would require:
+
+1. **Process isolation**: Run each sample in a fresh subprocess so
+   nothing carries over — no warm caches, no trained branch predictors,
+   no populated TLBs. High overhead (process spawn per sample) but
+   the only way to get a real cold start.
+
+2. **Cache firewall per sample**: Less extreme than process isolation.
+   Spoil L2/L3 between samples within the same process. Combined with
+   `iterations = 1`, this gives near-cold-start conditions without
+   subprocess overhead. Already partially supported via
+   `config().cache_firewall(true)`.
+
+3. **Separate reporting**: Cold-start results should be reported
+   alongside hot-loop results, not mixed. A table might show:
+   ```
+   │ benchmark │ cold │  min │  mean │
+   │ parse_cfg │ 45µs │ 12µs │ 14µs  │  ← cold is 3x hot
+   ```
+
+The `cold_start_ns` field in JSON output is the first step. A proper
+`config().cold_start(true)` mode that runs 1 iteration per sample with
+cache firewall and reports separately is future work.
+
 ## Multithreaded benchmarking
 
 Three patterns, three APIs.
