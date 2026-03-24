@@ -340,10 +340,20 @@ fn print_report_body(result: &SuiteResult) {
             let bench = &comp.benchmarks[i];
             let is_fastest = (bench.summary.mean - fastest_mean).abs() < f64::EPSILON
                 && comp.benchmarks.len() > 1;
+            // Throughput: show just the value, unit goes in header
             let tp_str = comp
                 .throughput
                 .as_ref()
-                .map(|tp| tp.format(bench.summary.mean, tp_unit))
+                .map(|tp| {
+                    let (val, _unit) = tp.compute(bench.summary.mean, tp_unit);
+                    if val >= 100.0 {
+                        format!("{val:.0}")
+                    } else if val >= 10.0 {
+                        format!("{val:.1}")
+                    } else {
+                        format!("{val:.2}")
+                    }
+                })
                 .unwrap_or_default();
             let cpu_str = bench
                 .cpu_summary
@@ -528,7 +538,7 @@ fn print_report_body(result: &SuiteResult) {
             let sigma_col = format!("\u{b1}{:>sigma_val_w$}{mean_unit}", raw.sigma_str);
             let vs_base = if !raw.vs_vals[0].is_empty() {
                 format!(
-                    "[{:>vs_val_w$}  {:>vs_val_w$}  {:>vs_val_w$}]",
+                    "[{:>vs_val_w$} {:>vs_val_w$} {:>vs_val_w$}]",
                     raw.vs_vals[0], raw.vs_vals[1], raw.vs_vals[2],
                 )
             } else {
@@ -567,12 +577,30 @@ fn print_report_body(result: &SuiteResult) {
             .max()
             .unwrap_or(1)
             .max(1);
+        // Compute throughput unit from the reference benchmark for the header
+        let tp_unit_str = comp
+            .throughput
+            .as_ref()
+            .map(|tp| {
+                let ref_mean = comp
+                    .benchmarks
+                    .iter()
+                    .find(|b| b.name == baseline_name)
+                    .unwrap_or(&comp.benchmarks[0])
+                    .summary
+                    .mean;
+                let (_, unit) = tp.compute(ref_mean, tp_unit);
+                unit
+            })
+            .unwrap_or_default();
         let tp_w = if has_throughput {
-            rows.iter()
+            let val_w = rows
+                .iter()
                 .map(|r| r.throughput.len())
                 .max()
-                .unwrap_or(10)
-                .max(10)
+                .unwrap_or(4)
+                .max(4);
+            val_w.max(tp_unit_str.len())
         } else {
             0
         };
@@ -632,7 +660,7 @@ fn print_report_body(result: &SuiteResult) {
 
         if has_throughput {
             add_col(&mut top, tp_w, '\u{252c}');
-            hdr.push_str(&format!(" \u{2502} {:>tp_w$}", "throughput"));
+            hdr.push_str(&format!(" \u{2502} {:>tp_w$}", tp_unit_str));
             add_col(&mut mid, tp_w, '\u{253c}');
         }
         if has_cpu {
