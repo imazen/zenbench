@@ -46,6 +46,13 @@ pub struct BenchmarkResult {
     /// This is the coldest measurement we can capture without process isolation.
     #[serde(default)]
     pub cold_start_ns: f64,
+    /// Bootstrap 95% confidence interval for this benchmark's mean time.
+    ///
+    /// Computed when there are enough samples (≥ 2 rounds). Tells you how
+    /// confident you can be in the absolute mean — "this function takes
+    /// 245 ± 3ns" rather than just "245ns."
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mean_ci: Option<crate::stats::MeanCi>,
     /// Allocation statistics (when `alloc-profiling` feature is active and
     /// `AllocProfiler` is installed as the global allocator).
     #[cfg(feature = "alloc-profiling")]
@@ -227,6 +234,13 @@ impl SuiteResult {
                     format!("rounds={}", comp.completed_rounds),
                     format!("calls={}", comp.iterations_per_sample),
                 ];
+                if let Some(ci) = &bench.mean_ci {
+                    meta.push(format!(
+                        "mean_ci=[{} {}]",
+                        crate::format::format_ns(ci.lower),
+                        crate::format::format_ns(ci.upper),
+                    ));
+                }
                 if bench.cold_start_ns > 0.0 {
                     meta.push(format!(
                         "cold={}",
@@ -769,6 +783,7 @@ mod tests {
             ],
             subgroup: None,
             cold_start_ns: 0.0,
+            mean_ci: None,
             #[cfg(feature = "alloc-profiling")]
             alloc_stats: None,
         };
@@ -793,6 +808,7 @@ mod tests {
                         tags: vec![("library".to_string(), "zenflate".to_string())],
                         subgroup: None,
                         cold_start_ns: 0.0,
+                        mean_ci: None,
                         #[cfg(feature = "alloc-profiling")]
                         alloc_stats: None,
                     },
@@ -803,6 +819,7 @@ mod tests {
                         tags: vec![("library".to_string(), "libdeflate".to_string())],
                         subgroup: None,
                         cold_start_ns: 0.0,
+                        mean_ci: None,
                         #[cfg(feature = "alloc-profiling")]
                         alloc_stats: None,
                     },
@@ -909,6 +926,7 @@ mod tests {
                         tags: vec![],
                         subgroup: None,
                         cold_start_ns: 12_500.0, // 12.5µs cold start
+                        mean_ci: None,
                         #[cfg(feature = "alloc-profiling")]
                         alloc_stats: None,
                     },
@@ -919,6 +937,7 @@ mod tests {
                         tags: vec![],
                         subgroup: None,
                         cold_start_ns: 0.0,
+                        mean_ci: None,
                         #[cfg(feature = "alloc-profiling")]
                         alloc_stats: None,
                     },
@@ -942,6 +961,7 @@ mod tests {
                 tags: vec![],
                 subgroup: None,
                 cold_start_ns: 5_000.0,
+                mean_ci: None,
                 #[cfg(feature = "alloc-profiling")]
                 alloc_stats: None,
             }],

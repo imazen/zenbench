@@ -122,6 +122,33 @@ impl Default for Summary {
     }
 }
 
+/// Bootstrap confidence interval for a single benchmark's mean.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct MeanCi {
+    /// Lower bound of 95% CI on the mean (ns).
+    pub lower: f64,
+    /// Bootstrap median of the mean (ns).
+    pub median: f64,
+    /// Upper bound of 95% CI on the mean (ns).
+    pub upper: f64,
+}
+
+impl MeanCi {
+    /// Compute a bootstrap CI for the mean from raw per-iteration samples.
+    pub fn from_samples(samples: &[f64], n_resamples: usize) -> Option<Self> {
+        if samples.len() < 2 {
+            return None;
+        }
+        let (lower, median, upper) = bootstrap_ci(samples, n_resamples, 0.95);
+        Some(Self {
+            lower,
+            median,
+            upper,
+        })
+    }
+}
+
 /// Result of paired statistical analysis between two interleaved benchmarks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -162,10 +189,26 @@ impl PairedAnalysis {
     ///
     /// `baseline` and `candidate` are per-iteration times in nanoseconds,
     /// from interleaved rounds. They must have the same length.
+    ///
+    /// `n_resamples`: bootstrap iterations (default 10,000).
+    /// `noise_threshold`: fraction of baseline (0.01 = 1%). When set > 0,
+    /// significance requires the CI to fall entirely outside ±threshold.
+    #[allow(dead_code)] // Used by tests and result helpers
     pub(crate) fn compute(
         baseline: &[f64],
         candidate: &[f64],
         iterations_per_sample: &[usize],
+    ) -> Option<Self> {
+        Self::compute_with_config(baseline, candidate, iterations_per_sample, 10_000, 0.0)
+    }
+
+    /// Compute paired analysis with configurable bootstrap resamples and noise threshold.
+    pub(crate) fn compute_with_config(
+        baseline: &[f64],
+        candidate: &[f64],
+        iterations_per_sample: &[usize],
+        n_resamples: usize,
+        noise_threshold: f64,
     ) -> Option<Self> {
         if baseline.len() != candidate.len()
             || baseline.len() != iterations_per_sample.len()
@@ -223,7 +266,7 @@ impl PairedAnalysis {
         };
 
         // Bootstrap 95% CI on mean diff
-        let (ci_lower, ci_median, ci_upper) = bootstrap_ci(&clean_diffs, 10_000, 0.95);
+        let (ci_lower, ci_median, ci_upper) = bootstrap_ci(&clean_diffs, n_resamples, 0.95);
 
         // Drift detection: Spearman correlation of index vs diff
         let drift_correlation = spearman_correlation(&clean_diffs);
@@ -231,10 +274,16 @@ impl PairedAnalysis {
         // Wilcoxon signed-rank test (non-parametric)
         let wilcoxon_p = wilcoxon_signed_rank(&clean_diffs);
 
-        // Significant = 95% CI excludes zero (direction is clear).
-        // This is the CI-based criterion: if the entire confidence interval
-        // is on one side of zero, we're 95% confident the difference is real.
-        let significant = ci_lower > 0.0 || ci_upper < 0.0;
+        // Significance: 95% CI must exclude zero AND the noise threshold.
+        // Without noise_threshold (0.0): pure CI-based — CI must not straddle zero.
+        // With noise_threshold (e.g., 0.01): CI must be entirely outside ±1% of baseline.
+        // This prevents "statistically significant but unmeasurably small" reports.
+        let significant = if noise_threshold > 0.0 && base_summary.mean.abs() > f64::EPSILON {
+            let threshold_ns = base_summary.mean.abs() * noise_threshold;
+            ci_lower > threshold_ns || ci_upper < -threshold_ns
+        } else {
+            ci_lower > 0.0 || ci_upper < 0.0
+        };
 
         Some(PairedAnalysis {
             baseline: base_summary,
@@ -315,7 +364,7 @@ fn iqr_range(values: &[f64]) -> Option<(f64, f64)> {
 /// distribution, so they're internally consistent.
 ///
 /// Uses a simple xoshiro256** PRNG to avoid depending on `rand`.
-fn bootstrap_ci(values: &[f64], n_resamples: usize, confidence: f64) -> (f64, f64, f64) {
+pub(crate) fn bootstrap_ci(values: &[f64], n_resamples: usize, confidence: f64) -> (f64, f64, f64) {
     if values.len() < 2 {
         let m = values.first().copied().unwrap_or(0.0);
         return (m, m, m);

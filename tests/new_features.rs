@@ -1,5 +1,6 @@
 //! Tests for new features: overhead compensation, deferred drop, TSC timing,
-//! asm fences, and allocation profiling integration.
+//! asm fences, allocation profiling, noise threshold, per-benchmark CIs,
+//! and configurable bootstrap resamples.
 //!
 //! These tests validate that the features actually work end-to-end, not just
 //! that they don't panic.
@@ -491,4 +492,258 @@ fn deferred_drop_vs_regular_iter_same_workload() {
         "regular ({regular_mean:.0}ns) and deferred ({deferred_mean:.0}ns) \
          should be within 5x for trivial Drop types (ratio={ratio:.1}x)"
     );
+}
+
+// ── Noise threshold (practical significance gate) ───────────────────
+
+#[test]
+fn noise_threshold_suppresses_tiny_differences() {
+    // Two nearly-identical benchmarks with a 5% noise threshold.
+    // The difference should be within noise and NOT significant.
+    let result = run_gated(disabled_gate(), |suite| {
+        suite.compare("noise_gate", |group| {
+            group
+                .config()
+                .max_rounds(50)
+                .auto_rounds(false)
+                .noise_threshold(0.05); // 5% — very generous
+            group.bench("a", |b| {
+                b.iter(|| {
+                    let mut v = 0u64;
+                    for i in 0..100 {
+                        v = v.wrapping_add(black_box(i));
+                    }
+                    black_box(v)
+                })
+            });
+            group.bench("b", |b| {
+                b.iter(|| {
+                    let mut v = 0u64;
+                    for i in 0..101 {
+                        v = v.wrapping_add(black_box(i));
+                    }
+                    black_box(v)
+                })
+            });
+        });
+    });
+    let comp = &result.comparisons[0];
+    if !comp.analyses.is_empty() {
+        let analysis = &comp.analyses[0].2;
+        // The difference between summing 100 vs 101 values is ~1%.
+        // With a 5% noise threshold, this should NOT be significant.
+        // (It might still be significant if the system is clean enough
+        // to detect 1% differences, but the noise gate should suppress it.)
+        if analysis.pct_change.abs() < 5.0 {
+            assert!(
+                !analysis.significant,
+                "a ~1% difference should not be significant with 5% noise threshold, \
+                 got pct_change={:.2}%",
+                analysis.pct_change,
+            );
+        }
+    }
+}
+
+#[test]
+fn noise_threshold_allows_large_differences() {
+    // A clearly different benchmark pair with noise threshold.
+    // The large difference should still be significant.
+    let result = run_gated(disabled_gate(), |suite| {
+        suite.compare("noise_large", |group| {
+            group
+                .config()
+                .max_rounds(30)
+                .auto_rounds(false)
+                .noise_threshold(0.01); // 1%
+            group.bench("fast", |b| b.iter(|| black_box(42u64)));
+            group.bench("slow", |b| {
+                b.iter(|| {
+                    let mut v = 0u64;
+                    for i in 0..200 {
+                        v = v.wrapping_add(black_box(i));
+                    }
+                    black_box(v)
+                })
+            });
+        });
+    });
+    let comp = &result.comparisons[0];
+    if !comp.analyses.is_empty() {
+        let analysis = &comp.analyses[0].2;
+        assert!(
+            analysis.significant,
+            "a large difference should still be significant with 1% noise threshold"
+        );
+    }
+}
+
+#[test]
+fn noise_threshold_zero_disables_gate() {
+    // With noise_threshold = 0.0, any CI that excludes zero is significant
+    let result = run_gated(disabled_gate(), |suite| {
+        suite.compare("no_gate", |group| {
+            group
+                .config()
+                .max_rounds(30)
+                .auto_rounds(false)
+                .noise_threshold(0.0); // disabled
+            group.bench("a", |b| b.iter(|| black_box(1u64)));
+            group.bench("b", |b| {
+                b.iter(|| {
+                    let mut v = 0u64;
+                    for i in 0..50 {
+                        v = v.wrapping_add(black_box(i));
+                    }
+                    black_box(v)
+                })
+            });
+        });
+    });
+    let comp = &result.comparisons[0];
+    if !comp.analyses.is_empty() {
+        let analysis = &comp.analyses[0].2;
+        // With no noise gate, the known difference should be significant
+        assert!(
+            analysis.significant,
+            "known difference should be significant with noise_threshold=0"
+        );
+    }
+}
+
+// ── Per-benchmark confidence intervals ──────────────────────────────
+
+#[test]
+fn per_benchmark_ci_is_computed() {
+    let result = run_gated(disabled_gate(), |suite| {
+        suite.compare("bench_ci", |group| {
+            group.config().max_rounds(30).auto_rounds(false);
+            group.bench("work", |b| {
+                b.iter(|| {
+                    let mut v = 0u64;
+                    for i in 0..100 {
+                        v = v.wrapping_add(black_box(i));
+                    }
+                    black_box(v)
+                })
+            });
+        });
+    });
+    let bench = &result.comparisons[0].benchmarks[0];
+    let ci = bench
+        .mean_ci
+        .as_ref()
+        .expect("mean_ci should be computed for benchmarks with ≥2 rounds");
+
+    // CI bounds should bracket the mean
+    assert!(
+        ci.lower <= bench.summary.mean,
+        "CI lower ({:.1}) should be <= mean ({:.1})",
+        ci.lower,
+        bench.summary.mean
+    );
+    assert!(
+        ci.upper >= bench.summary.mean,
+        "CI upper ({:.1}) should be >= mean ({:.1})",
+        ci.upper,
+        bench.summary.mean
+    );
+    // CI should be positive for a real workload
+    assert!(ci.lower > 0.0, "CI lower should be positive");
+    // CI should not be absurdly wide
+    let width_pct = (ci.upper - ci.lower) / bench.summary.mean * 100.0;
+    assert!(
+        width_pct < 50.0,
+        "CI width should be < 50% of mean, got {width_pct:.1}%"
+    );
+}
+
+#[test]
+fn per_benchmark_ci_in_json() {
+    let result = run_gated(disabled_gate(), |suite| {
+        suite.compare("ci_json", |group| {
+            group.config().max_rounds(10).auto_rounds(false);
+            group.bench("a", |b| b.iter(|| black_box(42u64)));
+        });
+    });
+    let json = serde_json::to_string(&result).unwrap();
+    assert!(json.contains("mean_ci"), "JSON should contain mean_ci field");
+    assert!(json.contains("\"lower\""), "JSON should contain lower bound");
+    assert!(json.contains("\"upper\""), "JSON should contain upper bound");
+}
+
+#[test]
+fn per_benchmark_ci_in_llm_output() {
+    let result = run_gated(disabled_gate(), |suite| {
+        suite.compare("ci_llm", |group| {
+            group.config().max_rounds(10).auto_rounds(false);
+            group.bench("work", |b| {
+                b.iter(|| {
+                    let mut v = 0u64;
+                    for i in 0..50 {
+                        v = v.wrapping_add(black_box(i));
+                    }
+                    black_box(v)
+                })
+            });
+        });
+    });
+    let llm = result.to_llm();
+    assert!(
+        llm.contains("mean_ci="),
+        "LLM output should contain mean_ci field"
+    );
+}
+
+#[test]
+fn standalone_benchmark_has_ci() {
+    let result = run_gated(disabled_gate(), |suite| {
+        suite.bench("standalone_ci", |b| {
+            b.iter(|| {
+                let mut v = 0u64;
+                for i in 0..100 {
+                    v = v.wrapping_add(black_box(i));
+                }
+                black_box(v)
+            })
+        });
+    });
+    assert!(
+        result.standalones[0].mean_ci.is_some(),
+        "standalone benchmarks should also get per-benchmark CIs"
+    );
+}
+
+// ── Configurable bootstrap resamples ────────────────────────────────
+
+#[test]
+fn configurable_resamples_works() {
+    // Using fewer resamples should still produce valid results
+    let result = run_gated(disabled_gate(), |suite| {
+        suite.compare("resamples", |group| {
+            group
+                .config()
+                .max_rounds(20)
+                .auto_rounds(false)
+                .bootstrap_resamples(500); // much less than default 10K
+            group.bench("a", |b| b.iter(|| black_box(1u64)));
+            group.bench("b", |b| {
+                b.iter(|| {
+                    let mut v = 0u64;
+                    for i in 0..100 {
+                        v = v.wrapping_add(black_box(i));
+                    }
+                    black_box(v)
+                })
+            });
+        });
+    });
+    let comp = &result.comparisons[0];
+    assert!(!comp.analyses.is_empty());
+    let analysis = &comp.analyses[0].2;
+    // CI should still be valid (lower <= median <= upper)
+    assert!(analysis.ci_lower <= analysis.ci_median);
+    assert!(analysis.ci_median <= analysis.ci_upper);
+    // Per-benchmark CI should also exist
+    assert!(comp.benchmarks[0].mean_ci.is_some());
 }

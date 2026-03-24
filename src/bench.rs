@@ -502,6 +502,20 @@ pub struct GroupConfig {
     /// parameter — if you're hitting it, your benchmarks are too slow or
     /// the system is too noisy.
     pub max_wall_time: Duration,
+    /// Noise threshold for practical significance (default: 0.01 = 1%).
+    ///
+    /// When set, a difference is only reported as significant if the entire
+    /// 95% CI falls outside ±noise_threshold of zero (relative to baseline).
+    /// This prevents "statistically significant but unmeasurably small"
+    /// reports from triggering CI failures or green/red coloring.
+    ///
+    /// Set to 0.0 to disable (pure CI-based significance).
+    pub noise_threshold: f64,
+    /// Number of bootstrap resamples for confidence intervals (default: 10,000).
+    ///
+    /// Higher values give more precise CI bounds at the tails. 10K is fine
+    /// for 95% CIs; increase to 100K for 99% CIs or extreme quantile work.
+    pub bootstrap_resamples: usize,
     /// Cold-start measurement mode.
     ///
     /// When `true`, forces `min_iterations = 1`, `max_iterations = 1`,
@@ -530,6 +544,8 @@ impl Default for GroupConfig {
             auto_rounds: true,
             target_precision: 0.02,
             max_wall_time: Duration::from_secs(120),
+            noise_threshold: 0.01, // 1% — suppress sub-1% differences
+            bootstrap_resamples: 10_000,
             cold_start: false,
         }
     }
@@ -593,6 +609,21 @@ impl GroupConfig {
 
     pub fn max_wall_time(&mut self, dur: Duration) -> &mut Self {
         self.max_wall_time = dur;
+        self
+    }
+
+    /// Set the noise threshold for practical significance (default: 0.01 = 1%).
+    ///
+    /// Changes smaller than this (as a fraction of baseline) are reported as
+    /// "within noise" even if statistically significant. Set to 0.0 to disable.
+    pub fn noise_threshold(&mut self, threshold: f64) -> &mut Self {
+        self.noise_threshold = threshold;
+        self
+    }
+
+    /// Set the number of bootstrap resamples (default: 10,000).
+    pub fn bootstrap_resamples(&mut self, n: usize) -> &mut Self {
+        self.bootstrap_resamples = n.max(100); // minimum 100
         self
     }
 

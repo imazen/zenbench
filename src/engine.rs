@@ -534,6 +534,9 @@ fn run_comparison_group(
     // Auto-detect baseline_only: default to true when > 3 benchmarks
     let baseline_only = config.baseline_only.unwrap_or(n_benchmarks > 3);
 
+    let n_resamples = config.bootstrap_resamples;
+    let noise_threshold = config.noise_threshold;
+
     if n_benchmarks >= 2 {
         // Compare all benchmarks against the baseline
         let baseline_samples = &samples[baseline_idx];
@@ -545,8 +548,13 @@ fn run_comparison_group(
             let base_f64: Vec<f64> = baseline_samples.iter().map(|&v| v as f64).collect();
             let cand_f64: Vec<f64> = candidate_samples.iter().map(|&v| v as f64).collect();
 
-            if let Some(analysis) = PairedAnalysis::compute(&base_f64, &cand_f64, &iters_per_round)
-            {
+            if let Some(analysis) = PairedAnalysis::compute_with_config(
+                &base_f64,
+                &cand_f64,
+                &iters_per_round,
+                n_resamples,
+                noise_threshold,
+            ) {
                 analyses.push((names[baseline_idx].clone(), names[i].clone(), analysis));
             }
         }
@@ -560,9 +568,13 @@ fn run_comparison_group(
                     }
                     let base_f64: Vec<f64> = samples[i].iter().map(|&v| v as f64).collect();
                     let cand_f64: Vec<f64> = samples[j].iter().map(|&v| v as f64).collect();
-                    if let Some(analysis) =
-                        PairedAnalysis::compute(&base_f64, &cand_f64, &iters_per_round)
-                    {
+                    if let Some(analysis) = PairedAnalysis::compute_with_config(
+                        &base_f64,
+                        &cand_f64,
+                        &iters_per_round,
+                        n_resamples,
+                        noise_threshold,
+                    ) {
                         analyses.push((names[i].clone(), names[j].clone(), analysis));
                     }
                 }
@@ -592,6 +604,9 @@ fn run_comparison_group(
             None
         };
 
+        // Bootstrap CI for this benchmark's mean
+        let mean_ci = crate::stats::MeanCi::from_samples(&per_iter, n_resamples);
+
         // Compute allocation stats if profiling is active
         #[cfg(feature = "alloc-profiling")]
         let alloc_stats = {
@@ -610,6 +625,7 @@ fn run_comparison_group(
             tags: bench.tags.clone(),
             subgroup: bench.subgroup.clone(),
             cold_start_ns: cold_starts[i] as f64,
+            mean_ci,
             #[cfg(feature = "alloc-profiling")]
             alloc_stats,
         });
@@ -684,6 +700,8 @@ fn run_standalone(
         None
     };
 
+    let mean_ci = crate::stats::MeanCi::from_samples(&samples, config.bootstrap_resamples);
+
     BenchmarkResult {
         name: bench.name.clone(),
         summary,
@@ -691,6 +709,7 @@ fn run_standalone(
         tags: bench.tags.clone(),
         subgroup: bench.subgroup.clone(),
         cold_start_ns: _cold_start_ns as f64,
+        mean_ci,
         #[cfg(feature = "alloc-profiling")]
         alloc_stats: None, // Standalone benchmarks don't track allocs yet
     }

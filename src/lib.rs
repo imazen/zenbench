@@ -46,7 +46,7 @@ pub fn engine_new(suite: Suite) -> engine::Engine {
 pub use format::format_ns;
 pub use gate::GateConfig;
 pub use results::{BenchmarkResult, ComparisonResult, RunId, SuiteResult};
-pub use stats::{PairedAnalysis, Summary};
+pub use stats::{MeanCi, PairedAnalysis, Summary};
 
 /// Re-export `black_box` from std for convenience.
 ///

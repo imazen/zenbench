@@ -81,13 +81,16 @@ zenbench::main!(|suite| {
 
     suite.compare("sort", |group| {
         group.config().max_rounds(50).auto_rounds(false);
-        group.bench("sort_100", |b| b.iter_deferred_drop(work_sort_100));
-        group.bench("sort_10000", |b| b.iter_deferred_drop(work_sort_10000));
+        // Use iter() not iter_deferred_drop() — divan drops each output immediately,
+        // so we should too for a fair comparison. iter_deferred_drop() holds all
+        // outputs in memory, causing cache pressure that inflates sort_10000 by ~7x.
+        group.bench("sort_100", |b| b.iter(work_sort_100));
+        group.bench("sort_10000", |b| b.iter(work_sort_10000));
     });
 
     suite.compare("hashmap", |group| {
         group.config().max_rounds(50).auto_rounds(false);
-        group.bench("insert_100", |b| b.iter_deferred_drop(work_hashmap_100));
+        group.bench("insert_100", |b| b.iter(work_hashmap_100));
     });
 
     // Print summary for manual comparison against divan output
