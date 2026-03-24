@@ -103,9 +103,10 @@ Don't mix bench_parallel/bench_contended with rayon — competing thread pools.
 - **Explicit warmup phase** (LOW): `warmup_time` in GroupConfig. Low priority since iteration estimation already warms caches.
 - ~~**Deferred drop** (LOW)~~: DONE — `iter_deferred_drop()` collects outputs during timing, drops after
 
-### CI regression testing (HIGH — see METHODOLOGY.md "Baseline persistence" section)
-- **Named baseline save/load**: `--save-baseline <name>` / `--baseline <name>` storing to `.zenbench/baselines/`
-- **Threshold-based CI exit codes**: 0=pass, 1=regression, 2=error. `--max-regression-pct` flag.
+### CI regression testing (see METHODOLOGY.md "Baseline persistence" section)
+- ~~**Named baseline save/load**~~: DONE — `--save-baseline=<name>` / `--baseline=<name>`, `.zenbench/baselines/`
+- ~~**Threshold-based CI exit codes**~~: DONE — exit 0/1/2, `--max-regression=<pct>` (default 5%)
+- ~~**CLI management**~~: DONE — `zenbench baseline list/show/delete`
 - **`--update-on-pass`**: Overwrite baseline if no regressions exceed threshold.
 - **Cross-run variance inflation**: Widen CIs for non-interleaved (saved baseline) comparisons.
 - **Hardware fingerprint in SuiteResult**: CPU model, cache sizes, cores, arch for testbed identification.
