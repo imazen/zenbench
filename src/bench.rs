@@ -447,6 +447,7 @@ impl BenchGroup {
 
 /// Configuration for a benchmark group's execution.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct GroupConfig {
     /// Target number of measurement rounds.
     pub max_rounds: usize,

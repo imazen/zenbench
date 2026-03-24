@@ -29,6 +29,7 @@ impl std::fmt::Display for RunId {
 
 /// Result of a single benchmark (standalone or within a group).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct BenchmarkResult {
     pub name: String,
     pub summary: Summary,
@@ -59,6 +60,7 @@ impl BenchmarkResult {
 
 /// Result of a comparison group (multiple interleaved benchmarks).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct ComparisonResult {
     pub group_name: String,
     pub benchmarks: Vec<BenchmarkResult>,
@@ -96,6 +98,7 @@ pub struct ComparisonResult {
 
 /// Complete results of a benchmark suite run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct SuiteResult {
     pub run_id: RunId,
     pub timestamp: String,

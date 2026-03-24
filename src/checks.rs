@@ -4,6 +4,7 @@
 
 /// Warnings produced by post-run analysis.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct BenchWarning {
     pub benchmark: String,
     pub kind: WarningKind,
@@ -11,6 +12,7 @@ pub struct BenchWarning {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum WarningKind {
     /// Very high coefficient of variation suggests noisy benchmark.
     HighVariance,

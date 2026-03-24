@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 /// Calculates mean, variance, min, max in a single pass.
 /// From _The Art of Computer Programming, Vol 2, page 232_.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Summary {
     pub n: usize,
     pub min: f64,
@@ -123,6 +124,7 @@ impl Default for Summary {
 
 /// Result of paired statistical analysis between two interleaved benchmarks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct PairedAnalysis {
     /// Summary of per-iteration times for baseline.
     pub baseline: Summary,

@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 /// Before each measurement round, the harness checks system state
 /// and waits if conditions aren't suitable for accurate benchmarking.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct GateConfig {
     /// Maximum CPU load fraction [0.0, 1.0] before we wait.
     /// Default: 0.15 (15%).
