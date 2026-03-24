@@ -1,16 +1,28 @@
 use crate::bench::Throughput;
 use crate::format::{format_ns, format_ns_range, ns_unit, terminal_width};
 use crate::results::{BenchmarkResult, SuiteResult};
+use std::io::IsTerminal;
 
-// ANSI color codes
-const RESET: &str = "\x1b[0m";
-const BOLD: &str = "\x1b[1m";
-const DIM: &str = "\x1b[2m";
-const GREEN: &str = "\x1b[32m";
-const RED: &str = "\x1b[31m";
-const YELLOW: &str = "\x1b[33m";
-const CYAN: &str = "\x1b[36m";
-const BOLD_WHITE: &str = "\x1b[1;37m";
+/// Detect whether to use ANSI color codes.
+/// Respects NO_COLOR (https://no-color.org/), TERM=dumb, and TTY detection.
+pub(crate) fn should_color() -> bool {
+    use std::sync::OnceLock;
+    static CACHED: OnceLock<bool> = OnceLock::new();
+    *CACHED.get_or_init(|| {
+        if std::env::var("NO_COLOR").is_ok() {
+            return false;
+        }
+        if std::env::var("TERM").as_deref() == Ok("dumb") {
+            return false;
+        }
+        std::io::stderr().is_terminal()
+    })
+}
+
+/// ANSI code if color enabled, empty string if not.
+const fn pick(code: &'static str, color: bool) -> &'static str {
+    if color { code } else { "" }
+}
 
 struct Row {
     name: String,
@@ -47,7 +59,18 @@ struct StandaloneRow {
 }
 
 /// Print a human-readable report to stderr (with ANSI colors).
+#[allow(non_snake_case)]
 pub fn print_report(result: &SuiteResult) {
+    let c = should_color();
+    let RESET = pick("\x1b[0m", c);
+    let BOLD = pick("\x1b[1m", c);
+    let DIM = pick("\x1b[2m", c);
+    let GREEN = pick("\x1b[32m", c);
+    let RED = pick("\x1b[31m", c);
+    let YELLOW = pick("\x1b[33m", c);
+    let CYAN = pick("\x1b[36m", c);
+    let BOLD_WHITE = pick("\x1b[1;37m", c);
+
     eprintln!();
     eprintln!("{BOLD_WHITE}═══════════════════════════════════════════════════════════════{RESET}");
     eprintln!(
