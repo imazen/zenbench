@@ -134,6 +134,9 @@ impl Engine {
         let mut total_gate_waits = 0usize;
         let mut total_gate_wait_time = std::time::Duration::ZERO;
 
+        // Print report header immediately
+        crate::report::print_header(&run_id, git_hash.as_deref(), ci.as_deref());
+
         let group_filter = self.suite.group_filter.as_deref();
 
         // Run comparison groups (interleaved), streaming results to file
@@ -170,6 +173,11 @@ impl Engine {
             );
             total_gate_waits += gate.total_waits();
             total_gate_wait_time += gate.total_wait_time();
+
+            // Clear any status line and print this group's report immediately
+            eprint!("\r\x1b[K");
+            crate::report::print_group(&result, timer_res);
+
             comparisons.push(result);
 
             // Stream: append completed group's LLM lines to the save file
@@ -255,8 +263,13 @@ impl Engine {
             let _ = std::fs::write(path, &content);
         }
 
-        // Print results to stderr (includes inline footnotes for issues)
-        result.print_report();
+        // Print footer (groups were already printed as they completed)
+        crate::report::print_footer(
+            result.total_time,
+            result.gate_waits,
+            result.gate_wait_time,
+            result.unreliable,
+        );
 
         // Lock is released when _lock drops
         result
@@ -276,7 +289,7 @@ fn run_comparison_group(
     let group_start = Instant::now();
 
     // Phase 1: Warmup + iteration estimation
-    eprintln!("[zenbench] warming up group '{}'...", group.name);
+    eprint!("\r\x1b[K[zenbench] warming up '{}'...", group.name);
 
     // Explicit warmup phase: run each benchmark for warmup_time to fill
     // icache, branch predictors, and allocator free lists.
@@ -328,8 +341,8 @@ fn run_comparison_group(
     } else {
         format!("{:.0}s", eta_secs)
     };
-    eprintln!(
-        "[zenbench] measuring '{}' (~{} iters/sample, est. {eta_str})...",
+    eprint!(
+        "\r\x1b[K[zenbench] measuring '{}' (~{} iters/sample, est. {eta_str})...",
         group.name, iterations_per_sample,
     );
 
@@ -358,11 +371,7 @@ fn run_comparison_group(
     for round in 0..config.max_rounds {
         // Hard wall-clock limit — includes gate waits. Safety net.
         if group_start.elapsed() >= config.max_wall_time {
-            eprintln!(
-                "[zenbench] '{}' hit wall-clock limit ({:.0}s)",
-                group.name,
-                config.max_wall_time.as_secs_f64(),
-            );
+            eprint!("\r\x1b[K"); // clear status line
             break;
         }
         // Check time limit against measurement time only (excludes gate waits).
@@ -582,10 +591,7 @@ fn run_comparison_group(
             };
 
             if converged {
-                eprintln!(
-                    "[zenbench] '{}' converged after {} rounds",
-                    group.name, completed_rounds,
-                );
+                eprint!("\r\x1b[K"); // clear status line
                 break;
             }
         }
@@ -1053,10 +1059,8 @@ impl ProcessLock {
         let mut f = &file;
         let _ = write!(f, "{}", std::process::id());
 
-        eprintln!("[zenbench] acquiring process lock...");
         // Blocking lock — waits until other zenbench processes finish
         fs4::fs_std::FileExt::lock_exclusive(&file)?;
-        eprintln!("[zenbench] lock acquired.");
 
         Ok(Self { _file: file })
     }

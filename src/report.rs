@@ -56,7 +56,93 @@ struct StandaloneRow {
 
 /// Print a human-readable report to stderr (with ANSI colors).
 #[allow(non_snake_case)]
-pub fn print_report(result: &SuiteResult) {
+/// Print the report header. Call once before streaming groups.
+pub fn print_header(run_id: &crate::results::RunId, git_hash: Option<&str>, ci: Option<&str>) {
+    let c = should_color(&std::io::stderr());
+    let RESET = pick("\x1b[0m", c);
+    let DIM = pick("\x1b[2m", c);
+    let BOLD_WHITE = pick("\x1b[1;37m", c);
+    eprintln!();
+    eprintln!("{BOLD_WHITE}═══════════════════════════════════════════════════════════════{RESET}");
+    eprintln!("{BOLD_WHITE}  zenbench{RESET}  {DIM}{run_id}{RESET}");
+    if let Some(h) = git_hash {
+        eprintln!("  {DIM}git:{RESET} {h}");
+    }
+    if let Some(c) = ci {
+        eprintln!("  {DIM}ci:{RESET}  {c}");
+    }
+    eprintln!("{BOLD_WHITE}═══════════════════════════════════════════════════════════════{RESET}");
+}
+
+/// Print report footer. Call once after all groups.
+#[allow(non_snake_case)]
+pub fn print_footer(
+    total_time: std::time::Duration,
+    gate_waits: usize,
+    gate_wait_time: std::time::Duration,
+    unreliable: bool,
+) {
+    let c = should_color(&std::io::stderr());
+    let RESET = pick("\x1b[0m", c);
+    let BOLD = pick("\x1b[1m", c);
+    let DIM = pick("\x1b[2m", c);
+    let RED = pick("\x1b[31m", c);
+    let YELLOW = pick("\x1b[33m", c);
+    let BOLD_WHITE = pick("\x1b[1;37m", c);
+    eprintln!();
+    eprintln!(
+        "  {DIM}total: {:.1}s  gate waits: {} ({:.1}s){RESET}",
+        total_time.as_secs_f64(), gate_waits, gate_wait_time.as_secs_f64(),
+    );
+    let gate_pct = if total_time.as_secs_f64() > 0.0 {
+        gate_wait_time.as_secs_f64() / total_time.as_secs_f64() * 100.0
+    } else {
+        0.0
+    };
+    if gate_pct > 50.0 {
+        eprintln!(
+            "  {YELLOW}\u{26a0} {gate_pct:.0}% of time spent waiting for quiet system \
+             \u{2014} results may be unreliable. \
+             Try: GateConfig::disabled() or a quieter machine.{RESET}",
+        );
+    }
+    if unreliable {
+        eprintln!("  {RED}{BOLD}\u{26a0} UNRELIABLE: too many resource gate waits{RESET}");
+    }
+    eprintln!("{BOLD_WHITE}═══════════════════════════════════════════════════════════════{RESET}");
+    eprintln!(
+        "  {DIM}filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json{RESET}",
+    );
+}
+
+/// Print a single group's report (table, bar chart, footnotes).
+/// Used by the engine for streaming output as each group completes.
+pub fn print_group(comp: &crate::results::ComparisonResult, _timer_res: u64) {
+    // Build a minimal SuiteResult with just this group and delegate to
+    // print_report's group rendering. This avoids duplicating the 650-line
+    // table/bar/footnote logic.
+    let wrapper = SuiteResult {
+        run_id: crate::results::RunId(String::new()),
+        timestamp: String::new(),
+        git_hash: None,
+        ci_environment: None,
+        comparisons: vec![comp.clone()],
+        standalones: vec![],
+        total_time: std::time::Duration::ZERO,
+        gate_waits: 0,
+        gate_wait_time: std::time::Duration::ZERO,
+        unreliable: false,
+        timer_resolution_ns: _timer_res,
+        loop_overhead_ns: 0.0,
+        testbed: None,
+        calibration: None,
+    };
+    print_report_body(&wrapper);
+}
+
+/// Print all comparison groups and standalones (no header/footer).
+#[allow(non_snake_case)]
+fn print_report_body(result: &SuiteResult) {
     let c = should_color(&std::io::stderr());
     let RESET = pick("\x1b[0m", c);
     let BOLD = pick("\x1b[1m", c);
@@ -65,21 +151,6 @@ pub fn print_report(result: &SuiteResult) {
     let RED = pick("\x1b[31m", c);
     let YELLOW = pick("\x1b[33m", c);
     let CYAN = pick("\x1b[36m", c);
-    let BOLD_WHITE = pick("\x1b[1;37m", c);
-
-    eprintln!();
-    eprintln!("{BOLD_WHITE}═══════════════════════════════════════════════════════════════{RESET}");
-    eprintln!(
-        "{BOLD_WHITE}  zenbench{RESET}  {DIM}{}{RESET}",
-        result.run_id
-    );
-    if let Some(hash) = &result.git_hash {
-        eprintln!("  {DIM}git:{RESET} {hash}");
-    }
-    if let Some(ci) = &result.ci_environment {
-        eprintln!("  {DIM}ci:{RESET}  {ci}");
-    }
-    eprintln!("{BOLD_WHITE}═══════════════════════════════════════════════════════════════{RESET}");
 
     for comp in &result.comparisons {
         eprintln!();
@@ -847,37 +918,15 @@ pub fn print_report(result: &SuiteResult) {
         eprintln!("{DIM}{bot}{RESET}");
     }
 
-    eprintln!();
-    eprintln!(
-        "  {DIM}total: {:.1}s  gate waits: {} ({:.1}s){RESET}",
-        result.total_time.as_secs_f64(),
-        result.gate_waits,
-        result.gate_wait_time.as_secs_f64(),
-    );
-    // Warn if gate waits dominated the run
-    let gate_pct = if result.total_time.as_secs_f64() > 0.0 {
-        result.gate_wait_time.as_secs_f64() / result.total_time.as_secs_f64() * 100.0
-    } else {
-        0.0
-    };
-    if gate_pct > 50.0 {
-        eprintln!(
-            "  {YELLOW}\u{26a0} {:.0}% of time spent waiting for quiet system \
-             \u{2014} results may be unreliable. \
-             Try: GateConfig::disabled() or a quieter machine.{RESET}",
-            gate_pct,
-        );
-    }
-    if result.unreliable {
-        eprintln!("  {RED}{BOLD}\u{26a0} UNRELIABLE: too many resource gate waits{RESET}");
-    }
-    eprintln!("{BOLD_WHITE}═══════════════════════════════════════════════════════════════{RESET}");
-    // Usage hints for LLMs and humans
-    eprintln!(
-        "  {DIM}filter: cargo bench -- --group=NAME  \
-         format: --format=llm|csv|md|json{RESET}",
-    );
-    eprintln!();
+    // Footer is now printed separately via print_footer()
+}
+
+/// Print a complete report (header + all groups + standalones + footer).
+/// Used by SuiteResult::print_report() for batch mode.
+pub fn print_report(result: &SuiteResult) {
+    print_header(&result.run_id, result.git_hash.as_deref(), result.ci_environment.as_deref());
+    print_report_body(result);
+    print_footer(result.total_time, result.gate_waits, result.gate_wait_time, result.unreliable);
 }
 
 /// Generate a text-based bar chart for a group of benchmarks.

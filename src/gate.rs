@@ -214,9 +214,15 @@ impl ResourceGate {
         loop {
             let state = self.monitor.snapshot();
             match self.check_state(&state) {
-                None => return true,
+                None => {
+                    if self.total_waits > 0 {
+                        eprint!("\r\x1b[K"); // clear the status line
+                    }
+                    return true;
+                }
                 Some(reason) => {
                     if start.elapsed() >= effective_max {
+                        eprint!("\r\x1b[K"); // clear the status line
                         eprintln!(
                             "[zenbench] gate timeout after {:.1}s: {}",
                             start.elapsed().as_secs_f64(),
@@ -224,9 +230,12 @@ impl ResourceGate {
                         );
                         return false;
                     }
-                    if self.total_waits == 0 || self.total_waits.is_multiple_of(10) {
-                        eprintln!("[zenbench] waiting: {}", reason);
-                    }
+                    // Single overwriting status line — carriage return + clear to EOL
+                    let elapsed = start.elapsed().as_secs_f64();
+                    let max = effective_max.as_secs_f64();
+                    eprint!(
+                        "\r\x1b[K[zenbench] waiting for quiet system ({elapsed:.0}s/{max:.0}s): {reason}"
+                    );
                     self.total_waits += 1;
                     std::thread::sleep(self.config.poll_interval);
                     self.total_wait_time += self.config.poll_interval;
