@@ -577,6 +577,58 @@ mod tests {
     }
 
     #[test]
+    fn bootstrap_ci_ordering() {
+        // lo <= median <= hi must always hold
+        let vals: Vec<f64> = (0..50).map(|i| i as f64).collect();
+        let (lo, med, hi) = bootstrap_ci(&vals, 2000, 0.95);
+        assert!(
+            lo <= med,
+            "bootstrap lo should be <= median: lo={lo} med={med}"
+        );
+        assert!(
+            med <= hi,
+            "bootstrap median should be <= hi: med={med} hi={hi}"
+        );
+    }
+
+    #[test]
+    fn bootstrap_ci_median_near_mean_for_symmetric_data() {
+        // For symmetric data the bootstrap median should be close to the sample mean
+        let vals: Vec<f64> = (0..100).map(|i| i as f64).collect(); // 0..99, symmetric
+        let sample_mean = vals.iter().sum::<f64>() / vals.len() as f64; // 49.5
+        let (_lo, med, _hi) = bootstrap_ci(&vals, 5000, 0.95);
+        let tol = 2.0; // allow 2 ns of drift
+        assert!(
+            (med - sample_mean).abs() < tol,
+            "bootstrap median ({med:.2}) should be close to sample mean ({sample_mean:.2})"
+        );
+    }
+
+    #[test]
+    fn bootstrap_ci_single_value() {
+        // Single-element slice: all three values are that element
+        let (lo, med, hi) = bootstrap_ci(&[42.0], 1000, 0.95);
+        assert_eq!(lo, 42.0);
+        assert_eq!(med, 42.0);
+        assert_eq!(hi, 42.0);
+    }
+
+    #[test]
+    fn bootstrap_ci_excludes_zero_for_all_positive() {
+        // If all diffs are strongly positive, CI should exclude zero (significant)
+        let vals: Vec<f64> = (0..100).map(|_| 10.0_f64).collect();
+        let (lo, _med, hi) = bootstrap_ci(&vals, 2000, 0.95);
+        assert!(
+            lo > 0.0,
+            "CI lower bound should be > 0 for all-positive data, got lo={lo}"
+        );
+        assert!(
+            hi > 0.0,
+            "CI upper bound should be > 0 for all-positive data, got hi={hi}"
+        );
+    }
+
+    #[test]
     fn xoshiro_deterministic() {
         let mut rng1 = Xoshiro256SS::seed(42);
         let mut rng2 = Xoshiro256SS::seed(42);
@@ -593,6 +645,19 @@ mod tests {
         let result = PairedAnalysis::compute(&base, &cand, &iters).unwrap();
         assert!(!result.significant);
         assert!((result.pct_change).abs() < 1e-10);
+        // ci_median must be populated and in-order
+        assert!(
+            result.ci_lower <= result.ci_median,
+            "ci_lower ({}) should be <= ci_median ({})",
+            result.ci_lower,
+            result.ci_median
+        );
+        assert!(
+            result.ci_median <= result.ci_upper,
+            "ci_median ({}) should be <= ci_upper ({})",
+            result.ci_median,
+            result.ci_upper
+        );
     }
 
     #[test]
@@ -604,6 +669,25 @@ mod tests {
         let result = PairedAnalysis::compute(&base, &cand, &iters).unwrap();
         assert!(result.significant);
         assert!(result.pct_change < -10.0);
+        // ci_median must be populated: for zero-variance all-negative diffs
+        // it must be negative and in-order
+        assert!(
+            result.ci_lower <= result.ci_median,
+            "ci_lower ({}) should be <= ci_median ({})",
+            result.ci_lower,
+            result.ci_median
+        );
+        assert!(
+            result.ci_median <= result.ci_upper,
+            "ci_median ({}) should be <= ci_upper ({})",
+            result.ci_median,
+            result.ci_upper
+        );
+        assert!(
+            result.ci_median < 0.0,
+            "ci_median ({}) should be negative when candidate is faster",
+            result.ci_median
+        );
     }
 
     #[test]
@@ -621,6 +705,19 @@ mod tests {
         assert!(result.significant);
         assert!(result.pct_change < -10.0);
         assert!(result.cohens_d < 0.0);
+        // ci_median is populated and in-order
+        assert!(
+            result.ci_lower <= result.ci_median,
+            "ci_lower ({}) should be <= ci_median ({})",
+            result.ci_lower,
+            result.ci_median
+        );
+        assert!(
+            result.ci_median <= result.ci_upper,
+            "ci_median ({}) should be <= ci_upper ({})",
+            result.ci_median,
+            result.ci_upper
+        );
     }
 
     #[test]
@@ -654,5 +751,23 @@ mod tests {
         let result = PairedAnalysis::compute(&base, &cand, &iters).unwrap();
         assert!(result.significant);
         assert!(result.pct_change > 10.0);
+        // ci_median must be positive and in-order when candidate is slower
+        assert!(
+            result.ci_lower <= result.ci_median,
+            "ci_lower ({}) should be <= ci_median ({})",
+            result.ci_lower,
+            result.ci_median
+        );
+        assert!(
+            result.ci_median <= result.ci_upper,
+            "ci_median ({}) should be <= ci_upper ({})",
+            result.ci_median,
+            result.ci_upper
+        );
+        assert!(
+            result.ci_median > 0.0,
+            "ci_median ({}) should be positive when candidate is slower",
+            result.ci_median
+        );
     }
 }

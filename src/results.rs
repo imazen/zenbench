@@ -836,6 +836,298 @@ mod tests {
         assert_eq!(csv_escape("has,comma"), "\"has,comma\"");
         assert_eq!(csv_escape("has\"quote"), "\"has\"\"quote\"");
     }
+
+    /// A suite with a real PairedAnalysis so vs_base fields are populated.
+    fn make_suite_result_with_analyses() -> SuiteResult {
+        use crate::stats::{PairedAnalysis, Summary};
+
+        // Build a PairedAnalysis from real samples so ci_median is populated.
+        let base_samples: Vec<f64> = (0..100).map(|_| 5_000_000.0_f64).collect();
+        let cand_samples: Vec<f64> = (0..100).map(|_| 10_000_000.0_f64).collect();
+        let iters: Vec<usize> = vec![1usize; 100];
+        let analysis = PairedAnalysis::compute(&base_samples, &cand_samples, &iters)
+            .expect("analysis should succeed for equal-length inputs");
+
+        SuiteResult {
+            run_id: RunId("test-456".to_string()),
+            timestamp: "2026-03-11T00:00:00Z".to_string(),
+            git_hash: None,
+            ci_environment: None,
+            comparisons: vec![ComparisonResult {
+                group_name: "compress".to_string(),
+                benchmarks: vec![
+                    BenchmarkResult {
+                        name: "zenflate".to_string(),
+                        summary: make_summary(5_000_000.0),
+                        cpu_summary: None,
+                        tags: vec![],
+                        subgroup: None,
+                        cold_start_ns: 12_500.0, // 12.5µs cold start
+                    },
+                    BenchmarkResult {
+                        name: "libdeflate".to_string(),
+                        summary: make_summary(10_000_000.0),
+                        cpu_summary: None,
+                        tags: vec![],
+                        subgroup: None,
+                        cold_start_ns: 0.0,
+                    },
+                ],
+                analyses: vec![("zenflate".to_string(), "libdeflate".to_string(), analysis)],
+                completed_rounds: 50,
+                throughput: None,
+                cache_firewall: false,
+                cache_firewall_bytes: 0,
+                baseline_only: false,
+                throughput_unit: None,
+                sort_by_speed: false,
+                expect_sub_ns: false,
+                cold_start: false,
+                iterations_per_sample: 10,
+            }],
+            standalones: vec![BenchmarkResult {
+                name: "standalone_bench".to_string(),
+                summary: Summary::from_slice(&[1_000.0, 1_100.0, 900.0, 1_050.0]),
+                cpu_summary: None,
+                tags: vec![],
+                subgroup: None,
+                cold_start_ns: 5_000.0,
+            }],
+            total_time: Duration::from_secs(3),
+            gate_waits: 2,
+            gate_wait_time: Duration::from_millis(250),
+            unreliable: false,
+            timer_resolution_ns: 25,
+        }
+    }
+
+    // --- to_llm() ---
+
+    #[test]
+    fn llm_output_baseline_has_vs_base_eq_baseline() {
+        let result = make_suite_result_with_analyses();
+        let llm = result.to_llm();
+        // The baseline row must say vs_base=baseline
+        let baseline_line = llm
+            .lines()
+            .find(|l| l.contains("benchmark=zenflate"))
+            .expect("should have a zenflate line");
+        assert!(
+            baseline_line.contains("vs_base=baseline"),
+            "baseline row should contain vs_base=baseline, got: {baseline_line}"
+        );
+    }
+
+    #[test]
+    fn llm_output_candidate_has_vs_base_pct() {
+        let result = make_suite_result_with_analyses();
+        let llm = result.to_llm();
+        let cand_line = llm
+            .lines()
+            .find(|l| l.contains("benchmark=libdeflate"))
+            .expect("should have a libdeflate line");
+        assert!(
+            cand_line.contains("vs_base_pct="),
+            "candidate row should contain vs_base_pct=, got: {cand_line}"
+        );
+    }
+
+    #[test]
+    fn llm_output_has_group_field() {
+        let result = make_suite_result_with_analyses();
+        let llm = result.to_llm();
+        assert!(
+            llm.contains("group=compress"),
+            "llm output should contain group=compress, got:\n{llm}"
+        );
+    }
+
+    #[test]
+    fn llm_output_has_benchmark_field() {
+        let result = make_suite_result_with_analyses();
+        let llm = result.to_llm();
+        assert!(
+            llm.contains("benchmark=zenflate"),
+            "llm output should contain benchmark=zenflate, got:\n{llm}"
+        );
+    }
+
+    #[test]
+    fn llm_output_has_section_separators() {
+        let result = make_suite_result_with_analyses();
+        let llm = result.to_llm();
+        for line in llm.lines() {
+            assert!(
+                line.contains("  |  "),
+                "every line should have '  |  ' section separators, got: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn llm_output_cold_start_field_present_when_nonzero() {
+        let result = make_suite_result_with_analyses();
+        let llm = result.to_llm();
+        // zenflate has cold_start_ns=12500, should show up as cold=...
+        let baseline_line = llm
+            .lines()
+            .find(|l| l.contains("benchmark=zenflate"))
+            .expect("should have a zenflate line");
+        assert!(
+            baseline_line.contains("cold="),
+            "row with nonzero cold_start_ns should have cold= field, got: {baseline_line}"
+        );
+    }
+
+    #[test]
+    fn llm_output_standalone_cold_start_present() {
+        let result = make_suite_result_with_analyses();
+        let llm = result.to_llm();
+        let standalone_line = llm
+            .lines()
+            .find(|l| l.contains("benchmark=standalone_bench"))
+            .expect("should have standalone_bench line");
+        assert!(
+            standalone_line.contains("cold="),
+            "standalone with nonzero cold_start_ns should show cold=, got: {standalone_line}"
+        );
+    }
+
+    #[test]
+    fn llm_output_throughput_absent_when_not_set() {
+        let result = make_suite_result_with_analyses();
+        let llm = result.to_llm();
+        // make_suite_result_with_analyses has no throughput
+        assert!(
+            !llm.contains("throughput="),
+            "no throughput should produce no throughput= field, got:\n{llm}"
+        );
+    }
+
+    // --- to_markdown() ---
+
+    #[test]
+    fn markdown_output_has_min_and_mean_headers() {
+        let result = make_suite_result();
+        let md = result.to_markdown();
+        assert!(
+            md.contains("| Min |"),
+            "markdown should have '| Min |' column header, got:\n{md}"
+        );
+        assert!(
+            md.contains("| Mean |"),
+            "markdown should have '| Mean |' column header, got:\n{md}"
+        );
+    }
+
+    #[test]
+    fn markdown_output_has_vs_base_column_when_comparisons_exist() {
+        let result = make_suite_result_with_analyses();
+        let md = result.to_markdown();
+        assert!(
+            md.contains("| vs Base |"),
+            "markdown should have '| vs Base |' column when analyses present, got:\n{md}"
+        );
+    }
+
+    #[test]
+    fn markdown_output_methodology_line_has_rounds_cross() {
+        let result = make_suite_result_with_analyses();
+        let md = result.to_markdown();
+        // Methodology line uses × (U+00D7) between rounds count and calls
+        assert!(
+            md.contains('\u{d7}'),
+            "methodology line should contain × (rounds × calls), got:\n{md}"
+        );
+        assert!(
+            md.contains("rounds"),
+            "methodology line should mention 'rounds', got:\n{md}"
+        );
+    }
+
+    // --- to_csv() ---
+
+    #[test]
+    fn csv_header_contains_cold_start_ns_column() {
+        let result = make_suite_result();
+        let csv = result.to_csv();
+        let header = csv.lines().next().expect("csv should have a header line");
+        assert!(
+            header.contains("cold_start_ns"),
+            "csv header should contain 'cold_start_ns', got: {header}"
+        );
+    }
+
+    #[test]
+    fn csv_header_contains_vs_base_pct_column() {
+        let result = make_suite_result();
+        let csv = result.to_csv();
+        let header = csv.lines().next().expect("csv should have a header line");
+        assert!(
+            header.contains("vs_base_pct"),
+            "csv header should contain 'vs_base_pct', got: {header}"
+        );
+    }
+
+    #[test]
+    fn csv_header_contains_significant_column() {
+        let result = make_suite_result();
+        let csv = result.to_csv();
+        let header = csv.lines().next().expect("csv should have a header line");
+        assert!(
+            header.contains("significant"),
+            "csv header should contain 'significant', got: {header}"
+        );
+    }
+
+    #[test]
+    fn csv_candidate_row_has_vs_base_pct_value() {
+        let result = make_suite_result_with_analyses();
+        let csv = result.to_csv();
+        let lines: Vec<&str> = csv.lines().collect();
+        let cand_row = lines
+            .iter()
+            .find(|l| l.contains("libdeflate"))
+            .expect("should have libdeflate row");
+        // The vs_base_pct column should be a non-empty float for the candidate
+        // Count commas to find the column position (vs_base_pct is column index 16, 0-based)
+        let cols: Vec<&str> = cand_row.split(',').collect();
+        // Header: group,benchmark,subgroup,mean_ns,std_dev_ns,median_ns,mad_ns,min_ns,max_ns,
+        //         n,cv,cold_start_ns,cpu_mean_ns,cpu_efficiency,throughput_value,throughput_unit,
+        //         vs_base_pct,...
+        let vs_base_pct_col = 16;
+        assert!(
+            cols.len() > vs_base_pct_col,
+            "candidate row should have enough columns, got {} cols in: {cand_row}",
+            cols.len()
+        );
+        assert!(
+            !cols[vs_base_pct_col].is_empty(),
+            "vs_base_pct should be non-empty for candidate, got: {cand_row}"
+        );
+    }
+
+    #[test]
+    fn csv_baseline_row_has_empty_vs_base_pct() {
+        let result = make_suite_result_with_analyses();
+        let csv = result.to_csv();
+        let lines: Vec<&str> = csv.lines().collect();
+        let base_row = lines
+            .iter()
+            .find(|l| l.contains("zenflate"))
+            .expect("should have zenflate row");
+        let cols: Vec<&str> = base_row.split(',').collect();
+        let vs_base_pct_col = 16;
+        assert!(
+            cols.len() > vs_base_pct_col,
+            "baseline row should have enough columns, got {} cols in: {base_row}",
+            cols.len()
+        );
+        assert!(
+            cols[vs_base_pct_col].is_empty(),
+            "vs_base_pct should be empty for baseline row, got: {base_row}"
+        );
+    }
 }
 
 /// Serde support for Duration via millis.
