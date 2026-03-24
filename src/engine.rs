@@ -56,10 +56,36 @@ impl Engine {
         let git_hash = platform::git_commit_hash();
         let timer_res = platform::timer_resolution_ns();
         let loop_overhead_ns = measure_loop_overhead();
-        eprintln!(
-            "[zenbench] timer resolution: {timer_res}ns, loop overhead: {:.2}ns/iter",
-            loop_overhead_ns
-        );
+
+        // Try to use hardware TSC timer for sub-ns precision
+        #[cfg(feature = "precise-timing")]
+        let tsc_ticks_per_ns: Option<f64> = match crate::timing::TscTimer::new() {
+            Some(timer) => {
+                let freq = timer.ticks_per_ns();
+                eprintln!(
+                    "[zenbench] timer resolution: {timer_res}ns, loop overhead: {:.2}ns/iter, \
+                     TSC: {:.3} ticks/ns (invariant)",
+                    loop_overhead_ns, freq,
+                );
+                Some(freq)
+            }
+            None => {
+                eprintln!(
+                    "[zenbench] timer resolution: {timer_res}ns, loop overhead: {:.2}ns/iter, \
+                     TSC: unavailable (using Instant)",
+                    loop_overhead_ns,
+                );
+                None
+            }
+        };
+        #[cfg(not(feature = "precise-timing"))]
+        let tsc_ticks_per_ns: Option<f64> = {
+            eprintln!(
+                "[zenbench] timer resolution: {timer_res}ns, loop overhead: {:.2}ns/iter",
+                loop_overhead_ns,
+            );
+            None
+        };
         let start = Instant::now();
 
         // Auto-save: write results to a temp file so LLMs/tools can re-read
@@ -122,7 +148,8 @@ impl Engine {
                 self.gate_config.clone()
             };
             let mut gate = ResourceGate::new(group_gate_config);
-            let result = run_comparison_group(group, &mut gate, loop_overhead_ns);
+            let result =
+                run_comparison_group(group, &mut gate, loop_overhead_ns, tsc_ticks_per_ns);
             total_gate_waits += gate.total_waits();
             total_gate_wait_time += gate.total_wait_time();
             comparisons.push(result);
@@ -154,8 +181,13 @@ impl Engine {
         // Run standalone benchmarks
         for bench in &mut self.suite.standalones {
             let mut standalone_gate = ResourceGate::new(self.gate_config.clone());
-            let result =
-                run_standalone(bench, &mut standalone_gate, &GroupConfig::default(), loop_overhead_ns);
+            let result = run_standalone(
+                bench,
+                &mut standalone_gate,
+                &GroupConfig::default(),
+                loop_overhead_ns,
+                tsc_ticks_per_ns,
+            );
             total_gate_waits += standalone_gate.total_waits();
             total_gate_wait_time += standalone_gate.total_wait_time();
             standalones.push(result);
@@ -213,6 +245,7 @@ fn run_comparison_group(
     group: &mut BenchGroup,
     gate: &mut ResourceGate,
     loop_overhead_ns: f64,
+    tsc_ticks_per_ns: Option<f64>,
 ) -> ComparisonResult {
     let config = &group.config;
     let n_benchmarks = group.benchmarks.len();
@@ -333,7 +366,7 @@ fn run_comparison_group(
 
             // Run the benchmark
             let bench = &mut group.benchmarks[bench_idx];
-            let mut bencher = Bencher::new(round_iters);
+            let mut bencher = Bencher::new_with_tsc(round_iters, tsc_ticks_per_ns);
             bench.func.call(&mut bencher);
 
             // Subtract loop overhead (black_box + iteration control flow).
@@ -575,6 +608,7 @@ fn run_standalone(
     gate: &mut ResourceGate,
     config: &GroupConfig,
     loop_overhead_ns: f64,
+    tsc_ticks_per_ns: Option<f64>,
 ) -> BenchmarkResult {
     gate.wait_for_clear();
 
@@ -604,7 +638,7 @@ fn run_standalone(
         ));
 
         let sample_start = Instant::now();
-        let mut bencher = Bencher::new(iterations);
+        let mut bencher = Bencher::new_with_tsc(iterations, tsc_ticks_per_ns);
         bench.func.call(&mut bencher);
         measurement_time += sample_start.elapsed();
         let overhead_total = (loop_overhead_ns * iterations as f64) as u64;
@@ -712,11 +746,17 @@ fn measure_loop_overhead() -> f64 {
     let mut min_per_iter = f64::MAX;
 
     for _ in 0..n_samples {
+        #[cfg(feature = "precise-timing")]
+        crate::timing::compiler_fence();
+
         let start = Instant::now();
         for i in 0..iters {
             std::hint::black_box(i);
         }
         let elapsed_ns = start.elapsed().as_nanos() as f64;
+
+        #[cfg(feature = "precise-timing")]
+        crate::timing::compiler_fence();
         let per_iter = elapsed_ns / iters as f64;
         if per_iter < min_per_iter {
             min_per_iter = per_iter;

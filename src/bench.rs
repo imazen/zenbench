@@ -642,7 +642,8 @@ impl BenchFn {
 ///
 /// `with_input().run()` excludes both setup AND teardown from timing.
 /// `iter()` includes teardown (drop of return value) in timing — use
-/// `with_input().run()` when the return type has expensive drop.
+/// [`iter_deferred_drop`](Self::iter_deferred_drop) or `with_input().run()`
+/// when the return type has expensive drop.
 pub struct Bencher {
     /// Number of iterations for this sample.
     pub(crate) iterations: usize,
@@ -650,6 +651,12 @@ pub struct Bencher {
     pub(crate) elapsed_ns: u64,
     /// Total CPU (user) nanoseconds for this sample. 0 when `cpu-time` feature disabled.
     pub(crate) cpu_ns: u64,
+    /// TSC frequency in ticks/ns. When `Some`, uses hardware TSC for timing.
+    /// When `None`, falls back to `Instant::now()`.
+    /// Only populated when `precise-timing` feature is active and hardware supports it.
+    /// Always present in the struct for simpler code paths — read only with the feature.
+    #[cfg_attr(not(feature = "precise-timing"), allow(dead_code))]
+    pub(crate) tsc_ticks_per_ns: Option<f64>,
 }
 
 impl Bencher {
@@ -658,6 +665,16 @@ impl Bencher {
             iterations,
             elapsed_ns: 0,
             cpu_ns: 0,
+            tsc_ticks_per_ns: None,
+        }
+    }
+
+    pub(crate) fn new_with_tsc(iterations: usize, tsc_ticks_per_ns: Option<f64>) -> Self {
+        Self {
+            iterations,
+            elapsed_ns: 0,
+            cpu_ns: 0,
+            tsc_ticks_per_ns,
         }
     }
 
@@ -667,17 +684,43 @@ impl Bencher {
     /// The return value is passed through `black_box` to prevent dead code elimination.
     ///
     /// **Note:** Drop cost of the return value IS included in timing. If the return
-    /// type has expensive drop (e.g., large `Vec`), use `with_input().run()` instead.
+    /// type has expensive drop (e.g., large `Vec`), use
+    /// [`iter_deferred_drop`](Self::iter_deferred_drop) or `with_input().run()` instead.
     #[inline(never)]
     pub fn iter<O, F: FnMut() -> O>(&mut self, mut f: F) {
         #[cfg(feature = "cpu-time")]
         let cpu_start = cpu_time::ThreadTime::now();
 
-        let start = std::time::Instant::now();
-        for _ in 0..self.iterations {
-            std::hint::black_box(f());
+        // Use TSC when available (sub-ns precision, properly serialized).
+        // Fall back to Instant::now() otherwise.
+        #[cfg(feature = "precise-timing")]
+        if let Some(ticks_per_ns) = self.tsc_ticks_per_ns {
+            crate::timing::compiler_fence();
+            let start = crate::timing::tsc_start();
+            for _ in 0..self.iterations {
+                std::hint::black_box(f());
+            }
+            let end = crate::timing::tsc_end();
+            crate::timing::compiler_fence();
+            self.elapsed_ns = crate::timing::ticks_to_ns(end.wrapping_sub(start), ticks_per_ns);
+        } else {
+            crate::timing::compiler_fence();
+            let start = std::time::Instant::now();
+            for _ in 0..self.iterations {
+                std::hint::black_box(f());
+            }
+            self.elapsed_ns = start.elapsed().as_nanos() as u64;
+            crate::timing::compiler_fence();
         }
-        self.elapsed_ns = start.elapsed().as_nanos() as u64;
+
+        #[cfg(not(feature = "precise-timing"))]
+        {
+            let start = std::time::Instant::now();
+            for _ in 0..self.iterations {
+                std::hint::black_box(f());
+            }
+            self.elapsed_ns = start.elapsed().as_nanos() as u64;
+        }
 
         #[cfg(feature = "cpu-time")]
         {
@@ -711,11 +754,34 @@ impl Bencher {
         #[cfg(feature = "cpu-time")]
         let cpu_start = cpu_time::ThreadTime::now();
 
-        let start = std::time::Instant::now();
-        for _ in 0..self.iterations {
-            outputs.push(std::hint::black_box(f()));
+        #[cfg(feature = "precise-timing")]
+        if let Some(ticks_per_ns) = self.tsc_ticks_per_ns {
+            crate::timing::compiler_fence();
+            let start = crate::timing::tsc_start();
+            for _ in 0..self.iterations {
+                outputs.push(std::hint::black_box(f()));
+            }
+            let end = crate::timing::tsc_end();
+            crate::timing::compiler_fence();
+            self.elapsed_ns = crate::timing::ticks_to_ns(end.wrapping_sub(start), ticks_per_ns);
+        } else {
+            crate::timing::compiler_fence();
+            let start = std::time::Instant::now();
+            for _ in 0..self.iterations {
+                outputs.push(std::hint::black_box(f()));
+            }
+            self.elapsed_ns = start.elapsed().as_nanos() as u64;
+            crate::timing::compiler_fence();
         }
-        self.elapsed_ns = start.elapsed().as_nanos() as u64;
+
+        #[cfg(not(feature = "precise-timing"))]
+        {
+            let start = std::time::Instant::now();
+            for _ in 0..self.iterations {
+                outputs.push(std::hint::black_box(f()));
+            }
+            self.elapsed_ns = start.elapsed().as_nanos() as u64;
+        }
 
         #[cfg(feature = "cpu-time")]
         {
@@ -760,23 +826,51 @@ impl<I, S: FnMut() -> I> InputBencher<'_, I, S> {
         #[cfg(feature = "cpu-time")]
         let mut total_cpu_ns: u64 = 0;
 
+        #[cfg(feature = "precise-timing")]
+        let tsc = self.bencher.tsc_ticks_per_ns;
+
         for _ in 0..iterations {
             let input = std::hint::black_box(setup());
 
             #[cfg(feature = "cpu-time")]
             let cpu_start = cpu_time::ThreadTime::now();
 
-            let start = std::time::Instant::now();
-            let output = std::hint::black_box(f(input));
-            let elapsed = start.elapsed().as_nanos() as u64;
+            #[cfg(feature = "precise-timing")]
+            let elapsed = if let Some(ticks_per_ns) = tsc {
+                crate::timing::compiler_fence();
+                let start = crate::timing::tsc_start();
+                let output = std::hint::black_box(f(input));
+                let end = crate::timing::tsc_end();
+                crate::timing::compiler_fence();
+                let ns =
+                    crate::timing::ticks_to_ns(end.wrapping_sub(start), ticks_per_ns);
+                drop(output);
+                ns
+            } else {
+                crate::timing::compiler_fence();
+                let start = std::time::Instant::now();
+                let output = std::hint::black_box(f(input));
+                let elapsed = start.elapsed().as_nanos() as u64;
+                crate::timing::compiler_fence();
+                drop(output);
+                elapsed
+            };
+
+            #[cfg(not(feature = "precise-timing"))]
+            let elapsed = {
+                let start = std::time::Instant::now();
+                let output = std::hint::black_box(f(input));
+                let elapsed = start.elapsed().as_nanos() as u64;
+                drop(output);
+                elapsed
+            };
+
             total_ns += elapsed;
 
             #[cfg(feature = "cpu-time")]
             {
                 total_cpu_ns += cpu_start.elapsed().as_nanos() as u64;
             }
-
-            drop(output); // teardown outside timing
         }
         self.bencher.elapsed_ns = total_ns;
         #[cfg(feature = "cpu-time")]

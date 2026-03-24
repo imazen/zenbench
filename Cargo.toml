@@ -10,10 +10,14 @@ keywords = ["benchmark", "performance", "profiling", "testing"]
 categories = ["development-tools", "development-tools::profiling"]
 
 [features]
-default = ["cli", "daemon"]
+default = ["cli", "daemon", "precise-timing"]
 cli = ["dep:clap"]
 daemon = []
 cpu-time = ["dep:cpu-time"]
+# Enables hardware TSC timer (rdtsc/rdtscp on x86_64, cntvct_el0 on aarch64)
+# and asm fences for stronger dead-code-elimination prevention.
+# Requires unsafe code in the timing module only.
+precise-timing = []
 # MCP server support (future)
 # mcp = []
 

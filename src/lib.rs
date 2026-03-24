@@ -1,4 +1,8 @@
-#![forbid(unsafe_code)]
+// Without precise-timing, no unsafe is permitted anywhere.
+// With precise-timing, unsafe is denied (errors) but the timing module
+// can override with #[allow(unsafe_code)] for TSC reads and asm fences.
+#![cfg_attr(not(feature = "precise-timing"), forbid(unsafe_code))]
+#![cfg_attr(feature = "precise-timing", deny(unsafe_code))]
 #![doc = include_str!("../README.md")]
 
 //! # Zenbench
@@ -19,6 +23,8 @@ pub mod platform;
 mod report;
 mod results;
 mod stats;
+#[cfg(feature = "precise-timing")]
+mod timing;
 
 pub use bench::{BenchGroup, Bencher, GroupConfig, Suite, Throughput};
 
