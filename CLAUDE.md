@@ -17,6 +17,7 @@ src/
   stats.rs     — Summary, PairedAnalysis, bootstrap_ci, Wilcoxon, Spearman
   gate.rs      — ResourceGate, GateConfig, system health checks
   platform.rs  — SystemMonitor, CI detection, git hash
+  timing.rs    — TSC reads, asm fences, frequency calibration (precise-timing feature, only unsafe)
   checks.rs    — BenchWarning, WarningKind (mostly superseded by footnotes in report.rs)
   daemon.rs    — fire-and-forget subprocess mode
   mcp.rs       — MCP JSON-RPC server
@@ -91,15 +92,16 @@ Don't mix bench_parallel/bench_contended with rayon — competing thread pools.
 - Add scaling/efficiency metrics to the LLM format output
 
 ### Statistical gaps (from comparative analysis — see METHODOLOGY.md "Gaps" section)
-- **Overhead compensation** (HIGH): Measure empty-loop overhead at startup, subtract from samples. Complements slope regression for flat mode.
+- ~~**Overhead compensation** (HIGH)~~: DONE — `measure_loop_overhead()` at startup, subtracted from all samples
 - **Slope regression / linear sampling** (HIGH): Vary iteration counts linearly within rounds, fit OLS through origin to separate per-iteration cost from constant overhead. Most impactful for <100ns benchmarks.
 - **Practical significance gate** (MEDIUM): Add `noise_threshold` to GroupConfig (default 1%). Suppress significance flag when entire CI falls within ±threshold.
 - **Per-benchmark CIs** (MEDIUM): Bootstrap individual benchmark means/medians, not just paired diffs. Report in JSON/LLM, display for standalone benchmarks.
-- **TSC / hardware timer** (MEDIUM): `hw-timer` feature for rdtsc/rdtscp on x86_64. Required for sub-ns benchmarks. Needs `unsafe`, feature-gated.
+- ~~**TSC / hardware timer** (MEDIUM)~~: DONE — `precise-timing` feature (default on), rdtsc/rdtscp x86_64, cntvct_el0 aarch64, auto-calibration, invariant TSC detection
+- ~~**asm fences**~~: DONE — `asm!("")` fences around all timing windows, stronger than `black_box` alone
 - **Stack alignment jitter** (MEDIUM): alloca-based random stack offset per sample (à la criterion/tango). Feature-gated, opt-in.
 - **Configurable bootstrap resamples** (LOW): Allow 10K→100K via GroupConfig for tighter tail CIs.
 - **Explicit warmup phase** (LOW): `warmup_time` in GroupConfig. Low priority since iteration estimation already warms caches.
-- **Deferred drop** (LOW): `iter_with_deferred_drop()` to exclude Drop cost from timing.
+- ~~**Deferred drop** (LOW)~~: DONE — `iter_deferred_drop()` collects outputs during timing, drops after
 
 ### CI regression testing (HIGH — see METHODOLOGY.md "Baseline persistence" section)
 - **Named baseline save/load**: `--save-baseline <name>` / `--baseline <name>` storing to `.zenbench/baselines/`
