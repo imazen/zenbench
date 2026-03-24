@@ -73,7 +73,45 @@ zenbench::main!(|suite| {
         }
     });
 
-    // Group 4: sort sizes
+    // Group 4: element processing — throughput with contention
+    suite.compare("process_elements", |group| {
+        group.throughput(Throughput::Elements(10_000));
+        group.throughput_unit("items");
+
+        // Single-threaded baseline: sum 10K integers
+        group.subgroup("single-threaded");
+        group.bench("sum_sequential", |b| {
+            b.with_input(|| (0..10_000i64).collect::<Vec<_>>())
+                .run(|v| black_box(v.iter().sum::<i64>()))
+        });
+
+        // Chunked map: apply a transform to each element
+        group.bench("map_sqrt", |b| {
+            b.with_input(|| (1..=10_000).map(|i| i as f64).collect::<Vec<_>>())
+                .run(|v| {
+                    let out: Vec<f64> = v.iter().map(|x| x.sqrt()).collect();
+                    black_box(out)
+                })
+        });
+
+        // Contended: 4 threads processing a shared work queue
+        group.subgroup("contended (4 threads)");
+        group.bench_contended(
+            "shared_vec_push",
+            4,
+            || Mutex::new(Vec::<i64>::with_capacity(10_000)),
+            |b, shared, tid| {
+                let start = (tid * 2500) as i64;
+                b.iter(|| {
+                    for i in start..start + 2500 {
+                        shared.lock().unwrap().push(black_box(i));
+                    }
+                })
+            },
+        );
+    });
+
+    // Group 5: sort sizes
     suite.compare("sort_sizes", |group| {
         for &size in &[10, 100, 1000, 10_000] {
             let label = format!("unstable_{size}");
