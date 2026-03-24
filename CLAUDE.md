@@ -77,11 +77,18 @@ Don't mix bench_parallel/bench_contended with rayon — competing thread pools.
 
 ## Remaining work (from METHODOLOGY.md)
 
+### Done (this session)
+- `bench_scaling()` — probes 1..logical_cores automatically
+- Gate thread awareness — benchmark_thread_allowance adjusts threshold
+- Cold-start mode — `config().cold_start(true)` forces 1 iter + cache firewall
+- Markdown output updated to new columns (min, mean, vs base, throughput)
+- CSV output includes cold_start_ns, comparison CI, significance fields
+- `checks.rs` cleaned — dead functions removed, only public types remain
+
 ### Near-term
-- `bench_scaling()` — automatic thread count probing with scaling/efficiency table
-- Gate thread awareness — don't flag benchmark threads as heavy processes
 - Pause/resume timer for mid-benchmark I/O exclusion
-- Cold-start mode — `config().cold_start(true)` with cache firewall + 1 iter/sample
+- `bench_scaling` efficiency/scaling columns (currently just uses throughput)
+- Add scaling/efficiency metrics to the LLM format output
 
 ### Medium-term
 - Asymptotic complexity analysis (Big O fitting, like Google Benchmark)
@@ -90,11 +97,9 @@ Don't mix bench_parallel/bench_contended with rayon — competing thread pools.
 - Custom counters (user-defined per-iteration metrics)
 
 ### Known bugs / tech debt
-- `checks.rs` is mostly dead code — footnote system in `report.rs` replaced it
-- `BelowTimerResolution` warning kind is unused
-- Markdown output (`to_markdown`) doesn't use the new column layout
-- CSV output doesn't include cold_start_ns or comparison CI percentages
 - No tests for the terminal report, LLM format, or bar chart output
+- Markdown bar chart doesn't sort by speed like terminal bar chart does
+- `sysinfo::System::new_all()` in bench_scaling is heavy — consider caching
 
 ## Development notes
 
