@@ -138,6 +138,9 @@ pub struct ResourceGate {
     monitor: SystemMonitor,
     total_waits: usize,
     total_wait_time: Duration,
+    /// Extra heavy processes to tolerate (from benchmark's own threads).
+    /// Set before measuring groups with bench_contended/bench_parallel.
+    benchmark_thread_allowance: usize,
 }
 
 impl ResourceGate {
@@ -147,7 +150,17 @@ impl ResourceGate {
             config,
             total_waits: 0,
             total_wait_time: Duration::ZERO,
+            benchmark_thread_allowance: 0,
         }
+    }
+
+    /// Set thread allowance for the current benchmark group.
+    ///
+    /// When benchmarks spawn N threads, those threads may appear as
+    /// "heavy processes" in the post-round gate check (CPU load lingers).
+    /// This allowance raises the heavy_process threshold to compensate.
+    pub fn set_thread_allowance(&mut self, threads: usize) {
+        self.benchmark_thread_allowance = threads;
     }
 
     /// Check if conditions are favorable. Returns None if OK, or the blocking reason.
@@ -173,7 +186,8 @@ impl ResourceGate {
                 return Some(GateReason::CpuTemp(current_temp));
             }
         }
-        if state.heavy_process_count > self.config.max_heavy_processes {
+        let effective_max_heavy = self.config.max_heavy_processes + self.benchmark_thread_allowance;
+        if state.heavy_process_count > effective_max_heavy {
             return Some(GateReason::HeavyProcesses(state.heavy_process_count));
         }
         None

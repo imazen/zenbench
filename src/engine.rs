@@ -90,6 +90,19 @@ impl Engine {
             if group.benchmarks.is_empty() {
                 continue;
             }
+            // Set gate thread allowance based on max thread count in group
+            let max_threads = group
+                .benchmarks
+                .iter()
+                .filter_map(|b| {
+                    b.tags
+                        .iter()
+                        .find(|(k, _)| k == "threads")
+                        .and_then(|(_, v)| v.parse::<usize>().ok())
+                })
+                .max()
+                .unwrap_or(0);
+            self.gate.set_thread_allowance(max_threads);
             let result = run_comparison_group(group, &mut self.gate);
             comparisons.push(result);
 
