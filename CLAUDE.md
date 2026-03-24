@@ -98,7 +98,7 @@ Don't mix bench_parallel/bench_contended with rayon — competing thread pools.
 - ~~**Per-benchmark CIs** (MEDIUM)~~: DONE — `MeanCi` struct, bootstrapped per-benchmark, in JSON/LLM/BenchmarkResult
 - ~~**TSC / hardware timer** (MEDIUM)~~: DONE — `precise-timing` feature (default on), rdtsc/rdtscp x86_64, cntvct_el0 aarch64, auto-calibration, invariant TSC detection
 - ~~**asm fences**~~: DONE — `asm!("")` fences around all timing windows, stronger than `black_box` alone
-- **Stack alignment jitter** (MEDIUM): alloca-based random stack offset per sample (à la criterion/tango). Feature-gated, opt-in.
+- ~~**Stack alignment jitter** (MEDIUM)~~: DONE — safe recursive trampoline, 0..4096 byte random offset per sample, on by default with precise-timing
 - ~~**Configurable bootstrap resamples** (LOW)~~: DONE — `bootstrap_resamples` in GroupConfig (default 10K, min 100)
 - **Explicit warmup phase** (LOW): `warmup_time` in GroupConfig. Low priority since iteration estimation already warms caches.
 - ~~**Deferred drop** (LOW)~~: DONE — `iter_deferred_drop()` collects outputs during timing, drops after
@@ -107,7 +107,7 @@ Don't mix bench_parallel/bench_contended with rayon — competing thread pools.
 - ~~**Named baseline save/load**~~: DONE — `--save-baseline=<name>` / `--baseline=<name>`, `.zenbench/baselines/`
 - ~~**Threshold-based CI exit codes**~~: DONE — exit 0/1/2, `--max-regression=<pct>` (default 5%)
 - ~~**CLI management**~~: DONE — `zenbench baseline list/show/delete`
-- **`--update-on-pass`**: Overwrite baseline if no regressions exceed threshold.
+- ~~**`--update-on-pass`**~~: DONE — auto-ratchets baseline when comparison passes
 - **Cross-run variance inflation**: Widen CIs for non-interleaved (saved baseline) comparisons.
 - **Hardware fingerprint in SuiteResult**: CPU model, cache sizes, cores, arch for testbed identification.
 - **Testbed comparison guards**: Warn or refuse when comparing across different hardware.

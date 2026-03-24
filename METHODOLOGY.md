@@ -751,171 +751,101 @@ reveals concrete methodology gaps in zenbench. Ordered by impact.
 
 ### Statistical gaps
 
-#### 1. No slope regression (HIGH)
+#### ✅ Overhead compensation — DONE
 
-**What criterion does**: In Linear mode, iteration counts are
-`[d, 2d, ..., 100d]`. OLS regression through the origin fits
-`time = slope × iterations`. The slope is the per-iteration cost,
-cleanly separated from constant overhead (function call, timing calls,
-`black_box`).
+`measure_loop_overhead()` runs 200 samples of 10K iterations of an
+empty `for i in 0..N { black_box(i); }` loop, takes the minimum as
+the per-iteration harness cost. Subtracted from all measurements.
+Stored in `SuiteResult.loop_overhead_ns` for transparency.
 
-**Why it matters**: For a 5ns function, the per-iteration overhead from
-`Instant::now()` and `black_box` can be 10-40ns. Our measurement
-includes this overhead; criterion's slope estimate doesn't. This is most
-impactful for fast benchmarks (< 100ns per iteration). For slower
-benchmarks (> 1μs), the overhead is < 1% and irrelevant.
+#### ✅ Practical significance gate — DONE
 
-**Mitigation**: We target 10ms per sample with many iterations, so the
-per-iteration overhead fraction is small. The ±20% iteration jitter
-decorrelates iteration count from systematic effects. But we can't
-extract the constant overhead.
+`GroupConfig::noise_threshold` (default 1%). Significance requires the
+95% CI to fall entirely outside ±threshold of baseline. Prevents
+"statistically significant but unmeasurably small" reports.
 
-**TODO**: Add a `linear_sampling` mode to `GroupConfig`. Vary iteration
-counts linearly across samples within each round (e.g., `[d, 2d, ...,
-10d]` within each round's allocation for a benchmark). Fit through-origin
-OLS on per-round data. Report slope as the "adjusted" per-iteration time
-alongside the raw mean. This is compatible with interleaving — each
-benchmark in the round can use a different iteration count from its
-linear schedule.
+#### ✅ Per-benchmark confidence intervals — DONE
 
-#### 2. No overhead compensation (HIGH)
+`MeanCi` struct: bootstrap 95% CI on each benchmark's mean, not just
+paired differences. Stored in `BenchmarkResult.mean_ci`. Reported in
+JSON, LLM, CSV output.
 
-**What divan does**: Measures the per-iteration cost of the empty sample
-loop (`for i in 0..N { black_box(i); }`) and subtracts it from all
-measurements. Also measures per-call overhead of allocation tracking.
-100 samples of 10,000 iterations, keeps the minimum.
+#### ✅ Configurable bootstrap resamples — DONE
 
-**Why it matters**: Same root issue as slope regression — the benchmark
-harness has a per-iteration cost that inflates measurements. Overhead
-compensation is simpler to implement than slope regression and addresses
-the same problem for flat sampling.
+`GroupConfig::bootstrap_resamples` (default 10K, minimum 100). Passed
+through to both `PairedAnalysis` and per-benchmark `MeanCi`.
 
-**TODO**: At startup, measure empty-loop overhead (100 samples ×
-10K iterations, take minimum). Subtract `overhead × iterations` from
-each sample's elapsed time, clamped to zero. Store measured overhead in
-`SuiteResult` for transparency. This is complementary to slope
-regression — apply it in flat mode, skip it in linear mode where the
-slope already handles it.
+#### 1. Slope regression (MEDIUM — deferred)
 
-#### 3. No practical significance gate (MEDIUM)
+**What criterion does**: Linear sampling with OLS regression separates
+per-iteration cost from constant overhead. Most impactful for sub-100ns
+benchmarks.
 
-**What criterion does**: A ±1% noise threshold. Even if the t-test says
-p < 0.05, the change is reported as "no change" unless the CI is
-entirely outside ±1%. This prevents "statistically significant but
-unmeasurably small" reports.
+**Our mitigation**: Overhead compensation subtracts the loop+black_box
+cost directly. Precision-driven iteration estimation ensures enough
+iterations to amortize timer overhead. TSC timer reduces per-call cost.
+These three measures together address the same root problem that slope
+regression solves — the remaining gap is for benchmarks where the
+function call overhead itself (not loop/black_box) is significant
+relative to the measured time. For most practical benchmarks (> 10ns),
+the difference is negligible.
 
-**What tango does**: |diff/baseline| > 0.5% practical threshold
-alongside the Z-test.
-
-**What we do**: The `significant` flag fires whenever the 95% CI
-excludes zero. With enough samples, even a 0.001% difference triggers
-it. The Cohen's d footnote (d < 0.2 → "tiny effect") partially addresses
-this, but it's informational — it doesn't suppress the significance
-flag.
-
-**TODO**: Add `noise_threshold` to `GroupConfig` (default 1%). Suppress
-the green/red coloring and significance flag when the entire CI falls
-within ±noise_threshold of zero. Still show the CI values — the user can
-see the numbers, but the visual treatment says "this is noise." Make the
-footnote say "within noise threshold" rather than "tiny effect size."
-
-#### 4. No per-benchmark confidence intervals (MEDIUM)
-
-**What criterion does**: Bootstraps CIs on each benchmark's mean,
-median, stddev, and MAD individually.
-
-**What we do**: Bootstrap CIs on paired differences only. Users can't
-assess "how confident am I that this benchmark's throughput is 5.2
-GiB/s?"
-
-**TODO**: Bootstrap individual benchmark summaries (mean, median) with
-the same 10K resample machinery. Report in JSON/LLM output. Optionally
-display as `mean ± CI` in terminal when no comparison is present
-(standalone benchmarks).
-
-#### 5. Bootstrap resample count (LOW)
-
-We use 10K resamples; criterion uses 100K. For 95% CIs, the 2.5th
-percentile of 10K is the 250th sorted value — plenty of resolution.
-For 99% CIs or extreme quantiles, 100K gives better tail coverage.
-
-**TODO**: Make resample count configurable via `GroupConfig`. Default
-10K is fine. Document that users can increase to 100K for tighter tail
-estimates at a ~10× cost in analysis time.
+**Status**: Not planned for 0.1. Overhead compensation + TSC + precision
+iteration estimation provide equivalent accuracy for > 10ns benchmarks.
+Slope regression would improve sub-10ns measurements.
 
 ### Methodology gaps
 
-#### 6. No TSC / hardware timer (MEDIUM)
+#### ✅ TSC / hardware timer — DONE
 
-Both divan and tango support `rdtsc`/`rdtscp` with proper serialization
-barriers. For sub-nanosecond benchmarks, wall-clock `Instant::now()` has
-~20ns resolution on some systems, making it impossible to measure 2ns
-functions at 1-iteration-per-sample.
+`precise-timing` feature (default on). `rdtsc`/`rdtscp` on x86_64 with
+`lfence` serialization. `cntvct_el0` on aarch64 with `isb` barriers.
+Auto-calibration against `Instant` (convergence < 0.1%). Automatic
+fallback when TSC is non-invariant.
 
-**TODO**: Add an optional `hw-timer` feature. On x86_64, use `rdtsc`
-(with `lfence` before) for start and `rdtscp` (with `lfence` after) for
-end. Calibrate TSC frequency against `Instant` at startup. Report times
-in nanoseconds (converted from cycles), not raw cycles. Fall back to
-`Instant` on non-x86 or when TSC is not invariant. This requires
-`unsafe` — gate behind a feature flag and document the tradeoff.
+#### ✅ Stack alignment jitter — DONE
 
-#### 7. No stack alignment jitter (MEDIUM)
+Safe recursive trampoline: `stack_jitter_call(func, bencher, depth)`.
+Each level adds a 64-byte `black_box`ed stack frame. Random 0..4096
+byte offset per sample per benchmark. On by default with
+`precise-timing`. Zero unsafe code.
 
-**What criterion does**: `alloca`-based stack offset of `i % page_size`
-per sample. Varies cache line alignment of stack variables across
-samples.
+#### ✅ Deferred drop — DONE
 
-**What tango does**: `--randomize-stack N` with `alloca` for random
-0..N byte stack offset per measurement.
+`Bencher::iter_deferred_drop()`: collects outputs in pre-allocated
+`Vec<O>` during the timed loop, drops after timing ends. `black_box`
+on the slice prevents LLVM from eliding writes.
 
-**What we do**: ±20% iteration jitter addresses some aliasing but not
-stack-frame alignment specifically. Code and data alignment effects
-(Mytkowicz 2009) can create systematic bias.
+#### ✅ asm fences — DONE
 
-**TODO**: Add optional stack alignment jitter. Before each sample,
-`alloca` a random 0..4096 byte offset. This is `unsafe` (or requires
-platform-specific shims). Gate behind a feature flag or make opt-in via
-`GroupConfig`. Consider whether iteration jitter already provides
-sufficient decorrelation for most use cases — this may be lower priority
-than the statistical gaps above.
+`asm!("")` barriers around all timing windows. Stronger than
+`compiler_fence(SeqCst)` — LLVM cannot reason through inline assembly.
+Applied in `iter()`, `iter_deferred_drop()`, `InputBencher::run()`,
+and `measure_loop_overhead()`.
 
-#### 8. No explicit warmup phase (LOW)
+#### ✅ Allocation profiling — DONE
 
-**What criterion does**: 3-second wall-time warmup, doubling iterations.
-**What tango does**: `iterations/10` warmup per sample.
-**What divan does**: Tuning phase doublings serve as implicit warmup.
+`AllocProfiler` wrapping any `GlobalAlloc`. Thread-local `Cell<u64>`
+counters. Reports `allocs/iter`, `bytes/iter`, `reallocs/iter` in
+LLM, CSV, JSON output.
 
-**What we do**: Binary search during iteration estimation runs the
-benchmark a few times. Not a time-based warmup.
+#### 2. Explicit warmup phase (LOW)
 
-**Why it's low priority**: Rust is ahead-of-time compiled (no JIT
-warmup). The binary search runs each benchmark 5+ times during
-estimation, warming caches and branch predictors. For benchmarks that
-build large data structures or warm filesystem caches, the current
-approach may be insufficient — but these are better handled by
-`with_input()` separating setup from measurement.
+Rust is AOT-compiled (no JIT). Iteration estimation already runs each
+benchmark 5+ times, warming caches and branch predictors. `with_input()`
+separates setup from measurement. A time-based warmup phase would help
+benchmarks with large working sets (filesystem caches, database
+connections) but these are uncommon in microbenchmarking.
 
-**TODO**: Add `warmup_time` to `GroupConfig` (default: 0 = current
-behavior). When set, run the benchmark in a loop for that duration
-before starting measurement rounds. Low priority — the iteration
-estimation already provides partial warmup.
+**Status**: Low priority. `warmup_time` in `GroupConfig` is the planned
+API if needed.
 
-#### 9. Deferred drop (LOW)
+#### 3. Precision-driven iteration estimation — DONE (post-original-doc)
 
-**What divan does**: Outputs written to `MaybeUninit<O>` slots during
-timed loop; `Drop::drop` runs only after timing ends. Prevents drop
-cost from polluting measurements for types with expensive destructors
-(e.g., large `Vec`, `String`, file handles).
-
-**What we do**: `Bencher::iter()` includes drop cost of the return
-value. `with_input().run()` excludes setup but includes drop.
-
-**TODO**: Consider a `Bencher::iter_with_deferred_drop()` variant that
-collects outputs in a pre-allocated buffer and drops them after timing.
-This requires careful lifetime management and capacity planning (what
-if the output is 1 MiB × 10,000 iterations?). The `with_input().run()`
-API already handles the common case where setup is expensive. Lower
-priority than statistical improvements.
+Added after the initial gap analysis. Scales iteration count to
+`max(1000 × timer_resolution / per_iter_time, sample_target_ns / per_iter_time)`.
+Produces shortest possible samples that are still precise. Default
+`sample_target_ns` = 1ms caps noise exposure.
 
 ### What we already do that others don't
 
@@ -1068,21 +998,18 @@ Over time this builds a time series suitable for change point detection
 - run: cargo bench -- --baseline release-v0.3.0 --max-regression-pct 3
 ```
 
-### TODO: baseline persistence implementation
+### Implementation status — DONE
 
-1. **`--save-baseline <name>`**: Save `SuiteResult` to
-   `.zenbench/baselines/<name>.json`. Overwrite if exists.
-2. **`--baseline <name>`**: Load baseline, run benchmarks, compare.
-   Match benchmarks by group name + benchmark name. Report missing
-   benchmarks (new or removed) separately.
-3. **`--update-on-pass`**: After comparison, if no regressions exceed
-   threshold, overwrite the baseline with the new results.
-4. **Exit codes**: 0 = pass, 1 = regression detected, 2 = error.
-   Machine-readable JSON summary on stdout for CI integration.
-5. **`zenbench baseline list/delete/show`**: CLI management commands.
-6. **Threshold configuration**: `noise_threshold` and
-   `max_regression_pct` in `GroupConfig`, overridable via CLI flags
-   and config file.
+All core baseline features are implemented:
+
+1. ✅ `--save-baseline=<name>`: Saves to `.zenbench/baselines/<name>.json`
+2. ✅ `--baseline=<name>`: Load, compare, exit 0/1/2
+3. ✅ `--update-on-pass`: Auto-ratchets baseline on clean runs
+4. ✅ `--max-regression=<pct>`: Configurable threshold (default 5%)
+5. ✅ `zenbench baseline list/show/delete`: CLI management
+6. ✅ Works with both `main!` and `criterion_main!` macros
+
+See REGRESSION-TESTING.md for complete user stories and CI workflows.
 
 ### Cross-run statistical adjustment
 
@@ -1281,31 +1208,34 @@ than reimplementing.
 | Change point detection | Handles transitions | Good for trends | Post-processing | High |
 | Instruction counting | Yes | Misses SIMD/cache | 20-50× | Medium-High |
 
-### TODO: cross-machine and baseline implementation priority
+### Remaining implementation priorities
 
-**Phase 1 — Baseline persistence (HIGH)**:
-- Named baseline save/load (`--save-baseline`, `--baseline`)
-- Threshold-based CI exit codes
-- Hardware fingerprint in SuiteResult (testbed identification)
+**Phase 1 — DONE:**
+- ✅ Named baseline save/load, exit codes, `--update-on-pass`
+- ✅ Noise threshold gate
+- ✅ Overhead compensation, TSC timer, asm fences, deferred drop
+- ✅ Stack alignment jitter, per-benchmark CIs, configurable resamples
+- ✅ Allocation profiling, precision-driven iteration estimation
+
+**Phase 2 — Cross-run robustness (MEDIUM)**:
 - Cross-run variance inflation for non-interleaved comparisons
-- Noise threshold gate (from statistical gaps TODO)
+- Hardware fingerprint in SuiteResult (testbed identification)
+- Testbed comparison guards (warn when hardware changes)
+- `--compare-ref=<commit>` from bench binaries (self-compare via macro)
 
-**Phase 2 — Calibration and testbed awareness (MEDIUM)**:
+**Phase 3 — Calibration and normalization (FUTURE)**:
 - Built-in calibration workloads (integer, memory BW, memory latency)
-- Calibration results stored in SuiteResult
-- Testbed fingerprinting and comparison guards
 - Calibration-normalized scores in output
+- Cross-machine trend tracking
 
-**Phase 3 — Time series and change point detection (FUTURE)**:
+**Phase 4 — Time series and change point detection (FUTURE)**:
 - Time-series storage format (append-only, per-benchmark)
 - E-Divisive change point detection (windowed t-test variant)
 - Advisory alerts for gradual regressions on main
-- Dashboard / report generation for trend visualization
 
-**Phase 4 — Instruction counting integration (FUTURE, OPTIONAL)**:
+**Phase 5 — Instruction counting integration (FUTURE, OPTIONAL)**:
 - `--mode=cachegrind` for hardware-independent metrics
 - Interop with iai-callgrind output format
-- Side-by-side wall-clock + instruction-count reporting
 
 ## References
 
