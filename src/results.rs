@@ -537,7 +537,7 @@ impl SuiteResult {
                     .map(|r| r.vs_base.len())
                     .max()
                     .unwrap_or(8)
-                    .max(15) // "95% CI vs base"
+                    .max(20) // header: [p5 · mean · p95] vs base
             } else {
                 0
             };
@@ -565,7 +565,7 @@ impl SuiteResult {
             // vs base column
             if has_comparisons {
                 add_col(&mut top, vs_w, '┬');
-                hdr.push_str(&format!(" │ {:>vs_w$}", "95% CI vs base"));
+                hdr.push_str(&format!(" │ {:^vs_w$}", "[low · mean · high] vs base"));
                 add_col(&mut mid, vs_w, '┼');
             }
 
