@@ -199,6 +199,32 @@ impl<'a> BenchmarkGroup<'a> {
         self
     }
 
+    /// Set a custom throughput unit name (zenbench extension).
+    /// E.g., `group.throughput_unit("pixels")` → "Gpixels/s" in output.
+    pub fn throughput_unit(&mut self, unit: impl Into<String>) -> &mut Self {
+        self.ensure_group().throughput_unit(unit);
+        self
+    }
+
+    /// Set the baseline benchmark by name (zenbench extension).
+    /// Comparisons are shown relative to this benchmark.
+    pub fn baseline(&mut self, name: impl Into<String>) -> &mut Self {
+        self.ensure_group().baseline(name);
+        self
+    }
+
+    /// Sort benchmarks by speed in the report (zenbench extension).
+    pub fn sort_by_speed(&mut self) -> &mut Self {
+        self.ensure_group().config().sort_by_speed(true);
+        self
+    }
+
+    /// Set a visual subgroup label for subsequent benchmarks (zenbench extension).
+    pub fn subgroup(&mut self, label: impl Into<String>) -> &mut Self {
+        self.ensure_group().subgroup(label);
+        self
+    }
+
     /// Benchmark a function (criterion-compatible).
     ///
     /// Runs the benchmark **immediately** — the closure doesn't need `'static`.
@@ -224,7 +250,7 @@ impl<'a> BenchmarkGroup<'a> {
 
         // Estimate iterations from timer precision and sample target
         let timer_res = crate::platform::timer_resolution_ns();
-        let precision_min = (timer_res as u64).saturating_mul(1000).max(10_000);
+        let precision_min = timer_res.saturating_mul(1000).max(10_000);
         let iters = ((config.sample_target_ns.max(precision_min)) / per_iter).max(1) as usize;
         let iters = iters.clamp(config.min_iterations, config.max_iterations);
 

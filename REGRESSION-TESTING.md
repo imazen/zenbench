@@ -232,6 +232,45 @@ use zenbench::{criterion_group, criterion_main};
 Both migrated and unmigrated bench files work side by side. Run both
 to verify parity, then drop `criterion` from Cargo.toml when done.
 
+**Incremental upgrades (small changes, big wins):**
+
+Once migrated, you can add zenbench features one line at a time without
+switching to the native API:
+
+```rust
+// Already works — same as criterion:
+group.throughput(Throughput::Elements(1000));
+
+// Zenbench extensions — just add these lines:
+group.throughput_unit("pixels");       // custom unit: "Gpixels/s"
+group.baseline("reference_impl");      // compare all vs this one
+group.sort_by_speed();                 // fastest first in report
+group.subgroup("SIMD variants");       // visual section headers
+```
+
+CLI flags work immediately — no code changes:
+```bash
+cargo bench -- --save-baseline=main              # CI baselines
+cargo bench -- --baseline=main --max-regression=5  # regression gates
+cargo bench -- --format=json                     # machine-readable
+```
+
+**When to switch to the native API:**
+
+The criterion-compat layer runs benchmarks sequentially (like criterion).
+Switch to `suite.compare()` when you want interleaved execution for
+precise A-vs-B comparison. The diff is small:
+
+```rust
+// Criterion-compat (sequential):         // Native (interleaved):
+let mut g = c.benchmark_group("sort");    suite.compare("sort", |g| {
+g.bench_function("std", |b| ...);            g.bench("std", |b| ...);
+g.bench_function("unstable", |b| ...);       g.bench("unstable", |b| ...);
+g.finish();                               });
+```
+
+`bench_function` → `bench`, drop `finish()`, wrap in `suite.compare()`.
+
 **What you get immediately per migrated file:**
 - `--save-baseline` / `--baseline` for CI regression detection
 - Resource gating (CPU load, temperature, heavy processes)
