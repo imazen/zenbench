@@ -996,7 +996,7 @@ fn baseline_comparison_warns_on_git_hash_mismatch() {
 
 #[test]
 fn baseline_comparison_warns_on_testbed_mismatch() {
-    let mut result1 = run_gated(disabled_gate(), |suite| {
+    let result1 = run_gated(disabled_gate(), |suite| {
         suite.compare("hw", |group| {
             group.config().max_rounds(5).auto_rounds(false);
             group.bench("x", |b| b.iter(|| black_box(1u64)));

@@ -428,7 +428,7 @@ mod tests {
     #[test]
     fn save_and_load_roundtrip() {
         let result = make_result(&[("g", "bench_a", 42.0)]);
-        let _ = std::fs::create_dir_all(&baseline_dir());
+        let _ = std::fs::create_dir_all(baseline_dir());
         let path = save_baseline(&result, "test_roundtrip").unwrap();
         let loaded = load_baseline("test_roundtrip").unwrap();
         assert_eq!(loaded.comparisons[0].benchmarks[0].summary.mean, 42.0);
@@ -437,7 +437,7 @@ mod tests {
 
     #[test]
     fn list_baselines_works() {
-        let _ = std::fs::create_dir_all(&baseline_dir());
+        let _ = std::fs::create_dir_all(baseline_dir());
         // Just verify it doesn't panic
         let _ = list_baselines();
     }
