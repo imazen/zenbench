@@ -7,6 +7,8 @@ Interleaved microbenchmarking for Rust with paired statistics, CI regression tes
 [![docs.rs](https://img.shields.io/docsrs/zenbench?style=for-the-badge)](https://docs.rs/zenbench)
 [![License](https://img.shields.io/crates/l/zenbench?style=for-the-badge)](LICENSE-MIT)
 
+**[Documentation](https://imazen.github.io/zenbench)** · **[Example HTML Report](https://imazen.github.io/zenbench/example-report.html)** · **[Tutorial](https://imazen.github.io/zenbench/getting-started/)**
+
 ```text
   compress_64k  200 rounds × 67 calls
                        mean ±mad µs  95% CI vs base          iB/s
