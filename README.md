@@ -302,7 +302,7 @@ and drop cost are excluded from timing. In criterion, you'd use
 - HTML reports with plots (zenbench has terminal tables and bar charts)
 - `iter_batched_ref` (zenbench's `with_input().run()` always clones)
 - `Criterion::default().configure_from_args()` (use `--format=X` or env vars)
-- Async benchmark support (not yet implemented)
+- Async benchmark support (via `async` feature, requires tokio)
 - Custom measurement types (wall-clock only for now)
 
 ### What you gain
