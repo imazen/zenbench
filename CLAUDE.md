@@ -131,3 +131,15 @@ Don't mix bench_parallel/bench_contended with rayon — competing thread pools.
 
 ### Known migration friction
 - criterion_compat requires `'static` closures (criterion doesn't). Users must add `move` and `.clone()` captured data. This is because zenbench stores closures for interleaved execution; criterion runs them immediately. Fixing properly requires lifetime-parameterized BenchFn or scoped thread approach. Filed as tech debt.
+
+### Report format evolution (from divan comparison)
+Divan's tree-style output is more compact than our box-drawing tables:
+- No top/bottom borders (saves 2 lines per group)
+- Tree nesting for subgroups (├─/│/╰─ instead of full-width separators)
+- Single header across all groups (not repeated per group)
+- Right-aligned values without explicit column borders
+
+Consider adopting a lighter format in a future pass. Current format is
+correct and complete — this is about density and aesthetics, not data.
+Key constraint: our CI column and throughput column are differentiators
+that divan doesn't have — any format change must preserve them.
