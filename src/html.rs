@@ -131,7 +131,7 @@ pub fn to_html(result: &SuiteResult) -> String {
             "<details><summary><h2>{}</h2></summary>\n",
             bench.name
         ));
-        html.push_str(&render_bench_details(bench, None));
+        html.push_str(&render_bench_detail_content(bench, None));
         html.push_str("</details>\n");
     }
 
@@ -267,6 +267,9 @@ fn render_group(comp: &ComparisonResult) -> String {
             String::new()
         };
 
+        // Benchmark name is the clickable expand trigger
+        let analysis = baseline_analyses.get(bench.name.as_str()).copied();
+        let ncols = if has_throughput { 6 } else { 5 };
         html.push_str(&format!(
             "<tr{cls}><td>{}</td><td>{}</td><td>{}</td><td>±{}</td><td>{ci_str}</td>{tp}</tr>\n",
             bench.name,
@@ -274,12 +277,13 @@ fn render_group(comp: &ComparisonResult) -> String {
             format_ns(bench.summary.mean),
             format_ns(bench.summary.mad),
         ));
-
-        // Expandable details per benchmark
-        let analysis = baseline_analyses.get(bench.name.as_str()).copied();
-        html.push_str("<tr class=\"detail-row\"><td colspan=\"6\">");
-        html.push_str(&render_bench_details(bench, analysis));
-        html.push_str("</td></tr>\n");
+        html.push_str(&format!(
+            "<tr class=\"detail-row\"><td colspan=\"{ncols}\"><details class=\"bench-detail\">\
+             <summary>{} — full details</summary>\n",
+            bench.name,
+        ));
+        html.push_str(&render_bench_detail_content(bench, analysis));
+        html.push_str("</details></td></tr>\n");
     }
     html.push_str("</table>\n");
 
@@ -290,12 +294,11 @@ fn render_group(comp: &ComparisonResult) -> String {
     html
 }
 
-fn render_bench_details(
+fn render_bench_detail_content(
     bench: &crate::results::BenchmarkResult,
     analysis: Option<&crate::stats::PairedAnalysis>,
 ) -> String {
     let mut html = String::new();
-    html.push_str("<details class=\"bench-detail\"><summary>details</summary>\n");
     html.push_str("<div class=\"detail-grid\">\n");
 
     // Summary stats
@@ -470,7 +473,7 @@ fn render_bench_details(
         html.push_str("</table></div>\n");
     }
 
-    html.push_str("</div></details>\n");
+    html.push_str("</div>\n");
     html
 }
 
