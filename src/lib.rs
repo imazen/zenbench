@@ -156,11 +156,16 @@ pub fn black_box<T>(x: T) -> T {
 }
 
 /// Prelude for convenient imports.
+///
+/// ```rust,ignore
+/// use zenbench::prelude::*;
+/// ```
 pub mod prelude {
-    pub use crate::bench::{BenchGroup, Bencher, Suite, Throughput};
+    pub use crate::bench::{BenchGroup, Bencher, GroupConfig, Suite, Throughput};
     pub use crate::black_box;
     pub use crate::gate::GateConfig;
     pub use crate::results::SuiteResult;
+    pub use crate::stats::{MeanCi, PairedAnalysis, Summary};
 }
 
 /// Run a benchmark suite with default configuration.
@@ -219,23 +224,39 @@ pub fn run_and_save<F: FnOnce(&mut Suite)>(f: F) -> SuiteResult {
 ///
 /// Use this in a `benches/*.rs` file with `harness = false` in `Cargo.toml`.
 ///
-/// # Example
+/// # Examples
 ///
+/// **Function list** (composable — recommended):
 /// ```rust,ignore
-/// // benches/my_bench.rs
-/// zenbench::main!(|suite| {
-///     suite.compare("sorting", |group| {
-///         let data: Vec<i32> = (0..1000).rev().collect();
-///         group.bench("std_sort", move |b| {
-///             let d = data.clone();
-///             b.with_input(move || d.clone())
+/// use zenbench::prelude::*;
+///
+/// fn bench_sort(suite: &mut Suite) {
+///     suite.group("sort", |g| {
+///         g.throughput(Throughput::Elements(1000));
+///         g.bench("std_sort", |b| {
+///             b.with_input(|| (0..1000).rev().collect::<Vec<i32>>())
 ///                 .run(|mut v| { v.sort(); v })
 ///         });
-///         group.bench("sort_unstable", move |b| {
-///             let data: Vec<i32> = (0..1000).rev().collect();
-///             b.with_input(move || data.clone())
+///         g.bench("sort_unstable", |b| {
+///             b.with_input(|| (0..1000).rev().collect::<Vec<i32>>())
 ///                 .run(|mut v| { v.sort_unstable(); v })
 ///         });
+///     });
+/// }
+///
+/// fn bench_fib(suite: &mut Suite) {
+///     suite.bench_fn("fibonacci", || black_box(fib(20)));
+/// }
+///
+/// zenbench::main!(bench_sort, bench_fib);
+/// ```
+///
+/// **Closure** (quick single-file):
+/// ```rust,ignore
+/// zenbench::main!(|suite| {
+///     suite.group("sort", |g| {
+///         g.bench("std", |b| b.iter(|| data.sort()));
+///         g.bench("unstable", |b| b.iter(|| data.sort_unstable()));
 ///     });
 /// });
 /// ```

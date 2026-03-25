@@ -93,18 +93,40 @@ impl Suite {
         }
     }
 
-    /// Add a comparison group. Benchmarks within a group are interleaved
-    /// to eliminate system-state bias.
-    pub fn compare<F: FnOnce(&mut BenchGroup)>(&mut self, name: impl Into<String>, f: F) {
+    /// Add a benchmark group. Benchmarks within a group are interleaved
+    /// and compared against each other with paired statistics.
+    ///
+    /// ```rust,ignore
+    /// suite.group("sort", |g| {
+    ///     g.bench("std", |b| b.iter(|| data.sort()));
+    ///     g.bench("unstable", |b| b.iter(|| data.sort_unstable()));
+    /// });
+    /// ```
+    pub fn group<F: FnOnce(&mut BenchGroup)>(&mut self, name: impl Into<String>, f: F) {
         let mut group = BenchGroup::new(name);
         f(&mut group);
-        if group.benchmarks.len() < 2 {
-            eprintln!(
-                "[zenbench] warning: comparison group '{}' has fewer than 2 benchmarks",
-                group.name
-            );
-        }
         self.groups.push(group);
+    }
+
+    /// Alias for [`group`](Self::group) — same behavior.
+    pub fn compare<F: FnOnce(&mut BenchGroup)>(&mut self, name: impl Into<String>, f: F) {
+        self.group(name, f);
+    }
+
+    /// Shorthand: benchmark a single function (no group, no comparison).
+    ///
+    /// ```rust,ignore
+    /// suite.bench_fn("fibonacci", || fib(20));
+    /// ```
+    pub fn bench_fn<O: 'static, F>(&mut self, name: impl Into<String>, mut f: F)
+    where
+        F: FnMut() -> O + Send + 'static,
+    {
+        let name = name.into();
+        let bench_name = name.clone();
+        self.group(name, move |g| {
+            g.bench(bench_name, move |b| b.iter(&mut f));
+        });
     }
 
     /// Add a standalone benchmark (not compared against anything).
