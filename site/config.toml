@@ -1,0 +1,13 @@
+base_url = "https://imazen.github.io/zenbench"
+title = "zenbench"
+description = "Interleaved microbenchmarking for Rust"
+compile_sass = false
+minify_html = true
+generate_feeds = false
+
+[markdown]
+highlight_code = true
+highlight_theme = "one-dark"
+
+[extra]
+repo_url = "https://github.com/imazen/zenbench"

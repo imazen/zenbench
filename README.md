@@ -7,13 +7,56 @@ Interleaved microbenchmarking for Rust with paired statistics, CI regression tes
 [![docs.rs](https://img.shields.io/docsrs/zenbench?style=for-the-badge)](https://docs.rs/zenbench)
 [![License](https://img.shields.io/crates/l/zenbench?style=for-the-badge)](LICENSE-MIT)
 
+```text
+  compress_64k  200 rounds × 67 calls
+                       mean ±mad µs  95% CI vs base          iB/s
+  ├─ sequential
+  │  ├─ level_1        16.2 ±0.5µs  [15.8–16.6]µs          3.78G
+  │  ├─ level_6        15.1 ±0.5µs  [-4.7%–-3.5%]          4.05G
+  │  ╰─ level_9        15.0 ±0.5µs  [-5.5%–-4.2%]          4.06G
+  ╰─ patterns
+     ├─ sequential     15.1 ±0.5µs  [-5.8%–-4.4%]          4.03G
+     ╰─ mixed         401.0 ±8.1µs  [+2370%–+2385%]         156M
+  level_9       ██████████████████████████████████████████████ 4.06 GiB/s
+  level_6       ██████████████████████████████████████████████ 4.05 GiB/s
+  sequential    █████████████████████████████████████████████ 4.03 GiB/s
+  level_1       ███████████████████████████████████████████ 3.78 GiB/s
+  mixed         ██ 156 MiB/s
+```
+
 ## Why zenbench
 
-Every round, all benchmarks in a group run in **shuffled order**. System state affects them equally. Paired tests on round-by-round differences detect changes that sequential harnesses miss.
+Existing harnesses run benchmarks **sequentially**. Benchmark A runs on a hot CPU; benchmark B runs on an even hotter CPU with degraded turbo boost. System load changes between runs corrupt results.
+
+Zenbench **interleaves**: each round, all benchmarks run in shuffled order. Round N of A and round N of B execute under identical conditions. Paired statistics on the round-by-round differences detect real changes — not thermal drift.
+
+### vs criterion and divan
+
+| | criterion 0.8 | divan 0.1 | **zenbench 0.1** |
+|---|---|---|---|
+| **Execution** | Sequential | Sequential | **Interleaved shuffle** |
+| **Comparison** | Welch t-test | None | **Bootstrap CI + Wilcoxon** |
+| **Effect size** | None | None | **Cohen's d** |
+| **Drift detection** | None | None | **Spearman correlation** |
+| **CI regression gates** | None | None | **`--baseline`, exit codes** |
+| **Noise threshold** | ±1% (fixed) | None | **±1% (configurable)** |
+| **Per-benchmark CIs** | Bootstrap | None | **Bootstrap** |
+| **TSC timer** | No | Opt-in | **Auto (default)** |
+| **Overhead compensation** | Slope regression | Loop subtraction | **Loop subtraction** |
+| **Stack jitter** | alloca (unsafe) | None | **Safe trampoline** |
+| **Alloc profiling** | No | GlobalAlloc | **GlobalAlloc** |
+| **Deferred drop** | No | MaybeUninit | **Vec collect** |
+| **Async** | to_async() | No | **iter_async()** |
+| **Output formats** | JSON/HTML | Terminal | **JSON/CSV/LLM/Markdown** |
+| **Auto-convergence** | No | No | **CI width + stability** |
+| **Resource gating** | No | No | **Process detection** |
+| **Migration** | — | No | **Drop-in compat layer** |
+| **Display** | HTML plots | Tree | **Tree + Table + Bar chart** |
 
 ## Quick start
 
 ```toml
+# Cargo.toml
 [dev-dependencies]
 zenbench = "0.1"
 
@@ -28,10 +71,12 @@ use zenbench::prelude::*;
 fn bench_sort(suite: &mut Suite) {
     suite.group("sort", |g| {
         g.throughput(Throughput::Elements(1000));
+
         g.bench("std_sort", |b| {
             b.with_input(|| (0..1000).rev().collect::<Vec<i32>>())
                 .run(|mut v| { v.sort(); v })
         });
+
         g.bench("sort_unstable", |b| {
             b.with_input(|| (0..1000).rev().collect::<Vec<i32>>())
                 .run(|mut v| { v.sort_unstable(); v })
@@ -42,61 +87,187 @@ fn bench_sort(suite: &mut Suite) {
 zenbench::main!(bench_sort);
 ```
 
-## Output
-
-```text
-  sort  200 rounds × 3K calls
-                     mean ±mad ns  95% CI vs base     items/s
-  ├─ std_sort        258 ±5ns  [255–262]ns          3.87G
-  ╰─ sort_unstable   246 ±4ns  [-5.5%–-4.2%]        4.06G
-  sort_unstable  ██████████████████████████████████████████ 4.06 Gitems/s
-  std_sort       ████████████████████████████████████████ 3.87 Gitems/s
-```
-
-Also: `--style=table` for bordered tables, `--format=json|csv|llm|md`.
-
 ## CI regression testing
 
 ```bash
-cargo bench -- --save-baseline=main           # save after merge
-cargo bench -- --baseline=main                # check PR (exit 1 on regression)
-cargo bench -- --baseline=main --update-on-pass  # auto-ratchet
+# After merging to main — save a baseline
+cargo bench -- --save-baseline=main
+
+# On PRs — check for regressions (exits 1 if > 5% slower)
+cargo bench -- --baseline=main
+
+# Auto-update baseline on clean runs
+cargo bench -- --baseline=main --update-on-pass --max-regression=5
 ```
 
-GitHub Actions workflow and full guide: [REGRESSION-TESTING.md](REGRESSION-TESTING.md)
+```text
+  Baseline comparison
+  ───────────────────
+  compress::level_1     16.2µs →   16.4µs    +1.2%    unchanged
+  compress::level_6     15.1µs →   15.3µs    +1.3%    unchanged
+  compress::level_9     15.0µs →   15.6µs    +4.0%    unchanged
+  compress::mixed      401.0µs →  412.3µs    +2.8%    unchanged
+  decompress::zenflate  91.5µs →   92.7µs    +1.3%    unchanged
+
+  Summary: 0 regressions, 0 improvements, 5 unchanged
+
+[zenbench] PASS: no regressions exceed 5% threshold
+```
+
+Full CI guide with GitHub Actions workflows: [REGRESSION-TESTING.md](REGRESSION-TESTING.md)
+
+## Thread scaling
+
+```rust
+suite.group("scaling", |g| {
+    g.throughput(Throughput::Elements(10_000));
+    g.bench_scaling("work", |b, _tid| {
+        b.iter(|| expensive_computation())
+    });
+});
+```
+
+```text
+  scaling  200 rounds × 77 calls
+                    mean ±mad µs  95% CI vs base    items/s
+  ├─ sqrt_1t        4.2 ±0.1µs  [4.2–4.3]µs       2.37G
+  ├─ sqrt_2t        4.7 ±0.1µs  [+10.7%–+12.6%]   2.12G
+  ├─ sqrt_4t        5.8 ±0.1µs  [+36.0%–+38.8%]   1.72G
+  ├─ sqrt_8t        8.5 ±0.3µs  [+91.6%–+101%]    1.17G
+  ╰─ sqrt_16t      14.2 ±0.3µs  [+232%–+245%]      703M
+  sqrt_1t   ██████████████████████████████████████████████████ 2.37G
+  sqrt_2t   █████████████████████████████████████████████ 2.12G
+  sqrt_4t   ████████████████████████████████████ 1.72G
+  sqrt_8t   █████████████████████████ 1.17G
+  sqrt_16t  ███████████████ 703M
+```
+
+## Subgroups and organization
+
+```rust
+suite.group("dispatch", |g| {
+    g.throughput(Throughput::Elements(100));
+    g.throughput_unit("checks");
+
+    g.subgroup("Generic (monomorphized)");
+    g.bench("impl Stop (Stopper)", |b| b.iter(|| check_stopper()));
+    g.bench("impl Stop (FnStop)", |b| b.iter(|| check_fn()));
+
+    g.subgroup("Dynamic dispatch");
+    g.bench("&dyn Stop", |b| b.iter(|| check_dyn()));
+    g.bench("StopToken", |b| b.iter(|| check_token()));
+
+    g.baseline("impl Stop (Stopper)");
+    g.sort_by_speed();
+});
+```
+
+```text
+  dispatch  200 rounds × 10K calls
+                                mean ±mad ns  95% CI vs base     checks/s
+  ├─ Generic (monomorphized)
+  │  ├─ impl Stop (FnStop)      19.7 ±0.3ns  [-49.1%–-47.2%]      5.08G
+  │  ╰─ impl Stop (Stopper)     38.5 ±0.5ns  [37.9–39.1]ns        2.60G
+  ╰─ Dynamic dispatch
+     ├─ StopToken                97.2 ±1.2ns  [+148%–+154%]        1.03G
+     ╰─ &dyn Stop              112.5 ±3.1ns  [+176%–+193%]         889M
+  impl Stop (FnStop)   ██████████████████████████████████████████████ 5.08G
+  impl Stop (Stopper)  █████████████████████████████ 2.60G
+  StopToken            ████████████ 1.03G
+  &dyn Stop            ██████████ 889M
+```
 
 ## Migrating from criterion
 
-Change one import per file — zero code changes:
+Add zenbench alongside criterion — migrate one file at a time:
+
+```toml
+[dev-dependencies]
+criterion = "0.8"                                          # keep
+zenbench = { version = "0.1", features = ["criterion-compat"] }  # add
+```
+
+Change one import per file — **zero code changes** to benchmark functions:
 
 ```rust
 // Before:
 use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
+
 // After:
 use zenbench::criterion_compat::*;
 use zenbench::{criterion_group, criterion_main};
 ```
 
-Requires `features = ["criterion-compat"]`. Full guide: [MIGRATION.md](MIGRATION.md)
+Closures can borrow local data — no `move` or `Clone` needed. Your existing `criterion_group!`, `criterion_main!`, `bench_function`, `bench_with_input`, `BenchmarkId`, `Throughput`, `group.sample_size()`, `group.measurement_time()`, and `group.finish()` all work unchanged.
 
-## Features
+Full upgrade ladder: [MIGRATION.md](MIGRATION.md)
 
-**Measurement:**
-interleaved execution · TSC hardware timer · stack alignment jitter · overhead compensation · deferred drop · slope regression · calibration workloads · allocation profiling
+## Output formats
 
-**Statistics:**
-bootstrap 95% CI · Wilcoxon signed-rank · Cohen's d effect size · Spearman drift detection · noise threshold · per-benchmark CIs · auto-convergence
+```bash
+cargo bench                           # tree display (default, stderr)
+cargo bench -- --style=table          # bordered tables with min column
+cargo bench -- --format=json          # structured JSON (stdout)
+cargo bench -- --format=csv           # spreadsheet-friendly (stdout)
+cargo bench -- --format=llm           # key=value for AI tools (stdout)
+cargo bench -- --format=md            # markdown tables (stdout)
+```
 
-**CI/Workflow:**
-baseline save/load · regression exit codes · `--update-on-pass` · benchmark process detection · hardware fingerprinting · cross-run variance inflation
+## API reference
 
-**Output:**
-tree display (default) · table display · JSON/CSV/LLM/Markdown · streaming per-group · adaptive column layout · bar charts
+```rust
+use zenbench::prelude::*;
 
-**API:**
-`group()` with interleaving · `bench_fn()` shorthand · `with_input().run()` · `iter_deferred_drop()` · `bench_contended()` / `bench_parallel()` / `bench_scaling()` · `iter_async()` · criterion compat layer
+// Interleaved comparison group
+suite.group("name", |g| {
+    g.throughput(Throughput::Bytes(1024));
+    g.subgroup("variant");
+    g.bench("impl", |b| b.iter(|| work()));
+    g.bench("with_setup", |b| {
+        b.with_input(|| make_data()).run(|data| process(data))
+    });
+    g.bench("deferred_drop", |b| {
+        b.iter_deferred_drop(|| Vec::<u8>::with_capacity(1024))
+    });
+});
 
-**Platform:** Linux x64/ARM64 · Windows x64/ARM64 · macOS ARM64/Intel
+// Single function shorthand
+suite.bench_fn("fibonacci", || fib(20));
+
+// Thread contention
+g.bench_contended("mutex", 4, || Mutex::new(Map::new()), |b, m, tid| {
+    b.iter(|| { m.lock().unwrap().insert(tid, 42); })
+});
+
+// Automatic thread scaling (probes 1..num_cpus)
+g.bench_scaling("work", |b, _tid| b.iter(|| compute()));
+```
+
+## Configuration
+
+```rust
+group.config()
+    .max_rounds(200)              // default 200
+    .noise_threshold(0.02)        // ±2% significance gate
+    .bootstrap_resamples(100_000) // CI precision (default 10K)
+    .linear_sampling(true)        // slope regression for sub-100ns
+    .cold_start(true)             // 1 iter + cache firewall
+    .stack_jitter(true)           // random alignment (default on)
+    .sort_by_speed(true);         // fastest first in report
+```
+
+## Platform support
+
+Tested on all targets via GitHub Actions CI:
+
+| Platform | Timer | Notes |
+|---|---|---|
+| Linux x86_64 | TSC (rdtsc) | Full support |
+| Linux aarch64 | Counter (cntvct_el0) | Full support |
+| Windows x86_64 | TSC (rdtsc) | Full support |
+| Windows ARM64 | Instant (~300ns) | No hardware counter in user mode |
+| macOS ARM64 | Counter (cntvct_el0) | Full support |
+| macOS Intel | TSC (rdtsc) | Full support |
 
 ## License
 
