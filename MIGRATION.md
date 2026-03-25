@@ -241,6 +241,92 @@ zenbench::main!(|suite| {
 
 ---
 
+---
+
+## Migrating from divan
+
+Divan uses attribute macros. Zenbench uses function registration.
+
+### Side-by-side comparison
+
+```rust
+// DIVAN:
+use divan::{Bencher, black_box};
+
+fn main() { divan::main(); }
+
+#[divan::bench]
+fn fibonacci() -> u64 {
+    black_box(fib(20))
+}
+
+#[divan::bench(args = [100, 1000, 10000])]
+fn sort(bencher: Bencher, n: usize) {
+    bencher.with_inputs(|| (0..n).rev().collect::<Vec<u32>>())
+           .bench_values(|mut v| { v.sort(); v })
+}
+```
+
+```rust
+// ZENBENCH (function list form):
+fn bench_fib(suite: &mut zenbench::Suite) {
+    suite.compare("fibonacci", |group| {
+        group.bench("fib_20", |b| b.iter(|| zenbench::black_box(fib(20))));
+    });
+}
+
+fn bench_sort(suite: &mut zenbench::Suite) {
+    suite.compare("sort", |group| {
+        group.throughput(zenbench::Throughput::Elements(10000));
+        for n in [100, 1000, 10000] {
+            group.bench(format!("sort_{n}"), move |b| {
+                b.with_input(|| (0..n).rev().collect::<Vec<u32>>())
+                    .run(|mut v| { v.sort(); v })
+            });
+        }
+    });
+}
+
+zenbench::main!(bench_fib, bench_sort);
+```
+
+### Key differences
+
+| | divan | zenbench |
+|---|---|---|
+| Registration | `#[divan::bench]` attribute | Function taking `&mut Suite` |
+| Entry point | `divan::main()` | `zenbench::main!(func1, func2)` |
+| Parameterization | `args = [...]` attribute | `for` loop in function body |
+| Input generation | `bencher.with_inputs(gen).bench_values(f)` | `b.with_input(gen).run(f)` |
+| Thread testing | `#[divan::bench(threads = [1,2,4])]` | `group.bench_parallel("name", 4, \|b, tid\| ...)` |
+| Alloc profiling | `#[global_allocator] AllocProfiler` | Same: `#[global_allocator] AllocProfiler` |
+| Output | Terminal only | Terminal + JSON/CSV/LLM/Markdown |
+| Statistics | min/max/median/mean | + Bootstrap CI, Wilcoxon, Cohen's d |
+| CI regression | Not built in | `--baseline`, `--save-baseline`, exit codes |
+| Interleaving | No | Yes (benchmarks in same group shuffled per round) |
+
+### What you gain
+
+- **Paired statistics**: Interleaved execution means A-vs-B comparisons
+  within a group are measured under identical system conditions.
+- **CI regression testing**: `--baseline=main --max-regression=5` blocks
+  PRs on performance regressions.
+- **Resource gating**: Waits for quiet system before measuring.
+- **Machine-readable output**: JSON, CSV, LLM formats for dashboards.
+- **Subgroups, baselines, throughput units**: Richer reporting.
+
+### What you lose
+
+- **Attribute macro ergonomics**: Divan's `#[divan::bench]` is the
+  shortest possible syntax. Zenbench requires explicit function bodies
+  with `suite.compare()` / `group.bench()`.
+- **Automatic type/const parameterization**: Divan's `types = [Vec, LinkedList]`
+  and `consts = [1, 2, 4]` have no direct equivalent — use `for` loops.
+- **Deferred drop by default**: Divan automatically defers drop via
+  `MaybeUninit`. Zenbench requires explicit `b.iter_deferred_drop()`.
+
+---
+
 ## FAQ
 
 **Q: Do I need to change my Cargo.toml `[[bench]]` sections?**

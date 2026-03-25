@@ -246,8 +246,51 @@ pub fn run_and_save<F: FnOnce(&mut Suite)>(f: F) -> SuiteResult {
 /// name = "my_bench"
 /// harness = false
 /// ```
+/// Macro for defining benchmark binaries.
+///
+/// Two forms:
+///
+/// **Function list** (composable, like criterion_group + criterion_main):
+/// ```rust,ignore
+/// fn bench_sort(suite: &mut zenbench::Suite) {
+///     suite.compare("sort", |group| {
+///         group.bench("std", |b| b.iter(|| data.sort()));
+///         group.bench("unstable", |b| b.iter(|| data.sort_unstable()));
+///     });
+/// }
+///
+/// fn bench_hash(suite: &mut zenbench::Suite) {
+///     suite.compare("hash", |group| { /* ... */ });
+/// }
+///
+/// zenbench::main!(bench_sort, bench_hash);
+/// ```
+///
+/// **Closure** (quick and simple):
+/// ```rust,ignore
+/// zenbench::main!(|suite| {
+///     suite.compare("sort", |group| { /* ... */ });
+/// });
+/// ```
 #[macro_export]
 macro_rules! main {
+    // Form 1: function list — composable, like criterion
+    ($($func:path),+ $(,)?) => {
+        fn main() {
+            let group_filter: Option<String> = std::env::args()
+                .find_map(|a| a.strip_prefix("--group=").map(String::from));
+
+            let result = $crate::run(|suite: &mut $crate::Suite| {
+                if let Some(ref filter) = group_filter {
+                    suite.set_group_filter(filter.clone());
+                }
+                $( $func(suite); )+
+            });
+
+            $crate::postprocess_result(&result);
+        }
+    };
+    // Form 2: closure — quick single-file benchmarks
     (|$suite:ident| $body:block) => {
         fn main() {
             let group_filter: Option<String> = std::env::args()
