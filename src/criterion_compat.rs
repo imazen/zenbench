@@ -319,7 +319,7 @@ macro_rules! criterion_group {
 macro_rules! criterion_main {
     ($($group:path),+ $(,)?) => {
         fn main() {
-            let mut suite = $crate::bench::Suite::new();
+            let mut suite = $crate::Suite::new();
 
             let group_filter: Option<String> = std::env::args()
                 .find_map(|a| a.strip_prefix("--group=").map(String::from));
