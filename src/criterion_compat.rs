@@ -6,12 +6,17 @@
 //! use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
 //! // After:
 //! use zenbench::criterion_compat::*;
+//! use zenbench::{criterion_group, criterion_main};
 //! ```
 //!
-//! Your `criterion_group!` / `criterion_main!` macros, `bench_function`,
-//! `bench_with_input`, `BenchmarkId`, `Throughput`, and `group.finish()`
-//! all work unchanged. Under the hood, you get zenbench's interleaved
-//! execution, paired statistics, and resource gating for free.
+//! The `criterion_group!` / `criterion_main!` macros are re-exported from
+//! the crate root (Rust macro scoping requires this). Types like `Criterion`,
+//! `BenchmarkId`, `Throughput`, `Bencher`, and `BatchSize` come from `*`.
+//!
+//! **Note:** Closures passed to `bench_function` must be `'static` (use `move`).
+//! If multiple closures capture the same data, clone before each `move` closure.
+//! This is because zenbench stores closures for interleaved execution; criterion
+//! runs them immediately.
 
 use crate::bench::{Bencher as ZenBencher, Suite};
 
