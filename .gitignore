@@ -46,3 +46,4 @@ Thumbs.db
 .idea/
 .vscode/
 *.iml
+site/public/

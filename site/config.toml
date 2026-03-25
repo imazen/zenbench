@@ -1,13 +1,73 @@
+# zenbench Documentation
+# Built with Zola + Goyo theme
+
 base_url = "https://imazen.github.io/zenbench"
 title = "zenbench"
 description = "Interleaved microbenchmarking for Rust"
-compile_sass = false
-minify_html = true
+
+theme = "goyo"
+
+build_search_index = true
+default_language = "en"
 generate_feeds = false
+generate_sitemap = true
+compile_sass = true
+
+taxonomies = [
+    { name = "tags", feed = false },
+    { name = "categories", feed = false },
+]
 
 [markdown]
-highlight_code = true
-highlight_theme = "one-dark"
+bottom_footnotes = true
+
+[markdown.highlighting]
+theme = "ayu-dark"
+
+[search]
+include_title = true
+include_description = true
+include_path = true
+include_content = true
+truncate_content_length = 200
 
 [extra]
-repo_url = "https://github.com/imazen/zenbench"
+footer_html = "<span>Powered by <a href='https://www.getzola.org'>Zola</a> and <a href='https://github.com/hahwul/goyo'>Goyo</a></span>"
+default_thumbnail = ""
+gtag = ""
+
+nav = [
+    { name = "Tutorial", url = "/getting-started", type = "url", icon = "fa-solid fa-rocket" },
+    { name = "CI Regression", url = "/ci-regression", type = "url", icon = "fa-solid fa-shield" },
+    { name = "Migration", url = "/migration", type = "url", icon = "fa-solid fa-arrow-right" },
+    { name = "Methodology", url = "/methodology", type = "url", icon = "fa-solid fa-microscope" },
+    { name = "Examples", url = "/examples", type = "url", icon = "fa-solid fa-chart-bar" },
+    { name = "Links", type = "dropdown", icon = "fa-solid fa-link", members = [
+        { name = "GitHub", url = "https://github.com/imazen/zenbench", type = "url", icon = "fa-brands fa-github" },
+        { name = "docs.rs", url = "https://docs.rs/zenbench", type = "url", icon = "fa-solid fa-book" },
+        { name = "crates.io", url = "https://crates.io/crates/zenbench", type = "url", icon = "fa-solid fa-cube" },
+        { name = "HTML Report", url = "/example-report.html", type = "url", icon = "fa-solid fa-file-lines" },
+    ] },
+]
+
+edit_url = "https://github.com/imazen/zenbench/edit/main/site"
+issue_url = "https://github.com/imazen/zenbench/issues"
+
+[extra.logo]
+text = "zenbench"
+
+[extra.theme]
+colorset = "dark"
+brightness = "normal"
+disable_toggle = false
+default_theme_dark = "goyo-dark"
+default_theme_light = "goyo-light"
+
+[extra.sidebar]
+expand_depth = 2
+disable_root_hide = false
+enable_desktop_menu = true
+
+[extra.share]
+copy_url = true
+x = false
