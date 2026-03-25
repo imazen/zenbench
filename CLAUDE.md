@@ -128,3 +128,6 @@ Don't mix bench_parallel/bench_contended with rayon — competing thread pools.
 - Report code is in `report.rs` (~891 lines) — the main complexity center
 - Three-pass row construction in report.rs: collect raw data → compute column widths → format with alignment
 - Formatting precision: per-value dp based on magnitude, column-wide alignment via max-width padding
+
+### Known migration friction
+- criterion_compat requires `'static` closures (criterion doesn't). Users must add `move` and `.clone()` captured data. This is because zenbench stores closures for interleaved execution; criterion runs them immediately. Fixing properly requires lifetime-parameterized BenchFn or scoped thread approach. Filed as tech debt.
