@@ -46,9 +46,9 @@ fn bench_with_setup(suite: &mut Suite) {
     suite.group("sort", |g| {
         g.throughput(Throughput::Elements(10_000));
 
-        for &size in &[100, 1000, 10_000] {
+        for size in [100usize, 1000, 10_000] {
             g.bench(format!("sort_{size}"), move |b| {
-                b.with_input(|| (0..size).rev().collect::<Vec<u32>>())
+                b.with_input(move || (0..size as u32).rev().collect::<Vec<u32>>())
                     .run(|mut v| {
                         v.sort_unstable();
                         v
