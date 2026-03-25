@@ -241,6 +241,58 @@ impl ResourceGate {
         }
     }
 
+    /// Non-blocking system check. Records whether the system is noisy
+    /// but never blocks. The statistical machinery handles noisy samples.
+    pub fn check_and_record(&mut self) {
+        if !self.config.enabled {
+            return;
+        }
+        let state = self.monitor.snapshot();
+        if self.check_state(&state).is_some() {
+            self.total_waits += 1;
+        }
+    }
+
+    /// Brief non-blocking gate check. Waits up to `max_wait` for conditions to
+    /// improve, then proceeds regardless. Shows a single status line during the
+    /// wait, clears it when done.
+    ///
+    /// This replaces the old blocking gate that could consume 89% of total
+    /// benchmark time on busy systems. The statistical machinery (IQR outlier
+    /// removal, bootstrap CI, MAD) handles noisy samples — the gate just gives
+    /// the system a brief chance to settle.
+    #[allow(dead_code)]
+    pub fn brief_wait(&mut self, max_wait: Duration) {
+        if !self.config.enabled {
+            return;
+        }
+
+        let start = Instant::now();
+        loop {
+            let state = self.monitor.snapshot();
+            if self.check_state(&state).is_none() {
+                crate::report::clear_status();
+                return; // system is quiet, proceed
+            }
+            if start.elapsed() >= max_wait {
+                crate::report::clear_status();
+                self.total_waits += 1;
+                self.total_wait_time += start.elapsed();
+                return; // time's up, measure anyway
+            }
+            if self.total_waits == 0 {
+                // Show status only on first wait of this group
+                if let Some(reason) = self.check_state(&state) {
+                    crate::report::status(&format!(
+                        "[zenbench] system busy ({reason}), waiting up to {:.0}s...",
+                        max_wait.as_secs_f64(),
+                    ));
+                }
+            }
+            std::thread::sleep(self.config.poll_interval);
+        }
+    }
+
     /// Whether the benchmark results should be considered unreliable due to
     /// excessive waiting (indicates a noisy system).
     #[allow(dead_code)] // May be used by bin targets

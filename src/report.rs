@@ -108,7 +108,7 @@ pub fn print_header(run_id: &crate::results::RunId, git_hash: Option<&str>, ci: 
 pub fn print_footer(
     total_time: std::time::Duration,
     gate_waits: usize,
-    gate_wait_time: std::time::Duration,
+    _gate_wait_time: std::time::Duration,
     unreliable: bool,
 ) {
     let c = should_color(&std::io::stderr());
@@ -116,25 +116,15 @@ pub fn print_footer(
     let BOLD = pick("\x1b[1m", c);
     let DIM = pick("\x1b[2m", c);
     let RED = pick("\x1b[31m", c);
-    let YELLOW = pick("\x1b[33m", c);
+    let _YELLOW = pick("\x1b[33m", c);
     let BOLD_WHITE = pick("\x1b[1;37m", c);
     eprintln!();
-    eprintln!(
-        "  {DIM}total: {:.1}s  gate waits: {} ({:.1}s){RESET}",
-        total_time.as_secs_f64(), gate_waits, gate_wait_time.as_secs_f64(),
-    );
-    let gate_pct = if total_time.as_secs_f64() > 0.0 {
-        gate_wait_time.as_secs_f64() / total_time.as_secs_f64() * 100.0
-    } else {
-        0.0
-    };
-    if gate_pct > 50.0 {
-        eprintln!(
-            "  {YELLOW}\u{26a0} {gate_pct:.0}% of time spent waiting for quiet system \
-             \u{2014} results may be unreliable. \
-             Try: GateConfig::disabled() or a quieter machine.{RESET}",
-        );
+    let mut footer = format!("  {DIM}total: {:.1}s", total_time.as_secs_f64());
+    if gate_waits > 0 {
+        footer.push_str(&format!("  ({gate_waits} noisy rounds)"));
     }
+    footer.push_str(RESET);
+    eprintln!("{footer}");
     if unreliable {
         eprintln!("  {RED}{BOLD}\u{26a0} UNRELIABLE: too many resource gate waits{RESET}");
     }

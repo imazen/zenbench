@@ -381,21 +381,19 @@ fn run_comparison_group(
             break;
         }
 
-        // Resource gate: use max_wall_time as the budget, not max_time.
-        // max_time is the measurement budget (short for fast benchmarks);
-        // max_wall_time is the user's patience limit (default 120s).
-        // Previously used max_time × 3 which starved fast benchmarks
-        // on noisy systems — they'd exhaust the 30s gate budget in 5 rounds.
-        // Fixes: https://github.com/imazen/zenbench/issues/3
+        // Wall-clock limit
         let wall_remaining = config
             .max_wall_time
             .saturating_sub(group_start.elapsed());
         if round >= config.min_rounds && wall_remaining.is_zero() {
             break;
         }
-        gate.wait_for_clear_with_deadline(Some(
-            wall_remaining.max(std::time::Duration::from_secs(1)),
-        ));
+
+        // Resource gate: check-and-proceed. Never blocks.
+        // If system is noisy, we measure anyway — IQR outlier removal
+        // and MAD handle contaminated samples. The gate just records
+        // how many rounds were noisy for the footer warning.
+        gate.check_and_record();
 
         // Randomize benchmark order for this round
         let order = random_permutation(n_benchmarks, &mut rng);

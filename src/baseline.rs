@@ -17,7 +17,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Directory for baseline storage, relative to project root.
-const BASELINE_DIR: &str = ".zenbench/baselines";
+/// Uses PathBuf::join for cross-platform path separators.
+fn baseline_dir() -> PathBuf {
+    PathBuf::from(".zenbench").join("baselines")
+}
 
 /// Result of comparing a benchmark run against a saved baseline.
 #[derive(Debug)]
@@ -57,7 +60,7 @@ pub struct BenchmarkDelta {
 
 /// Save a `SuiteResult` as a named baseline.
 pub fn save_baseline(result: &SuiteResult, name: &str) -> std::io::Result<PathBuf> {
-    let dir = PathBuf::from(BASELINE_DIR);
+    let dir = baseline_dir();
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(format!("{name}.json"));
     result.save(&path)?;
@@ -66,7 +69,7 @@ pub fn save_baseline(result: &SuiteResult, name: &str) -> std::io::Result<PathBu
 
 /// Load a named baseline.
 pub fn load_baseline(name: &str) -> Result<SuiteResult, String> {
-    let path = PathBuf::from(BASELINE_DIR).join(format!("{name}.json"));
+    let path = baseline_dir().join(format!("{name}.json"));
     if !path.exists() {
         return Err(format!(
             "baseline '{}' not found at {}",
@@ -79,7 +82,7 @@ pub fn load_baseline(name: &str) -> Result<SuiteResult, String> {
 
 /// List all saved baselines.
 pub fn list_baselines() -> Vec<String> {
-    let dir = PathBuf::from(BASELINE_DIR);
+    let dir = baseline_dir();
     let mut names = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for entry in entries.flatten() {
@@ -100,7 +103,7 @@ pub fn list_baselines() -> Vec<String> {
 
 /// Delete baselines older than `max_age_secs`. Returns number deleted.
 pub fn prune_baselines(max_age_secs: u64) -> std::io::Result<usize> {
-    let dir = PathBuf::from(BASELINE_DIR);
+    let dir = baseline_dir();
     let mut deleted = 0;
     let now = std::time::SystemTime::now();
     let entries = std::fs::read_dir(&dir).into_iter().flatten().flatten();
@@ -121,7 +124,7 @@ pub fn prune_baselines(max_age_secs: u64) -> std::io::Result<usize> {
 
 /// Delete a named baseline.
 pub fn delete_baseline(name: &str) -> std::io::Result<()> {
-    let path = PathBuf::from(BASELINE_DIR).join(format!("{name}.json"));
+    let path = baseline_dir().join(format!("{name}.json"));
     std::fs::remove_file(path)
 }
 
@@ -425,7 +428,7 @@ mod tests {
     #[test]
     fn save_and_load_roundtrip() {
         let result = make_result(&[("g", "bench_a", 42.0)]);
-        let _ = std::fs::create_dir_all(BASELINE_DIR);
+        let _ = std::fs::create_dir_all(&baseline_dir());
         let path = save_baseline(&result, "test_roundtrip").unwrap();
         let loaded = load_baseline("test_roundtrip").unwrap();
         assert_eq!(loaded.comparisons[0].benchmarks[0].summary.mean, 42.0);
@@ -434,7 +437,7 @@ mod tests {
 
     #[test]
     fn list_baselines_works() {
-        let _ = std::fs::create_dir_all(BASELINE_DIR);
+        let _ = std::fs::create_dir_all(&baseline_dir());
         // Just verify it doesn't panic
         let _ = list_baselines();
     }
