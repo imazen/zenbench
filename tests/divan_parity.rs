@@ -73,10 +73,7 @@ fn parse_divan_output(output: &str) -> HashMap<String, f64> {
         let first = parts[0].trim();
 
         // Strip tree drawing characters (├─, ╰─, │, spaces)
-        let stripped = first
-            .trim_start_matches(|c: char| {
-                !c.is_alphanumeric() && c != '.'
-            });
+        let stripped = first.trim_start_matches(|c: char| !c.is_alphanumeric() && c != '.');
 
         // Split into name and fastest value
         // Name is the first word(s) before the time value
@@ -221,9 +218,7 @@ fn parity_zenbench_vs_divan() {
             (Some(&z), Some(&d)) => {
                 let ratio = if z > d { z / d } else { d / z };
                 let status = if ratio <= tolerance { "OK" } else { "MISMATCH" };
-                eprintln!(
-                    "  {zen_name}: zen={z:.1}ns divan={d:.1}ns ratio={ratio:.2}x [{status}]"
-                );
+                eprintln!("  {zen_name}: zen={z:.1}ns divan={d:.1}ns ratio={ratio:.2}x [{status}]");
                 if ratio <= tolerance {
                     matched += 1;
                 } else {
@@ -322,16 +317,25 @@ fn parity_three_way() {
     let divan = run_bench(&["bench", "--bench", "divan_compare_ref"]);
     let crit = run_bench(&["bench", "--bench", "criterion_compare_ref"]);
 
-    let zen_results = zen.as_ref().map(|(stdout, _)| parse_zenbench_llm(stdout)).unwrap_or_default();
-    let divan_results = divan.as_ref().map(|(stdout, _)| parse_divan_output(stdout)).unwrap_or_default();
-    let crit_results = crit.as_ref().map(|(stdout, stderr)| {
-        // criterion outputs to stdout
-        let mut r = parse_criterion_output(stdout);
-        if r.is_empty() {
-            r = parse_criterion_output(stderr);
-        }
-        r
-    }).unwrap_or_default();
+    let zen_results = zen
+        .as_ref()
+        .map(|(stdout, _)| parse_zenbench_llm(stdout))
+        .unwrap_or_default();
+    let divan_results = divan
+        .as_ref()
+        .map(|(stdout, _)| parse_divan_output(stdout))
+        .unwrap_or_default();
+    let crit_results = crit
+        .as_ref()
+        .map(|(stdout, stderr)| {
+            // criterion outputs to stdout
+            let mut r = parse_criterion_output(stdout);
+            if r.is_empty() {
+                r = parse_criterion_output(stderr);
+            }
+            r
+        })
+        .unwrap_or_default();
 
     if zen_results.is_empty() {
         eprintln!("SKIPPING: no zenbench results");
@@ -348,8 +352,10 @@ fn parity_three_way() {
         ("insert_100", "hashmap_insert_100", "hashmap_insert_100"),
     ];
 
-    eprintln!("  {:<16} {:>13}  {:>13}  {:>13}  {:>8}  {:>8}  {:>8}",
-        "workload", "zenbench", "divan", "criterion", "z/d", "z/c", "d/c");
+    eprintln!(
+        "  {:<16} {:>13}  {:>13}  {:>13}  {:>8}  {:>8}  {:>8}",
+        "workload", "zenbench", "divan", "criterion", "z/d", "z/c", "d/c"
+    );
     eprintln!("  {}", "-".repeat(100));
 
     let mut all_ok = true;
@@ -372,26 +378,39 @@ fn parity_three_way() {
             }
         };
 
-        eprintln!("  {:<16} {:>13}  {:>13}  {:>13}  {:>8}  {:>8}  {:>8}",
+        eprintln!(
+            "  {:<16} {:>13}  {:>13}  {:>13}  {:>8}  {:>8}  {:>8}",
             zen_name,
-            fmt(z), fmt(d), fmt(c),
-            ratio(z, d), ratio(z, c), ratio(d, c));
+            fmt(z),
+            fmt(d),
+            fmt(c),
+            ratio(z, d),
+            ratio(z, c),
+            ratio(d, c)
+        );
 
         // Check pairwise within 3x
         let tolerance = 3.0;
         if let (Some(&zv), Some(&dv)) = (z, d) {
             let r = if zv > dv { zv / dv } else { dv / zv };
-            if r > tolerance { all_ok = false; }
+            if r > tolerance {
+                all_ok = false;
+            }
         }
         if let (Some(&zv), Some(&cv)) = (z, c) {
             let r = if zv > cv { zv / cv } else { cv / zv };
-            if r > tolerance { all_ok = false; }
+            if r > tolerance {
+                all_ok = false;
+            }
         }
     }
 
     eprintln!();
     if !divan_results.is_empty() && !crit_results.is_empty() {
-        eprintln!("  All pairwise within 3x: {}", if all_ok { "YES" } else { "NO" });
+        eprintln!(
+            "  All pairwise within 3x: {}",
+            if all_ok { "YES" } else { "NO" }
+        );
     }
 }
 

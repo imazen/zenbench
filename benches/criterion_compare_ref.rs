@@ -6,7 +6,7 @@
 //!   `cargo bench --bench divan_compare`        (zenbench)
 //!   `cargo bench --bench divan_compare_ref`    (divan)
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use std::collections::HashMap;
 
 #[inline(never)]

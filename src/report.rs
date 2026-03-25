@@ -617,7 +617,11 @@ fn print_report_body(result: &SuiteResult) {
                 let (_, unit) = tp.compute(ref_mean, tp_unit);
                 // Strip SI prefix: "Gchecks/s" → "checks/s", "MiB/s" → "iB/s"
                 let base = unit.trim_start_matches(['G', 'M', 'K', 'T']);
-                if base.is_empty() { unit } else { base.to_string() }
+                if base.is_empty() {
+                    unit
+                } else {
+                    base.to_string()
+                }
             })
             .unwrap_or_default();
         let tp_w = if has_throughput {
@@ -754,15 +758,9 @@ fn print_report_body(result: &SuiteResult) {
             );
 
             if show_min {
-                line.push_str(&format!(
-                    " {DIM}\u{2502}{RESET} {:>min_w$}",
-                    row.min_col,
-                ));
+                line.push_str(&format!(" {DIM}\u{2502}{RESET} {:>min_w$}", row.min_col,));
             }
-            line.push_str(&format!(
-                " {DIM}\u{2502}{RESET} {:>mean_w$}",
-                row.mean_col,
-            ));
+            line.push_str(&format!(" {DIM}\u{2502}{RESET} {:>mean_w$}", row.mean_col,));
             if show_sigma {
                 line.push_str(&format!(
                     " {DIM}\u{2502}{RESET} {DIM}{:>sigma_w$}{RESET}",
@@ -1030,9 +1028,18 @@ fn print_report_body(result: &SuiteResult) {
 /// Print a complete report (header + all groups + standalones + footer).
 /// Used by SuiteResult::print_report() for batch mode.
 pub fn print_report(result: &SuiteResult) {
-    print_header(&result.run_id, result.git_hash.as_deref(), result.ci_environment.as_deref());
+    print_header(
+        &result.run_id,
+        result.git_hash.as_deref(),
+        result.ci_environment.as_deref(),
+    );
     print_report_body(result);
-    print_footer(result.total_time, result.gate_waits, result.gate_wait_time, result.unreliable);
+    print_footer(
+        result.total_time,
+        result.gate_waits,
+        result.gate_wait_time,
+        result.unreliable,
+    );
 }
 
 /// Print a group in tree style (compact, divan-like).
@@ -1132,7 +1139,10 @@ fn print_group_tree(comp: &ComparisonResult, _timer_res: u64) {
         meta.push_str(&format!(" × {iters_str} calls"));
     }
     if comp.completed_rounds < 10 {
-        meta.push_str(&format!(" {YELLOW}⚠ only {} rounds{RESET}", comp.completed_rounds));
+        meta.push_str(&format!(
+            " {YELLOW}⚠ only {} rounds{RESET}",
+            comp.completed_rounds
+        ));
     }
 
     let mut rows: Vec<TreeRow> = Vec::new();
@@ -1256,7 +1266,11 @@ fn print_group_tree(comp: &ComparisonResult, _timer_res: u64) {
                     .mean;
                 let (_, unit) = tp.compute(ref_mean, tp_unit);
                 let base = unit.trim_start_matches(['G', 'M', 'K', 'T']);
-                if base.is_empty() { unit } else { base.to_string() }
+                if base.is_empty() {
+                    unit
+                } else {
+                    base.to_string()
+                }
             })
             .unwrap_or_default()
     } else {
@@ -1271,10 +1285,7 @@ fn print_group_tree(comp: &ComparisonResult, _timer_res: u64) {
 
     // Print group header
     eprintln!();
-    eprintln!(
-        "  {BOLD}{}{RESET}  {DIM}{meta}{RESET}",
-        comp.group_name,
-    );
+    eprintln!("  {BOLD}{}{RESET}  {DIM}{meta}{RESET}", comp.group_name,);
     let mean_header = format!("mean ±mad {mean_unit}");
     let tp_hdr = if has_throughput {
         format!("  {:>tp_w$}", tp_header)
@@ -1283,7 +1294,9 @@ fn print_group_tree(comp: &ComparisonResult, _timer_res: u64) {
     };
     eprintln!(
         "  {:left_col_w$}  {:>mean_w$}  {:<ci_w$}{tp_hdr}",
-        "", mean_header, "95% CI vs base",
+        "",
+        mean_header,
+        "95% CI vs base",
         mean_w = mean_val_w + mean_unit.len(),
     );
 
@@ -1305,7 +1318,9 @@ fn print_group_tree(comp: &ComparisonResult, _timer_res: u64) {
             if let Some(sg) = new_subgroup {
                 let is_last_subgroup = {
                     // Check if any later row has a different subgroup
-                    !rows[idx + 1..].iter().any(|r| r.subgroup.as_deref() != new_subgroup)
+                    !rows[idx + 1..]
+                        .iter()
+                        .any(|r| r.subgroup.as_deref() != new_subgroup)
                 };
                 let branch = if is_last_subgroup { "╰─" } else { "├─" };
                 eprintln!("  {DIM}{branch} {sg}{RESET}");
@@ -1318,8 +1333,13 @@ fn print_group_tree(comp: &ComparisonResult, _timer_res: u64) {
                 .iter()
                 .skip(1)
                 .any(|r| r.subgroup == row.subgroup);
-            let is_last_subgroup_in_group = !rows[idx + 1..].iter().any(|r| r.subgroup != row.subgroup);
-            let vert = if is_last_subgroup_in_group { "   " } else { "│  " };
+            let is_last_subgroup_in_group =
+                !rows[idx + 1..].iter().any(|r| r.subgroup != row.subgroup);
+            let vert = if is_last_subgroup_in_group {
+                "   "
+            } else {
+                "│  "
+            };
             if parent_last || is_last_in_group {
                 (vert, "╰─")
             } else {
@@ -1405,8 +1425,7 @@ fn print_group_tree(comp: &ComparisonResult, _timer_res: u64) {
             eprintln!();
             for (idx, &bench_i) in bar_indices.iter().enumerate() {
                 let bench = &comp.benchmarks[bench_i];
-                let is_fastest =
-                    (bench.summary.mean - fastest_mean).abs() < f64::EPSILON;
+                let is_fastest = (bench.summary.mean - fastest_mean).abs() < f64::EPSILON;
 
                 let display_name = if bench.name.len() > name_w {
                     format!("{}…", &bench.name[..name_w - 1])

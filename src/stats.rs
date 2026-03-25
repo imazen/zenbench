@@ -917,8 +917,14 @@ mod tests {
         let xs: Vec<f64> = (1..=20).map(|x| x as f64).collect();
         let ys: Vec<f64> = xs.iter().map(|&x| 10.0 * x).collect();
         let (slope, r2) = slope_estimate(&xs, &ys).unwrap();
-        assert!((slope - 10.0).abs() < 0.001, "slope should be ~10, got {slope}");
-        assert!((r2 - 1.0).abs() < 0.001, "R² should be ~1.0 for perfect fit, got {r2}");
+        assert!(
+            (slope - 10.0).abs() < 0.001,
+            "slope should be ~10, got {slope}"
+        );
+        assert!(
+            (r2 - 1.0).abs() < 0.001,
+            "R² should be ~1.0 for perfect fit, got {r2}"
+        );
     }
 
     #[test]
@@ -959,7 +965,10 @@ mod tests {
             .collect();
         let (lo, mid, hi) = slope_ci(&xs, &ys, 5000).unwrap();
         assert!(lo <= mid && mid <= hi, "CI ordering: {lo} <= {mid} <= {hi}");
-        assert!(lo < 7.5 && hi > 7.5, "CI [{lo}, {hi}] should contain true slope 7.5");
+        assert!(
+            lo < 7.5 && hi > 7.5,
+            "CI [{lo}, {hi}] should contain true slope 7.5"
+        );
     }
 
     // ── Wilcoxon edge cases ─────────────────────────────────────────
@@ -969,7 +978,10 @@ mod tests {
         // n < 10 should return p = 1.0
         let diffs = vec![1.0, 2.0, 3.0];
         let p = wilcoxon_signed_rank(&diffs);
-        assert!((p - 1.0).abs() < f64::EPSILON, "p should be 1.0 for n<10, got {p}");
+        assert!(
+            (p - 1.0).abs() < f64::EPSILON,
+            "p should be 1.0 for n<10, got {p}"
+        );
     }
 
     #[test]
@@ -977,6 +989,9 @@ mod tests {
         // Perfectly decreasing: should give r ≈ -1
         let values: Vec<f64> = (0..20).rev().map(|x| x as f64).collect();
         let r = spearman_correlation(&values);
-        assert!(r < -0.9, "inverse correlation should give r < -0.9, got {r}");
+        assert!(
+            r < -0.9,
+            "inverse correlation should give r < -0.9, got {r}"
+        );
     }
 }

@@ -1039,8 +1039,7 @@ impl<I, S: FnMut() -> I> InputBencher<'_, I, S> {
                 let output = std::hint::black_box(f(input));
                 let end = crate::timing::tsc_end();
                 crate::timing::compiler_fence();
-                let ns =
-                    crate::timing::ticks_to_ns(end.wrapping_sub(start), ticks_per_ns);
+                let ns = crate::timing::ticks_to_ns(end.wrapping_sub(start), ticks_per_ns);
                 drop(output);
                 ns
             } else {

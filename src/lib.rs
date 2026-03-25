@@ -16,8 +16,10 @@
 //! Interleaved microbenchmarking with resource gating, paired statistics,
 //! and fire-and-forget subprocess mode.
 
-mod bench;
+#[cfg(feature = "alloc-profiling")]
+mod alloc;
 pub mod baseline;
+mod bench;
 pub mod calibration;
 mod checks;
 mod ci;
@@ -34,8 +36,6 @@ mod results;
 mod stats;
 #[cfg(feature = "precise-timing")]
 mod timing;
-#[cfg(feature = "alloc-profiling")]
-mod alloc;
 
 pub use bench::{BenchGroup, Bencher, GroupConfig, Suite, Throughput};
 
@@ -58,7 +58,10 @@ pub fn postprocess_result(result: &SuiteResult) {
         .find_map(|a| a.strip_prefix("--baseline=").map(String::from));
     let max_regression: f64 = args
         .iter()
-        .find_map(|a| a.strip_prefix("--max-regression=").and_then(|v| v.parse().ok()))
+        .find_map(|a| {
+            a.strip_prefix("--max-regression=")
+                .and_then(|v| v.parse().ok())
+        })
         .unwrap_or(5.0);
     let update_on_pass = args.iter().any(|a| a == "--update-on-pass");
 
@@ -90,8 +93,7 @@ pub fn postprocess_result(result: &SuiteResult) {
     if let Some(ref name) = baseline_name {
         match baseline::load_baseline(name) {
             Ok(saved) => {
-                let comparison =
-                    baseline::compare_against_baseline(&saved, result, max_regression);
+                let comparison = baseline::compare_against_baseline(&saved, result, max_regression);
                 baseline::print_comparison_report(&comparison);
 
                 if comparison.regressions > 0 {
@@ -142,8 +144,8 @@ pub fn engine_new(suite: Suite) -> engine::Engine {
 }
 pub use format::format_ns;
 pub use gate::GateConfig;
-pub use results::{BenchmarkResult, ComparisonResult, RunId, SuiteResult};
 pub use platform::Testbed;
+pub use results::{BenchmarkResult, ComparisonResult, RunId, SuiteResult};
 pub use stats::{MeanCi, PairedAnalysis, Summary};
 
 /// Re-export `black_box` from std for convenience.

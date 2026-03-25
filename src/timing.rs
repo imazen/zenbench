@@ -280,9 +280,7 @@ impl TscTimer {
         let freq = calibrate_tsc_frequency();
         // Sane range: 0.001 (1 MHz) to 10.0 (10 GHz)
         if freq > 0.001 && freq < 10.0 {
-            Some(Self {
-                ticks_per_ns: freq,
-            })
+            Some(Self { ticks_per_ns: freq })
         } else {
             None
         }

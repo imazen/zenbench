@@ -49,7 +49,10 @@ fn bench_with_setup(suite: &mut Suite) {
         for &size in &[100, 1000, 10_000] {
             g.bench(format!("sort_{size}"), move |b| {
                 b.with_input(|| (0..size).rev().collect::<Vec<u32>>())
-                    .run(|mut v| { v.sort_unstable(); v })
+                    .run(|mut v| {
+                        v.sort_unstable();
+                        v
+                    })
             });
         }
     });

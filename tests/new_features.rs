@@ -109,8 +109,14 @@ fn iter_deferred_drop_runs() {
     assert_eq!(comp.benchmarks.len(), 2);
     let deferred_mean = comp.benchmarks[0].summary.mean;
     let regular_mean = comp.benchmarks[1].summary.mean;
-    assert!(deferred_mean > 0.0, "deferred_drop should produce positive times");
-    assert!(regular_mean > 0.0, "regular iter should produce positive times");
+    assert!(
+        deferred_mean > 0.0,
+        "deferred_drop should produce positive times"
+    );
+    assert!(
+        regular_mean > 0.0,
+        "regular iter should produce positive times"
+    );
 
     // Deferred drop should be faster or similar — the Vec::drop deallocation
     // is excluded from timing in deferred mode but included in regular mode.
@@ -140,9 +146,7 @@ fn iter_deferred_drop_actually_drops() {
     let result = run_gated(disabled_gate(), |suite| {
         suite.compare("drop_check", |group| {
             group.config().max_rounds(5).auto_rounds(false);
-            group.bench("counted", |b| {
-                b.iter_deferred_drop(|| DropCounter)
-            });
+            group.bench("counted", |b| b.iter_deferred_drop(|| DropCounter));
         });
     });
     let comp = &result.comparisons[0];
@@ -151,10 +155,7 @@ fn iter_deferred_drop_actually_drops() {
 
     // Every iteration should have produced one DropCounter that was dropped.
     // Allow some tolerance for jitter (±20% iteration count per round).
-    assert!(
-        drops > 0,
-        "should have dropped some DropCounters, got 0"
-    );
+    assert!(drops > 0, "should have dropped some DropCounters, got 0");
     // Approximate: n rounds × iterations_per_sample (with jitter)
     // The actual count may be higher due to warmup iterations.
     assert!(
@@ -184,9 +185,7 @@ fn iter_deferred_drop_excludes_drop_from_timing() {
                 b.iter_deferred_drop(|| ExpensiveDrop(vec![0u8; 4096]))
             });
             // Regular: drop happens during timing
-            group.bench("regular", |b| {
-                b.iter(|| ExpensiveDrop(vec![0u8; 4096]))
-            });
+            group.bench("regular", |b| b.iter(|| ExpensiveDrop(vec![0u8; 4096])));
         });
     });
     let deferred_mean = result.comparisons[0].benchmarks[0].summary.mean;
@@ -301,12 +300,12 @@ mod alloc_profiling {
 
         // Test the stats computation directly
         let stats = AllocStats::from_totals(
-            200,  // allocs
-            200,  // deallocs
-            10,   // reallocs
+            200,   // allocs
+            200,   // deallocs
+            10,    // reallocs
             16000, // bytes alloc
             16000, // bytes dealloc
-            100,  // iterations
+            100,   // iterations
         );
         assert!((stats.allocs_per_iter - 2.0).abs() < f64::EPSILON);
         assert!((stats.deallocs_per_iter - 2.0).abs() < f64::EPSILON);
@@ -667,9 +666,18 @@ fn per_benchmark_ci_in_json() {
         });
     });
     let json = serde_json::to_string(&result).unwrap();
-    assert!(json.contains("mean_ci"), "JSON should contain mean_ci field");
-    assert!(json.contains("\"lower\""), "JSON should contain lower bound");
-    assert!(json.contains("\"upper\""), "JSON should contain upper bound");
+    assert!(
+        json.contains("mean_ci"),
+        "JSON should contain mean_ci field"
+    );
+    assert!(
+        json.contains("\"lower\""),
+        "JSON should contain lower bound"
+    );
+    assert!(
+        json.contains("\"upper\""),
+        "JSON should contain upper bound"
+    );
 }
 
 #[test]
@@ -749,8 +757,8 @@ fn baseline_save_load_compare() {
     assert!(path.exists(), "baseline file should exist");
 
     // Load it back
-    let loaded = zenbench::baseline::load_baseline("test_integration")
-        .expect("should load baseline");
+    let loaded =
+        zenbench::baseline::load_baseline("test_integration").expect("should load baseline");
     assert_eq!(loaded.comparisons[0].group_name, "base_test");
 
     // Run again (same workload — should be similar)
@@ -949,8 +957,14 @@ fn testbed_is_populated_in_results() {
             group.bench("a", |b| b.iter(|| black_box(1u64)));
         });
     });
-    let testbed = result.testbed.as_ref().expect("testbed should be populated");
-    assert!(!testbed.cpu_model.is_empty(), "cpu_model should not be empty");
+    let testbed = result
+        .testbed
+        .as_ref()
+        .expect("testbed should be populated");
+    assert!(
+        !testbed.cpu_model.is_empty(),
+        "cpu_model should not be empty"
+    );
     assert!(!testbed.arch.is_empty(), "arch should not be empty");
     assert!(!testbed.os.is_empty(), "os should not be empty");
     assert!(testbed.logical_cores > 0, "logical_cores should be > 0");
@@ -1011,7 +1025,10 @@ fn baseline_comparison_warns_on_testbed_mismatch() {
 
     let comparison = zenbench::baseline::compare_against_baseline(&result1, &result2, 50.0);
     assert!(
-        comparison.warnings.iter().any(|w| w.contains("CPU changed")),
+        comparison
+            .warnings
+            .iter()
+            .any(|w| w.contains("CPU changed")),
         "should warn about CPU change: {:?}",
         comparison.warnings,
     );

@@ -367,11 +367,14 @@ mod tests {
         let mut groups: HashMap<String, Vec<BenchmarkResult>> = HashMap::new();
 
         for &(group, name, mean) in benchmarks {
-            groups.entry(group.to_string()).or_default().push(BenchmarkResult {
-                name: name.to_string(),
-                summary: Summary::from_slice(&[mean]),
-                ..Default::default()
-            });
+            groups
+                .entry(group.to_string())
+                .or_default()
+                .push(BenchmarkResult {
+                    name: name.to_string(),
+                    summary: Summary::from_slice(&[mean]),
+                    ..Default::default()
+                });
         }
 
         for (group_name, benches) in groups {

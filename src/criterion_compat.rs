@@ -306,12 +306,13 @@ impl<'a> BenchmarkGroup<'a> {
         let summary = crate::stats::Summary::from_slice(&samples);
         let mean_ci = crate::stats::MeanCi::from_samples(&samples, config.bootstrap_resamples);
 
-        self.immediate_results.push(crate::results::BenchmarkResult {
-            name,
-            summary,
-            mean_ci,
-            ..Default::default()
-        });
+        self.immediate_results
+            .push(crate::results::BenchmarkResult {
+                name,
+                summary,
+                mean_ci,
+                ..Default::default()
+            });
         self
     }
 

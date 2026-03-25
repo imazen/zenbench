@@ -252,9 +252,7 @@ impl ResourceGate {
         }
 
         // Benchmark process names to look for (case-insensitive substrings)
-        const BENCH_NAMES: &[&str] = &[
-            "criterion", "divan", "zenbench", "cargo-bench", "bench-",
-        ];
+        const BENCH_NAMES: &[&str] = &["criterion", "divan", "zenbench", "cargo-bench", "bench-"];
 
         let our_pid = sysinfo::get_current_pid().ok();
         let start = Instant::now();
@@ -272,13 +270,11 @@ impl ResourceGate {
                 .values()
                 .filter(|p| {
                     // Skip ourselves
-                    if let Some(our) = our_pid && p.pid() == our {
+                    if let Some(our) = our_pid
+                        && p.pid() == our
+                    {
                         return false;
                     }
-
-
-
-
 
                     let name = p.name().to_string_lossy().to_lowercase();
                     let cmd: String = p
@@ -287,7 +283,9 @@ impl ResourceGate {
                         .map(|s| s.to_string_lossy().to_lowercase())
                         .collect::<Vec<_>>()
                         .join(" ");
-                    BENCH_NAMES.iter().any(|&pat| name.contains(pat) || cmd.contains(pat))
+                    BENCH_NAMES
+                        .iter()
+                        .any(|&pat| name.contains(pat) || cmd.contains(pat))
                 })
                 .count();
 

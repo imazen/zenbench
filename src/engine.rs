@@ -382,9 +382,7 @@ fn run_comparison_group(
         }
 
         // Wall-clock limit
-        let wall_remaining = config
-            .max_wall_time
-            .saturating_sub(group_start.elapsed());
+        let wall_remaining = config.max_wall_time.saturating_sub(group_start.elapsed());
         if round >= config.min_rounds && wall_remaining.is_zero() {
             break;
         }
@@ -412,9 +410,8 @@ fn run_comparison_group(
             (iterations_per_sample as f64 * factor).max(1.0) as usize
         } else {
             let jitter = (rng.next_u64() % 41) as i64 - 20; // -20..+20
-            ((iterations_per_sample as i64
-                + iterations_per_sample as i64 * jitter / 100)
-                .max(1)) as usize
+            ((iterations_per_sample as i64 + iterations_per_sample as i64 * jitter / 100).max(1))
+                as usize
         };
         iters_per_round.push(round_iters);
 
@@ -690,7 +687,9 @@ fn run_comparison_group(
         let alloc_stats = {
             let t = &alloc_totals[i];
             if crate::alloc::is_active() && t.5 > 0 {
-                Some(crate::alloc::AllocStats::from_totals(t.0, t.1, t.2, t.3, t.4, t.5))
+                Some(crate::alloc::AllocStats::from_totals(
+                    t.0, t.1, t.2, t.3, t.4, t.5,
+                ))
             } else {
                 None
             }
@@ -747,7 +746,8 @@ fn run_standalone(
 ) -> BenchmarkResult {
     gate.wait_for_clear();
 
-    let (iterations, _cold_start_ns) = estimate_iterations(&mut bench.func, config, timer_resolution_ns);
+    let (iterations, _cold_start_ns) =
+        estimate_iterations(&mut bench.func, config, timer_resolution_ns);
     let mut samples = Vec::with_capacity(config.max_rounds);
     let mut cpu_samples_vec = Vec::with_capacity(config.max_rounds);
 
@@ -886,7 +886,9 @@ fn estimate_iterations(
         if new_iters <= 2 * iters {
             // Converged
             return (
-                new_iters.max(1).clamp(config.min_iterations, config.max_iterations),
+                new_iters
+                    .max(1)
+                    .clamp(config.min_iterations, config.max_iterations),
                 cold_start_ns,
             );
         }
@@ -894,7 +896,9 @@ fn estimate_iterations(
     }
 
     (
-        iters.max(1).clamp(config.min_iterations, config.max_iterations),
+        iters
+            .max(1)
+            .clamp(config.min_iterations, config.max_iterations),
         cold_start_ns,
     )
 }

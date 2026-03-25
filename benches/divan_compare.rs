@@ -69,7 +69,11 @@ fn work_hashmap_100() -> HashMap<u64, u64> {
 zenbench::main!(|suite| {
     // Use fixed rounds for reproducible comparison
     suite.compare("noop", |group| {
-        group.config().max_rounds(100).auto_rounds(false).expect_sub_ns(true);
+        group
+            .config()
+            .max_rounds(100)
+            .auto_rounds(false)
+            .expect_sub_ns(true);
         group.bench("noop", |b| b.iter(work_noop));
     });
 
@@ -97,7 +101,8 @@ zenbench::main!(|suite| {
     // ~100 iterations per sample. Tests whether iteration count (cache
     // hotness) explains the measurement difference.
     suite.compare("hashmap_cold", |group| {
-        group.config()
+        group
+            .config()
             .max_rounds(100)
             .auto_rounds(false)
             .cold_start(true); // 1 iter/sample + cache firewall
