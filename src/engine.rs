@@ -188,15 +188,14 @@ impl Engine {
                     git_hash: git_hash.clone(),
                     ci_environment: ci.clone(),
                     comparisons: comparisons.clone(),
-                    standalones: Vec::new(),
                     total_time: start.elapsed(),
                     gate_waits: total_gate_waits,
                     gate_wait_time: total_gate_wait_time,
-                    unreliable: false,
                     timer_resolution_ns: timer_res,
                     loop_overhead_ns,
                     testbed: testbed.clone(),
                     calibration: calibration.clone(),
+                    ..Default::default()
                 };
                 let n_groups = comparisons.len();
                 let mut content =
@@ -223,7 +222,6 @@ impl Engine {
         }
 
         let total_time = start.elapsed();
-        let gate_unreliable = false; // Per-group gates, no global unreliable state
 
         let result = SuiteResult {
             run_id,
@@ -235,11 +233,11 @@ impl Engine {
             total_time,
             gate_waits: total_gate_waits,
             gate_wait_time: total_gate_wait_time,
-            unreliable: gate_unreliable,
             timer_resolution_ns: timer_res,
             loop_overhead_ns,
             testbed,
             calibration,
+            ..Default::default()
         };
 
         // Write final complete results

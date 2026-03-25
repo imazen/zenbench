@@ -367,14 +367,7 @@ mod tests {
             groups.entry(group.to_string()).or_default().push(BenchmarkResult {
                 name: name.to_string(),
                 summary: Summary::from_slice(&[mean]),
-                cpu_summary: None,
-                tags: vec![],
-                subgroup: None,
-                cold_start_ns: 0.0,
-                slope_ns: None,
-                mean_ci: None,
-                #[cfg(feature = "alloc-profiling")]
-                alloc_stats: None,
+                ..Default::default()
             });
         }
 
@@ -382,35 +375,19 @@ mod tests {
             comparisons.push(ComparisonResult {
                 group_name,
                 benchmarks: benches,
-                analyses: vec![],
                 completed_rounds: 100,
-                throughput: None,
-                cache_firewall: false,
-                cache_firewall_bytes: 0,
-                baseline_only: false,
-                throughput_unit: None,
-                sort_by_speed: false,
-                expect_sub_ns: false,
-                cold_start: false,
                 iterations_per_sample: 1000,
+                ..Default::default()
             });
         }
 
         SuiteResult {
             run_id: RunId("test".to_string()),
-            timestamp: "2026-03-24T00:00:00Z".to_string(),
-            git_hash: None,
-            ci_environment: None,
             comparisons,
-            standalones: vec![],
             total_time: std::time::Duration::from_secs(1),
-            gate_waits: 0,
-            gate_wait_time: std::time::Duration::ZERO,
-            unreliable: false,
             timer_resolution_ns: 10,
             loop_overhead_ns: 0.5,
-            testbed: None,
-            calibration: None,
+            ..Default::default()
         }
     }
 

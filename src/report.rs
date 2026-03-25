@@ -142,20 +142,9 @@ pub fn print_group(comp: &crate::results::ComparisonResult, _timer_res: u64) {
     // print_report's group rendering. This avoids duplicating the 650-line
     // table/bar/footnote logic.
     let wrapper = SuiteResult {
-        run_id: crate::results::RunId(String::new()),
-        timestamp: String::new(),
-        git_hash: None,
-        ci_environment: None,
         comparisons: vec![comp.clone()],
-        standalones: vec![],
-        total_time: std::time::Duration::ZERO,
-        gate_waits: 0,
-        gate_wait_time: std::time::Duration::ZERO,
-        unreliable: false,
         timer_resolution_ns: _timer_res,
-        loop_overhead_ns: 0.0,
-        testbed: None,
-        calibration: None,
+        ..Default::default()
     };
     print_report_body(&wrapper);
 }

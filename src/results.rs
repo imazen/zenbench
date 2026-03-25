@@ -65,6 +65,23 @@ pub struct BenchmarkResult {
     pub alloc_stats: Option<crate::alloc::AllocStats>,
 }
 
+impl Default for BenchmarkResult {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            summary: Summary::new(),
+            cpu_summary: None,
+            tags: Vec::new(),
+            subgroup: None,
+            cold_start_ns: 0.0,
+            mean_ci: None,
+            slope_ns: None,
+            #[cfg(feature = "alloc-profiling")]
+            alloc_stats: None,
+        }
+    }
+}
+
 impl BenchmarkResult {
     /// Get a tag value by key.
     pub fn tag(&self, key: &str) -> Option<&str> {
@@ -76,7 +93,7 @@ impl BenchmarkResult {
 }
 
 /// Result of a comparison group (multiple interleaved benchmarks).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ComparisonResult {
     pub group_name: String,
@@ -146,6 +163,27 @@ pub struct SuiteResult {
     /// Hardware calibration results from built-in workloads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub calibration: Option<crate::calibration::Calibration>,
+}
+
+impl Default for SuiteResult {
+    fn default() -> Self {
+        Self {
+            run_id: RunId(String::new()),
+            timestamp: String::new(),
+            git_hash: None,
+            ci_environment: None,
+            comparisons: Vec::new(),
+            standalones: Vec::new(),
+            total_time: Duration::ZERO,
+            gate_waits: 0,
+            gate_wait_time: Duration::ZERO,
+            unreliable: false,
+            timer_resolution_ns: 0,
+            loop_overhead_ns: 0.0,
+            testbed: None,
+            calibration: None,
+        }
+    }
 }
 
 impl SuiteResult {
@@ -788,17 +826,11 @@ mod tests {
         let br = BenchmarkResult {
             name: "test".to_string(),
             summary: make_summary(100.0),
-            cpu_summary: None,
             tags: vec![
                 ("library".to_string(), "zenflate".to_string()),
                 ("level".to_string(), "L6".to_string()),
             ],
-            subgroup: None,
-            cold_start_ns: 0.0,
-                        slope_ns: None,
-            mean_ci: None,
-            #[cfg(feature = "alloc-profiling")]
-            alloc_stats: None,
+            ..Default::default()
         };
         assert_eq!(br.tag("library"), Some("zenflate"));
         assert_eq!(br.tag("level"), Some("L6"));
@@ -808,58 +840,31 @@ mod tests {
     fn make_suite_result() -> SuiteResult {
         SuiteResult {
             run_id: RunId("test-123".to_string()),
-            timestamp: "2026-03-11T00:00:00Z".to_string(),
             git_hash: Some("abc123".to_string()),
-            ci_environment: None,
             comparisons: vec![ComparisonResult {
                 group_name: "compress".to_string(),
                 benchmarks: vec![
                     BenchmarkResult {
                         name: "zenflate".to_string(),
-                        summary: make_summary(5_000_000.0), // 5ms
-                        cpu_summary: None,
+                        summary: make_summary(5_000_000.0),
                         tags: vec![("library".to_string(), "zenflate".to_string())],
-                        subgroup: None,
-                        cold_start_ns: 0.0,
-                        slope_ns: None,
-                        mean_ci: None,
-                        #[cfg(feature = "alloc-profiling")]
-                        alloc_stats: None,
+                        ..Default::default()
                     },
                     BenchmarkResult {
                         name: "libdeflate".to_string(),
-                        summary: make_summary(10_000_000.0), // 10ms
-                        cpu_summary: None,
+                        summary: make_summary(10_000_000.0),
                         tags: vec![("library".to_string(), "libdeflate".to_string())],
-                        subgroup: None,
-                        cold_start_ns: 0.0,
-                        slope_ns: None,
-                        mean_ci: None,
-                        #[cfg(feature = "alloc-profiling")]
-                        alloc_stats: None,
+                        ..Default::default()
                     },
                 ],
-                analyses: vec![],
                 completed_rounds: 100,
-                throughput: Some(Throughput::Bytes(1_048_576)), // 1 MiB
-                cache_firewall: false,
-                cache_firewall_bytes: 0,
-                baseline_only: false,
-                throughput_unit: None,
-                sort_by_speed: false,
-                expect_sub_ns: false,
-                cold_start: false,
+                throughput: Some(Throughput::Bytes(1_048_576)),
                 iterations_per_sample: 1000,
+                ..Default::default()
             }],
-            standalones: vec![],
             total_time: Duration::from_secs(5),
-            gate_waits: 0,
-            gate_wait_time: Duration::ZERO,
-            unreliable: false,
             timer_resolution_ns: 25,
-            loop_overhead_ns: 0.0,
-            testbed: None,
-            calibration: None,
+            ..Default::default()
         }
     }
 
@@ -930,69 +935,37 @@ mod tests {
 
         SuiteResult {
             run_id: RunId("test-456".to_string()),
-            timestamp: "2026-03-11T00:00:00Z".to_string(),
-            git_hash: None,
-            ci_environment: None,
             comparisons: vec![ComparisonResult {
                 group_name: "compress".to_string(),
                 benchmarks: vec![
                     BenchmarkResult {
                         name: "zenflate".to_string(),
                         summary: make_summary(5_000_000.0),
-                        cpu_summary: None,
-                        tags: vec![],
-                        subgroup: None,
                         cold_start_ns: 12_500.0,
-                        slope_ns: None, // 12.5µs cold start
-                        mean_ci: None,
-                        #[cfg(feature = "alloc-profiling")]
-                        alloc_stats: None,
+                        ..Default::default()
                     },
                     BenchmarkResult {
                         name: "libdeflate".to_string(),
                         summary: make_summary(10_000_000.0),
-                        cpu_summary: None,
-                        tags: vec![],
-                        subgroup: None,
-                        cold_start_ns: 0.0,
-                        slope_ns: None,
-                        mean_ci: None,
-                        #[cfg(feature = "alloc-profiling")]
-                        alloc_stats: None,
+                        ..Default::default()
                     },
                 ],
                 analyses: vec![("zenflate".to_string(), "libdeflate".to_string(), analysis)],
                 completed_rounds: 50,
-                throughput: None,
-                cache_firewall: false,
-                cache_firewall_bytes: 0,
-                baseline_only: false,
-                throughput_unit: None,
-                sort_by_speed: false,
-                expect_sub_ns: false,
-                cold_start: false,
                 iterations_per_sample: 10,
+                ..Default::default()
             }],
             standalones: vec![BenchmarkResult {
                 name: "standalone_bench".to_string(),
                 summary: Summary::from_slice(&[1_000.0, 1_100.0, 900.0, 1_050.0]),
-                cpu_summary: None,
-                tags: vec![],
-                subgroup: None,
                 cold_start_ns: 5_000.0,
-                slope_ns: None,
-                mean_ci: None,
-                #[cfg(feature = "alloc-profiling")]
-                alloc_stats: None,
+                ..Default::default()
             }],
             total_time: Duration::from_secs(3),
             gate_waits: 2,
             gate_wait_time: Duration::from_millis(250),
-            unreliable: false,
             timer_resolution_ns: 25,
-            loop_overhead_ns: 0.0,
-            testbed: None,
-            calibration: None,
+            ..Default::default()
         }
     }
 
