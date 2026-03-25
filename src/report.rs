@@ -1105,7 +1105,7 @@ fn print_group_tree(comp: &ComparisonResult, _timer_res: u64) {
     struct TreeRow {
         name: String,
         subgroup: Option<String>,
-        mean_str: String,
+        mean_mad_str: String, // "258 ±7" — mean and noise in one column
         ci_str: String,
         tp_str: String,
         is_fastest: bool,
@@ -1152,7 +1152,9 @@ fn print_group_tree(comp: &ComparisonResult, _timer_res: u64) {
         let is_fastest =
             (bench.summary.mean - fastest_mean).abs() < f64::EPSILON && comp.benchmarks.len() > 1;
 
-        let mean_str = format!("{:.*}", mean_dp, bench.summary.mean / mean_divisor);
+        let mean_val = format!("{:.*}", mean_dp, bench.summary.mean / mean_divisor);
+        let mad_val = format!("{:.*}", mean_dp, bench.summary.mad / mean_divisor);
+        let mean_mad_str = format!("{mean_val} ±{mad_val}");
 
         // CI string: compact [lo–hi] or [lo%–hi%]
         let ci_str = if is_baseline {
@@ -1237,7 +1239,7 @@ fn print_group_tree(comp: &ComparisonResult, _timer_res: u64) {
                 bench.name.clone()
             },
             subgroup: bench.subgroup.clone(),
-            mean_str,
+            mean_mad_str,
             ci_str,
             tp_str,
             is_fastest,
@@ -1246,7 +1248,7 @@ fn print_group_tree(comp: &ComparisonResult, _timer_res: u64) {
     }
 
     // Compute column widths for alignment
-    let mean_val_w = rows.iter().map(|r| r.mean_str.len()).max().unwrap_or(1);
+    let mean_val_w = rows.iter().map(|r| r.mean_mad_str.len()).max().unwrap_or(1);
     let ci_w = rows.iter().map(|r| r.ci_str.len()).max().unwrap_or(0);
     let tp_w = rows.iter().map(|r| r.tp_str.len()).max().unwrap_or(0);
 
@@ -1283,7 +1285,7 @@ fn print_group_tree(comp: &ComparisonResult, _timer_res: u64) {
         "  {BOLD}{}{RESET}  {DIM}{meta}{RESET}",
         comp.group_name,
     );
-    let mean_header = format!("mean {mean_unit}");
+    let mean_header = format!("mean ±mad {mean_unit}");
     let tp_hdr = if has_throughput {
         format!("  {:>tp_w$}", tp_header)
     } else {
@@ -1356,7 +1358,7 @@ fn print_group_tree(comp: &ComparisonResult, _timer_res: u64) {
         eprintln!(
             "  {DIM}{prefix}{branch}{RESET} {name_color}{:<this_name_w$}{name_reset}  {:>mean_w$}{DIM}{mean_unit}{RESET}  {DIM}{:<ci_w$}{RESET}{tp_col}{YELLOW}{}{RESET}",
             row.name,
-            row.mean_str,
+            row.mean_mad_str,
             row.ci_str,
             row.markers,
             mean_w = mean_val_w,
