@@ -241,6 +241,81 @@ impl ResourceGate {
         }
     }
 
+    /// Block until no other benchmark harness is running.
+    ///
+    /// Detects zenbench, criterion, divan, and cargo-bench processes by name.
+    /// This prevents concurrent benchmarks from corrupting each other's data.
+    /// General system noise is NOT gated here — only benchmark-vs-benchmark.
+    pub fn wait_for_no_benchmarks(&mut self) {
+        if !self.config.enabled {
+            return;
+        }
+
+        // Benchmark process names to look for (case-insensitive substrings)
+        const BENCH_NAMES: &[&str] = &[
+            "criterion", "divan", "zenbench", "cargo-bench", "bench-",
+        ];
+
+        let our_pid = sysinfo::get_current_pid().ok();
+        let start = Instant::now();
+        let max_wait = Duration::from_secs(30);
+        let mut warned = false;
+
+        loop {
+            // Use a fresh System scan for process detection (the monitor
+            // may not refresh process command lines in its snapshot).
+            let mut sys = sysinfo::System::new();
+            sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+
+            let bench_count = sys
+                .processes()
+                .values()
+                .filter(|p| {
+                    // Skip ourselves
+                    if let Some(our) = our_pid && p.pid() == our {
+                        return false;
+                    }
+
+
+
+
+
+                    let name = p.name().to_string_lossy().to_lowercase();
+                    let cmd: String = p
+                        .cmd()
+                        .iter()
+                        .map(|s| s.to_string_lossy().to_lowercase())
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    BENCH_NAMES.iter().any(|&pat| name.contains(pat) || cmd.contains(pat))
+                })
+                .count();
+
+            if bench_count == 0 {
+                if warned {
+                    crate::report::clear_status();
+                }
+                return;
+            }
+
+            if start.elapsed() >= max_wait {
+                crate::report::clear_status();
+                return; // give up waiting, measure anyway
+            }
+
+            if !warned {
+                crate::report::status(&format!(
+                    "[zenbench] waiting for {bench_count} other benchmark process(es) to finish..."
+                ));
+                warned = true;
+            }
+
+            std::thread::sleep(Duration::from_secs(1));
+            self.total_waits += 1;
+            self.total_wait_time += Duration::from_secs(1);
+        }
+    }
+
     /// Non-blocking system check. Records whether the system is noisy
     /// but never blocks. The statistical machinery handles noisy samples.
     pub fn check_and_record(&mut self) {

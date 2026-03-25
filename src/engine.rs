@@ -389,10 +389,12 @@ fn run_comparison_group(
             break;
         }
 
-        // Resource gate: check-and-proceed. Never blocks.
-        // If system is noisy, we measure anyway — IQR outlier removal
-        // and MAD handle contaminated samples. The gate just records
-        // how many rounds were noisy for the footer warning.
+        // Wait for other benchmark processes to finish (they'd corrupt our data).
+        // This blocks until no benchmark harness (zenbench/criterion/divan) is running.
+        // General system noise is NOT gated — IQR outlier removal handles that.
+        gate.wait_for_no_benchmarks();
+
+        // Record whether system is noisy (advisory, doesn't block).
         gate.check_and_record();
 
         // Randomize benchmark order for this round
