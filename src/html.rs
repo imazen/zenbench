@@ -7,6 +7,74 @@
 use crate::format::format_ns;
 use crate::results::{ComparisonResult, SuiteResult};
 
+/// Generate a baseline comparison HTML section.
+#[allow(dead_code)]
+pub fn baseline_comparison_html(comparison: &crate::baseline::BaselineComparison) -> String {
+    let mut html = String::new();
+    html.push_str("<details open><summary><h2>Baseline Comparison</h2></summary>\n");
+
+    if !comparison.warnings.is_empty() {
+        for w in &comparison.warnings {
+            html.push_str(&format!(
+                "<p><span class=\"pill pill-yellow\">⚠</span> {w}</p>\n"
+            ));
+        }
+    }
+
+    html.push_str("<table><tr><th>benchmark</th><th>baseline</th><th>current</th><th>change</th><th>status</th></tr>\n");
+
+    for delta in &comparison.benchmarks {
+        let color = if delta.regressed {
+            "var(--red)"
+        } else if delta.improved {
+            "var(--green)"
+        } else {
+            "inherit"
+        };
+        let status = if delta.regressed {
+            "<span class=\"pill pill-red\">▲ REGRESSION</span>"
+        } else if delta.improved {
+            "<span class=\"pill pill-green\">▼ improved</span>"
+        } else {
+            "<span class=\"pill pill-dim\">unchanged</span>"
+        };
+        html.push_str(&format!(
+            "<tr style=\"color:{color}\"><td>{}::{}</td><td>{}</td><td>{}</td><td>{:+.2}%</td><td>{status}</td></tr>\n",
+            delta.group, delta.name,
+            format_ns(delta.baseline_mean),
+            format_ns(delta.new_mean),
+            delta.pct_change,
+        ));
+    }
+    html.push_str("</table>\n");
+
+    // Summary
+    let total = comparison.regressions + comparison.improvements + comparison.unchanged;
+    html.push_str(&format!(
+        "<p><strong>{}</strong> benchmarks: \
+         <span class=\"pill pill-red\">{} regressions</span> \
+         <span class=\"pill pill-green\">{} improvements</span> \
+         <span class=\"pill pill-dim\">{} unchanged</span></p>\n",
+        total, comparison.regressions, comparison.improvements, comparison.unchanged,
+    ));
+
+    if !comparison.new_benchmarks.is_empty() {
+        html.push_str(&format!(
+            "<p>New (not in baseline): {}</p>\n",
+            comparison.new_benchmarks.join(", ")
+        ));
+    }
+    if !comparison.missing_benchmarks.is_empty() {
+        html.push_str(&format!(
+            "<p>Missing (in baseline): {}</p>\n",
+            comparison.missing_benchmarks.join(", ")
+        ));
+    }
+
+    html.push_str("</details>\n");
+    html
+}
+
 /// Generate a complete HTML report as a string.
 pub fn to_html(result: &SuiteResult) -> String {
     let mut html = String::with_capacity(32_000);
@@ -67,7 +135,7 @@ pub fn to_html(result: &SuiteResult) -> String {
         html.push_str("</details>\n");
     }
 
-    html.push_str("</div></body></html>");
+    html.push_str("</div></body></html>\n");
     html
 }
 
@@ -93,6 +161,21 @@ fn render_group(comp: &ComparisonResult) -> String {
         comp.group_name,
         meta_parts.join(" · "),
     ));
+
+    // Methodology explanation
+    html.push_str("<p class=\"methodology\">");
+    html.push_str(&format!(
+        "Each <strong>round</strong>, all {} benchmarks run in shuffled order. \
+         Each benchmark runs <strong>{} calls</strong> (iterations) per round to produce one sample. \
+         After <strong>{} rounds</strong>, paired statistics compare the round-by-round differences.",
+        comp.benchmarks.len(),
+        comp.iterations_per_sample,
+        comp.completed_rounds,
+    ));
+    if comp.cold_start {
+        html.push_str(" <strong>Cold-start mode</strong>: 1 call per sample with cache eviction between benchmarks.");
+    }
+    html.push_str("</p>\n");
 
     // Baseline lookup
     let baseline_name = comp
@@ -243,9 +326,27 @@ fn render_bench_details(
         "<tr><td>std dev</td><td>{}</td></tr>",
         format_ns(s.std_dev())
     ));
+    let cv = s.cv() * 100.0;
+    let cv_label = if cv < 5.0 {
+        "excellent"
+    } else if cv < 15.0 {
+        "good"
+    } else if cv < 30.0 {
+        "noisy"
+    } else {
+        "very noisy — try a quieter system"
+    };
+    let cv_pill = if cv < 5.0 {
+        "pill-green"
+    } else if cv < 15.0 {
+        "pill-dim"
+    } else if cv < 30.0 {
+        "pill-yellow"
+    } else {
+        "pill-red"
+    };
     html.push_str(&format!(
-        "<tr><td>CV</td><td>{:.1}%</td></tr>",
-        s.cv() * 100.0
+        "<tr><td>CV</td><td>{cv:.1}% <span class=\"pill {cv_pill}\">{cv_label}</span></td></tr>",
     ));
     if bench.cold_start_ns > 0.0 {
         html.push_str(&format!(
@@ -277,13 +378,25 @@ fn render_bench_details(
             "<tr><td>change</td><td>{:+.2}%</td></tr>",
             a.pct_change
         ));
+        let sig_pill = if a.significant {
+            "<span class=\"pill pill-green\">yes — real difference</span>"
+        } else {
+            "<span class=\"pill pill-dim\">no — within noise</span>"
+        };
+        html.push_str(&format!("<tr><td>significant</td><td>{sig_pill}</td></tr>",));
+        let d = a.cohens_d.abs();
+        let d_label = if d < 0.2 {
+            "negligible"
+        } else if d < 0.5 {
+            "small"
+        } else if d < 0.8 {
+            "medium"
+        } else {
+            "large"
+        };
         html.push_str(&format!(
-            "<tr><td>significant</td><td>{}</td></tr>",
-            if a.significant { "yes" } else { "no" }
-        ));
-        html.push_str(&format!(
-            "<tr><td>Cohen's d</td><td>{:.2}</td></tr>",
-            a.cohens_d
+            "<tr><td>effect size</td><td>d={:.2} <span class=\"pill pill-dim\">{d_label}</span></td></tr>",
+            a.cohens_d,
         ));
         html.push_str(&format!(
             "<tr><td>Wilcoxon p</td><td>{:.4}</td></tr>",
@@ -294,9 +407,23 @@ fn render_bench_details(
             format_ns(a.ci_lower),
             format_ns(a.ci_upper)
         ));
+        let drift = a.drift_correlation;
+        let drift_label = if drift.abs() < 0.3 {
+            "stable — no systematic trend"
+        } else if drift > 0.0 {
+            "later rounds slower — possible thermal throttling"
+        } else {
+            "later rounds faster — cache/branch predictor warming up"
+        };
+        let drift_pill = if drift.abs() < 0.3 {
+            "pill-green"
+        } else if drift.abs() < 0.6 {
+            "pill-yellow"
+        } else {
+            "pill-red"
+        };
         html.push_str(&format!(
-            "<tr><td>drift (Spearman r)</td><td>{:.3}</td></tr>",
-            a.drift_correlation
+            "<tr><td>drift</td><td>r={drift:.2} <span class=\"{drift_pill} pill\">{drift_label}</span></td></tr>",
         ));
         html.push_str(&format!(
             "<tr><td>samples</td><td>{}</td></tr>",
@@ -431,33 +558,41 @@ const HTML_HEAD: &str = r#"<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>zenbench results</title>
 <style>
-  :root { --bg: #1a1b26; --fg: #c0caf5; --accent: #7aa2f7; --dim: #565f89; --green: #9ece6a; --red: #f7768e; --surface: #24283b; --border: #2f3549; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--fg); margin: 0; padding: 0; }
-  .container { max-width: 1000px; margin: 0 auto; padding: 2rem; }
-  h1 { color: #fff; margin-bottom: 0.5rem; } h1 small { color: var(--dim); font-weight: normal; font-size: 0.45em; }
-  h2 { color: var(--accent); font-size: 1.15rem; margin: 0; display: inline; }
-  h4 { color: var(--accent); font-size: 0.85rem; margin: 0.5rem 0 0.25rem; }
-  .meta { color: var(--dim); font-size: 0.8rem; margin-left: 1rem; }
-  .header-meta { display: flex; gap: 1.5rem; flex-wrap: wrap; color: var(--dim); font-size: 0.8rem; margin-bottom: 1rem; }
-  summary { cursor: pointer; padding: 0.4rem 0; }
+  :root { --bg: #1a1b26; --fg: #c0caf5; --accent: #7aa2f7; --dim: #737aa2; --green: #9ece6a; --red: #f7768e; --yellow: #e0af68; --surface: #24283b; --border: #2f3549; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--fg); margin: 0; padding: 0; font-size: 15px; line-height: 1.5; }
+  .container { max-width: 1060px; margin: 0 auto; padding: 2rem; }
+  h1 { color: #fff; margin-bottom: 0.5rem; font-size: 1.8rem; } h1 small { color: var(--dim); font-weight: normal; font-size: 0.4em; }
+  h2 { color: var(--accent); font-size: 1.2rem; margin: 0; display: inline; }
+  h4 { color: var(--accent); font-size: 0.95rem; margin: 0.6rem 0 0.3rem; }
+  .meta { color: var(--dim); font-size: 0.9rem; margin-left: 1rem; }
+  .header-meta { display: flex; gap: 1.5rem; flex-wrap: wrap; color: var(--dim); font-size: 0.9rem; margin-bottom: 1.2rem; padding: 0.6rem 0.8rem; background: var(--surface); border-radius: 6px; }
+  summary { cursor: pointer; padding: 0.5rem 0; }
   summary:hover { opacity: 0.8; }
-  details { margin: 0.75rem 0; border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; }
+  details { margin: 0.8rem 0; border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem 1.2rem; }
   table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
-  th, td { padding: 0.25rem 0.5rem; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
-  th { color: var(--accent); font-weight: 600; font-size: 0.8rem; }
+  th, td { padding: 0.35rem 0.6rem; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.95rem; }
+  th { color: var(--accent); font-weight: 600; font-size: 0.9rem; }
   td { font-variant-numeric: tabular-nums; }
   .fastest td { color: var(--green); }
-  .subgroup td { color: var(--dim); font-style: italic; font-size: 0.8rem; border-bottom: none; padding-top: 0.5rem; }
+  .subgroup td { color: var(--dim); font-style: italic; font-size: 0.9rem; border-bottom: none; padding-top: 0.6rem; }
   .detail-row td { padding: 0; border-bottom: none; }
-  .bench-detail { border: none; margin: 0; padding: 0 0 0 1rem; }
-  .bench-detail summary { font-size: 0.75rem; color: var(--dim); padding: 0.1rem 0; }
-  .detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.5rem; padding: 0.5rem 0; }
-  .detail-section { background: var(--surface); border-radius: 6px; padding: 0.5rem 0.75rem; }
+  .bench-detail { border: none; margin: 0; padding: 0.2rem 0 0.2rem 1rem; }
+  .bench-detail > summary { font-size: 0.85rem; color: var(--dim); padding: 0.2rem 0; }
+  .detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.6rem; padding: 0.6rem 0; }
+  .detail-section { background: var(--surface); border-radius: 6px; padding: 0.6rem 0.9rem; }
   .detail-table { margin: 0; }
-  .detail-table td { font-size: 0.8rem; padding: 0.15rem 0.4rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
+  .detail-table td { font-size: 0.9rem; padding: 0.2rem 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
   .detail-table td:first-child { color: var(--dim); width: 45%; }
-  svg { margin: 0.75rem 0; display: block; max-width: 100%; }
-  code { background: var(--surface); padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.85em; }
+  .explain { font-size: 0.8rem; color: var(--dim); font-style: italic; margin-top: 0.15rem; }
+  .methodology { font-size: 0.85rem; color: var(--dim); margin: 0.3rem 0 0.6rem; line-height: 1.6; }
+  .methodology strong { color: var(--fg); font-weight: 500; }
+  .pill { display: inline-block; font-size: 0.75rem; padding: 0.1em 0.5em; border-radius: 10px; font-weight: 600; }
+  .pill-green { background: rgba(158,206,106,0.15); color: var(--green); }
+  .pill-red { background: rgba(247,118,142,0.15); color: var(--red); }
+  .pill-yellow { background: rgba(224,175,104,0.15); color: var(--yellow); }
+  .pill-dim { background: rgba(115,122,162,0.15); color: var(--dim); }
+  svg { margin: 0.8rem 0; display: block; max-width: 100%; }
+  code { background: var(--surface); padding: 0.15em 0.4em; border-radius: 3px; font-size: 0.9em; }
 </style>
 </head>
 <body><div class="container">
