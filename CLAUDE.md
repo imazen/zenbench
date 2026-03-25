@@ -143,3 +143,17 @@ Consider adopting a lighter format in a future pass. Current format is
 correct and complete — this is about density and aesthetics, not data.
 Key constraint: our CI column and throughput column are differentiators
 that divan doesn't have — any format change must preserve them.
+
+### Windows verification (2026-03-25)
+Tested via WSL→PowerShell bridge (Windows cargo 1.92 nightly):
+- cargo check: ✓ builds clean
+- cargo clippy -- -D warnings: ✓ zero warnings
+- cargo test --lib: 89/89 pass
+- cargo test (full suite including criterion-compat): 170/170 pass
+- cargo bench --bench sorting: ✓ full report with tree output, bar chart, TSC timer
+- fs4 file locking: ✓ works on Windows NTFS
+- sysinfo process detection: ✓ works for benchmark detection
+- terminal_size: ✓ returns correct width
+- ANSI colors: ✓ work in Windows Terminal (PowerShell 7)
+- PathBuf paths: ✓ baselines save/load correctly
+- Git commands: ✓ git available in PATH, worktree works
