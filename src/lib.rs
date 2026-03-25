@@ -11,11 +11,6 @@
 )]
 #![doc = include_str!("../README.md")]
 
-//! # Zenbench
-//!
-//! Interleaved microbenchmarking with resource gating, paired statistics,
-//! and fire-and-forget subprocess mode.
-
 #[cfg(feature = "alloc-profiling")]
 mod alloc;
 pub mod baseline;
