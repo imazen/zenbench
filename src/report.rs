@@ -865,6 +865,13 @@ fn print_report_body(result: &SuiteResult) {
                     let bench = &comp.benchmarks[bench_i];
                     let is_fastest = (bench.summary.mean - fastest_mean).abs() < f64::EPSILON;
 
+                    // Truncate name to fit name_w (same as table)
+                    let display_name = if bench.name.len() > name_w {
+                        format!("{}…", &bench.name[..name_w - 1])
+                    } else {
+                        bench.name.clone()
+                    };
+
                     // Throughput mode: longest bar = highest throughput = lowest mean time.
                     // Time mode: longest bar = highest time = slowest benchmark.
                     let frac = if has_throughput && min_mean > 0.0 {
@@ -881,7 +888,7 @@ fn print_report_body(result: &SuiteResult) {
 
                     eprintln!(
                         "  {name_color}{:<name_w$}{name_reset}  {bar_color}{bar}{RESET} {DIM}{}{RESET}",
-                        bench.name, bar_labels[idx],
+                        display_name, bar_labels[idx],
                     );
                 }
             }
