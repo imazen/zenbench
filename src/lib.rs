@@ -21,6 +21,7 @@ pub mod baseline;
 pub mod calibration;
 mod checks;
 mod ci;
+#[cfg(feature = "criterion-compat")]
 pub mod criterion_compat;
 pub mod daemon;
 mod engine;

@@ -77,6 +77,9 @@ pub struct Suite {
     pub(crate) groups: Vec<BenchGroup>,
     pub(crate) standalones: Vec<Benchmark>,
     pub(crate) group_filter: Option<String>,
+    /// Pre-computed results from criterion-compat immediate mode.
+    #[cfg(feature = "criterion-compat")]
+    pub(crate) precomputed_comparisons: Vec<crate::results::ComparisonResult>,
 }
 
 impl Suite {
@@ -85,6 +88,8 @@ impl Suite {
             groups: Vec::new(),
             standalones: Vec::new(),
             group_filter: None,
+            #[cfg(feature = "criterion-compat")]
+            precomputed_comparisons: Vec::new(),
         }
     }
 
@@ -125,11 +130,24 @@ impl Suite {
     pub fn merge(&mut self, other: Suite) {
         self.groups.extend(other.groups);
         self.standalones.extend(other.standalones);
+        #[cfg(feature = "criterion-compat")]
+        self.precomputed_comparisons
+            .extend(other.precomputed_comparisons);
     }
 
     /// Push a pre-built group (used by criterion_compat).
     pub fn push_group(&mut self, group: BenchGroup) {
         self.groups.push(group);
+    }
+
+    /// Push a pre-built ComparisonResult (used by criterion_compat immediate mode).
+    #[cfg(feature = "criterion-compat")]
+    pub fn push_comparison(&mut self, comp: crate::results::ComparisonResult) {
+        // Store as a pre-computed result that the engine passes through.
+        // We use a special marker — an empty BenchGroup with the results attached.
+        // TODO: This is a hack. A cleaner approach would separate pre-computed
+        // results from groups-to-run in the Suite struct.
+        self.precomputed_comparisons.push(comp);
     }
 }
 
@@ -408,6 +426,12 @@ impl BenchGroup {
     pub fn subgroup(&mut self, label: impl Into<String>) -> &mut Self {
         self.current_subgroup = Some(label.into());
         self
+    }
+
+    /// Get the current subgroup label (for criterion_compat).
+    #[cfg(feature = "criterion-compat")]
+    pub fn current_subgroup(&self) -> Option<&String> {
+        self.current_subgroup.as_ref()
     }
 
     /// Set a custom unit name for `Throughput::Elements`.

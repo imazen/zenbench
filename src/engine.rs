@@ -130,6 +130,9 @@ impl Engine {
             });
 
         let mut comparisons = Vec::new();
+        // Include pre-computed results from criterion-compat immediate mode
+        #[cfg(feature = "criterion-compat")]
+        comparisons.extend(std::mem::take(&mut self.suite.precomputed_comparisons));
         let mut standalones = Vec::new();
         let mut total_gate_waits = 0usize;
         let mut total_gate_wait_time = std::time::Duration::ZERO;

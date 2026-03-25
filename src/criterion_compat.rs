@@ -113,6 +113,7 @@ impl Criterion {
             name: name.into(),
             suite: &mut self.suite,
             group: None,
+            immediate_results: Vec::new(),
             config_max_rounds: self.config_max_rounds,
             config_max_time: self.config_max_time,
             config_warmup_time: self.config_warmup_time,
@@ -120,37 +121,30 @@ impl Criterion {
         }
     }
 
-    /// Benchmark a single function (criterion-compatible name).
+    /// Benchmark a single function (criterion-compatible).
+    /// Runs immediately — no `'static` required.
     pub fn bench_function<S, F>(&mut self, id: S, mut f: F) -> &mut Self
     where
         S: Into<String>,
-        F: FnMut(&mut Bencher) + Send + 'static,
+        F: FnMut(&mut Bencher),
     {
-        let name = id.into();
-        let bench_name = name.clone();
-        self.suite.compare(name, move |group| {
-            group.bench(bench_name.clone(), move |b| f(&mut Bencher(b)));
-        });
+        let mut group = self.benchmark_group(id);
+        group.bench_function("_", &mut f);
+        group.finish();
         self
     }
 
-    /// Benchmark with input (criterion-compatible name).
+    /// Benchmark with input (criterion-compatible).
+    /// Runs immediately — no `'static` required.
     pub fn bench_with_input<S, I, F>(&mut self, id: S, input: &I, mut f: F) -> &mut Self
     where
         S: Into<String>,
-        I: Clone + Send + 'static,
-        F: FnMut(&mut Bencher, &I) + Send + 'static,
+        I: Clone,
+        F: FnMut(&mut Bencher, &I),
     {
-        let name = id.into();
-        let bench_name = name.clone();
-        let input = input.clone();
-        self.suite.compare(name, move |group| {
-            let input = input.clone();
-            group.bench(bench_name.clone(), move |b| {
-                let input = input.clone();
-                f(&mut Bencher(b), &input);
-            });
-        });
+        let mut group = self.benchmark_group(id);
+        group.bench_with_input("_", input, &mut f);
+        group.finish();
         self
     }
 
@@ -168,6 +162,8 @@ pub struct BenchmarkGroup<'a> {
     name: String,
     suite: &'a mut Suite,
     group: Option<crate::bench::BenchGroup>,
+    /// Results from immediate-mode benchmarks (no 'static required).
+    immediate_results: Vec<crate::results::BenchmarkResult>,
     // Config inherited from Criterion
     config_max_rounds: Option<usize>,
     config_max_time: Option<std::time::Duration>,
@@ -203,39 +199,105 @@ impl<'a> BenchmarkGroup<'a> {
         self
     }
 
-    /// Benchmark a function (criterion-compatible name).
+    /// Benchmark a function (criterion-compatible).
+    ///
+    /// Runs the benchmark **immediately** — the closure doesn't need `'static`.
+    /// This matches criterion's actual behavior (sequential execution, no
+    /// interleaving). For interleaved execution, use the native `suite.compare()` API.
+    /// Benchmark a function (criterion-compatible).
+    ///
+    /// Runs the benchmark **immediately** — the closure doesn't need `'static`.
+    /// This matches criterion's actual behavior (sequential execution).
+    /// For interleaved execution, use the native `suite.compare()` API.
     pub fn bench_function<S, F>(&mut self, id: S, mut f: F) -> &mut Self
     where
         S: Into<String>,
-        F: FnMut(&mut Bencher) + Send + 'static,
+        F: FnMut(&mut Bencher),
     {
-        self.ensure_group().bench(id, move |b| f(&mut Bencher(b)));
-        self
-    }
+        let name = id.into();
+        let config = self.get_config();
 
-    /// Benchmark with input (criterion-compatible name).
-    pub fn bench_with_input<S, I, F>(&mut self, id: S, input: &I, mut f: F) -> &mut Self
-    where
-        S: Into<String>,
-        I: Clone + Send + 'static,
-        F: FnMut(&mut Bencher, &I) + Send + 'static,
-    {
-        let input = input.clone();
-        self.ensure_group().bench(id, move |b| {
-            let input = input.clone();
-            f(&mut Bencher(b), &input);
+        // Quick calibration
+        let mut bencher = crate::bench::Bencher::new(1);
+        f(&mut Bencher(&mut bencher));
+        let per_iter = bencher.elapsed_ns.max(1);
+
+        // Estimate iterations from timer precision and sample target
+        let timer_res = crate::platform::timer_resolution_ns();
+        let precision_min = (timer_res as u64).saturating_mul(1000).max(10_000);
+        let iters = ((config.sample_target_ns.max(precision_min)) / per_iter).max(1) as usize;
+        let iters = iters.clamp(config.min_iterations, config.max_iterations);
+
+        // Collect samples (sequential, immediate)
+        let n_rounds = config.max_rounds.min(100);
+        let mut samples = Vec::with_capacity(n_rounds);
+        for _ in 0..n_rounds {
+            let mut b = crate::bench::Bencher::new(iters);
+            f(&mut Bencher(&mut b));
+            samples.push(b.elapsed_ns as f64 / iters as f64);
+        }
+
+        let summary = crate::stats::Summary::from_slice(&samples);
+        let mean_ci = crate::stats::MeanCi::from_samples(&samples, config.bootstrap_resamples);
+
+        self.immediate_results.push(crate::results::BenchmarkResult {
+            name,
+            summary,
+            mean_ci,
+            ..Default::default()
         });
         self
     }
 
-    /// Criterion requires `finish()`. In zenbench it's a no-op that
-    /// commits the group to the suite.
+    /// Benchmark with input (criterion-compatible).
+    /// Runs immediately — no `'static` required.
+    pub fn bench_with_input<S, I, F>(&mut self, id: S, input: &I, mut f: F) -> &mut Self
+    where
+        S: Into<String>,
+        I: Clone,
+        F: FnMut(&mut Bencher, &I),
+    {
+        let input = input.clone();
+        self.bench_function(id, |b| f(b, &input))
+    }
+
+    /// Get config, applying Criterion-level overrides.
+    fn get_config(&self) -> crate::bench::GroupConfig {
+        let mut config = crate::bench::GroupConfig::default();
+        if let Some(n) = self.config_max_rounds {
+            config.max_rounds = n;
+        }
+        if let Some(d) = self.config_max_time {
+            config.max_time = d;
+        }
+        if let Some(d) = self.config_warmup_time {
+            config.warmup_time = d;
+        }
+        if let Some(t) = self.config_noise_threshold {
+            config.noise_threshold = t;
+        }
+        config
+    }
+
+    /// Criterion requires `finish()`. Commits results to the suite.
     pub fn finish(mut self) {
         self.commit();
     }
 
     fn commit(&mut self) {
-        if let Some(group) = self.group.take() {
+        // For immediate-mode benchmarks, we already have results.
+        // Build a ComparisonResult from them.
+        if !self.immediate_results.is_empty() {
+            let comp = crate::results::ComparisonResult {
+                group_name: self.name.clone(),
+                benchmarks: std::mem::take(&mut self.immediate_results),
+                ..Default::default()
+            };
+            // Print group report immediately
+            crate::report::print_group(&comp, crate::platform::timer_resolution_ns());
+            // Store for final output
+            self.suite.push_comparison(comp);
+        } else if let Some(group) = self.group.take() {
             self.suite.push_group(group);
         }
     }

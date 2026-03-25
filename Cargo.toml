@@ -22,6 +22,8 @@ precise-timing = []
 # Install as #[global_allocator] in your bench binary to activate.
 # Requires unsafe code in the alloc module only.
 alloc-profiling = []
+# Drop-in criterion compatibility layer. NOT default — opt-in for migration.
+criterion-compat = []
 # Enables async benchmarking via Bencher::to_async(runtime).
 # Requires tokio runtime. Uses block_on() inside sync loop — same as criterion.
 async = ["dep:tokio"]
