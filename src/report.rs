@@ -1271,26 +1271,28 @@ fn print_group_tree(comp: &ComparisonResult, _timer_res: u64) {
         String::new()
     };
 
+    // Compute total left-column width: tree prefix + name
+    // Max prefix is 6 chars ("│  ╰─ ") for nested items, 3 chars ("╰─ ") for flat
+    let has_subgroups = rows.iter().any(|r| r.subgroup.is_some());
+    let prefix_w = if has_subgroups { 6 } else { 3 }; // "├─ " or "│  ╰─ "
+    let left_col_w = prefix_w + name_w;
+
     // Print group header
     eprintln!();
-    let header_cols = format!(
-        "{:>mean_w$}{mean_unit}  {:<ci_w$}{}",
-        "mean",
-        "95% CI vs base",
-        if has_throughput {
-            format!("  {:>tp_w$}", tp_header)
-        } else {
-            String::new()
-        },
-        mean_w = mean_val_w,
-    );
     eprintln!(
-        "  {BOLD}{}{RESET}  {DIM}{}{RESET}",
-        comp.group_name, meta,
+        "  {BOLD}{}{RESET}  {DIM}{meta}{RESET}",
+        comp.group_name,
     );
+    let mean_header = format!("mean {mean_unit}");
+    let tp_hdr = if has_throughput {
+        format!("  {:>tp_w$}", tp_header)
+    } else {
+        String::new()
+    };
     eprintln!(
-        "  {:name_w$}  {DIM}{header_cols}{RESET}",
-        "",
+        "  {:left_col_w$}  {:>mean_w$}  {:<ci_w$}{tp_hdr}",
+        "", mean_header, "95% CI vs base",
+        mean_w = mean_val_w + mean_unit.len(),
     );
 
     // Group benchmarks by subgroup
@@ -1345,14 +1347,99 @@ fn print_group_tree(comp: &ComparisonResult, _timer_res: u64) {
             String::new()
         };
 
+        // Compute the actual prefix width for this row
+        let prefix_str = format!("{prefix}{branch} ");
+        let prefix_chars = prefix_str.chars().count();
+        // Pad name so total left column = left_col_w
+        let this_name_w = left_col_w.saturating_sub(prefix_chars);
+
         eprintln!(
-            "  {DIM}{prefix}{branch}{RESET} {name_color}{:<name_w$}{name_reset}  {:>mean_w$}{DIM}{mean_unit}{RESET}  {DIM}{:<ci_w$}{RESET}{tp_col}{YELLOW}{}{RESET}",
+            "  {DIM}{prefix}{branch}{RESET} {name_color}{:<this_name_w$}{name_reset}  {:>mean_w$}{DIM}{mean_unit}{RESET}  {DIM}{:<ci_w$}{RESET}{tp_col}{YELLOW}{}{RESET}",
             row.name,
             row.mean_str,
             row.ci_str,
             row.markers,
             mean_w = mean_val_w,
         );
+    }
+
+    // Compact bar chart (throughput or time, sorted fastest-first)
+    if rows.len() >= 2 {
+        let term_w = terminal_width().unwrap_or(80);
+        let mut bar_indices: Vec<usize> = (0..comp.benchmarks.len()).collect();
+        bar_indices.sort_by(|&a, &b| {
+            comp.benchmarks[a]
+                .summary
+                .mean
+                .total_cmp(&comp.benchmarks[b].summary.mean)
+        });
+
+        let bar_labels: Vec<String> = if has_throughput {
+            bar_indices
+                .iter()
+                .map(|&i| {
+                    comp.throughput
+                        .as_ref()
+                        .map(|tp| tp.format(comp.benchmarks[i].summary.mean, tp_unit))
+                        .unwrap_or_default()
+                })
+                .collect()
+        } else {
+            bar_indices
+                .iter()
+                .map(|&i| format_ns(comp.benchmarks[i].summary.mean))
+                .collect()
+        };
+        let label_w = bar_labels.iter().map(|l| l.len()).max().unwrap_or(0);
+        let overhead = 2 + name_w + 2 + 1 + label_w;
+        let bar_max = if term_w > overhead + 4 {
+            term_w - overhead
+        } else {
+            20
+        };
+
+        let max_mean = comp
+            .benchmarks
+            .iter()
+            .map(|b| b.summary.mean)
+            .fold(0.0_f64, f64::max);
+        let min_mean = comp
+            .benchmarks
+            .iter()
+            .map(|b| b.summary.mean)
+            .fold(f64::INFINITY, f64::min);
+
+        if max_mean > 0.0 {
+            eprintln!();
+            for (idx, &bench_i) in bar_indices.iter().enumerate() {
+                let bench = &comp.benchmarks[bench_i];
+                let is_fastest =
+                    (bench.summary.mean - fastest_mean).abs() < f64::EPSILON;
+
+                let display_name = if bench.name.len() > name_w {
+                    format!("{}…", &bench.name[..name_w - 1])
+                } else {
+                    bench.name.clone()
+                };
+
+                let frac = if has_throughput && min_mean > 0.0 {
+                    min_mean / bench.summary.mean
+                } else {
+                    bench.summary.mean / max_mean
+                };
+                let bar_len = (frac * bar_max as f64).round().max(1.0) as usize;
+                let bar: String = "\u{2588}".repeat(bar_len);
+
+                let name_color = if is_fastest { GREEN } else { "" };
+                let name_reset = if is_fastest { RESET } else { "" };
+                let bar_color = if is_fastest { GREEN } else { CYAN };
+
+                eprintln!(
+                    "  {name_color}{:<name_w$}{name_reset}  {bar_color}{bar}{RESET} {DIM}{}{RESET}",
+                    display_name, bar_labels[idx],
+                );
+            }
+        }
     }
 
     // Footnotes
