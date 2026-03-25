@@ -387,9 +387,16 @@ fn run_comparison_group(
             break;
         }
 
+        // Progress indicator — overwriting line showing round count
+        if round > 0 && round % 10 == 0 {
+            let elapsed = group_start.elapsed().as_secs_f64();
+            crate::report::status(&format!(
+                "[zenbench] '{}' round {}/{}  ({elapsed:.0}s)",
+                group.name, round, config.max_rounds,
+            ));
+        }
+
         // Wait for other benchmark processes to finish (they'd corrupt our data).
-        // This blocks until no benchmark harness (zenbench/criterion/divan) is running.
-        // General system noise is NOT gated — IQR outlier removal handles that.
         gate.wait_for_no_benchmarks();
 
         // Record whether system is noisy (advisory, doesn't block).
