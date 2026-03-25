@@ -79,7 +79,7 @@ Don't mix bench_parallel/bench_contended with rayon — competing thread pools.
 ## Remaining work (from METHODOLOGY.md)
 
 ### Done (this session)
-- `bench_scaling()` — probes 1..logical_cores automatically
+- `bench_scaling()` — probes 1..=physical_cores, then adds logical_cores as extra point if different
 - Gate thread awareness — benchmark_thread_allowance adjusts threshold
 - Cold-start mode — `config().cold_start(true)` forces 1 iter + cache firewall
 - Markdown output updated to new columns (min, mean, vs base, throughput)
