@@ -1,7 +1,16 @@
 use crate::bench::Throughput;
 use crate::format::{format_ns, format_ns_range, ns_unit, terminal_width};
-use crate::results::{BenchmarkResult, SuiteResult};
+use crate::results::{BenchmarkResult, ComparisonResult, SuiteResult};
 use std::io::IsTerminal;
+
+/// Report display style.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportStyle {
+    /// Box-drawing tables with borders. Detailed, wider.
+    Table,
+    /// Tree-style with ├─/╰─ nesting. Compact, divan-like.
+    Tree,
+}
 
 /// Should this stream use ANSI color codes?
 /// Respects NO_COLOR (https://no-color.org/), TERM=dumb, and TTY detection.
@@ -135,18 +144,36 @@ pub fn print_footer(
     );
 }
 
-/// Print a single group's report (table, bar chart, footnotes).
-/// Used by the engine for streaming output as each group completes.
-pub fn print_group(comp: &crate::results::ComparisonResult, _timer_res: u64) {
-    // Build a minimal SuiteResult with just this group and delegate to
-    // print_report's group rendering. This avoids duplicating the 650-line
-    // table/bar/footnote logic.
-    let wrapper = SuiteResult {
-        comparisons: vec![comp.clone()],
-        timer_resolution_ns: _timer_res,
-        ..Default::default()
-    };
-    print_report_body(&wrapper);
+/// Print a single group's report. Dispatches to table or tree style.
+pub fn print_group(comp: &ComparisonResult, _timer_res: u64) {
+    print_group_styled(comp, _timer_res, detect_style());
+}
+
+/// Print a single group in the specified style.
+pub fn print_group_styled(comp: &ComparisonResult, timer_res: u64, style: ReportStyle) {
+    match style {
+        ReportStyle::Table => {
+            let wrapper = SuiteResult {
+                comparisons: vec![comp.clone()],
+                timer_resolution_ns: timer_res,
+                ..Default::default()
+            };
+            print_report_body(&wrapper);
+        }
+        ReportStyle::Tree => {
+            print_group_tree(comp, timer_res);
+        }
+    }
+}
+
+/// Detect style from --style=tree|table arg or ZENBENCH_STYLE env var.
+pub fn detect_style() -> ReportStyle {
+    if std::env::var("ZENBENCH_STYLE").is_ok_and(|s| s == "table")
+        || std::env::args().any(|a| a == "--style=table")
+    {
+        return ReportStyle::Table;
+    }
+    ReportStyle::Tree // default: tree
 }
 
 /// Print all comparison groups and standalones (no header/footer).
@@ -1016,6 +1043,324 @@ pub fn print_report(result: &SuiteResult) {
     print_header(&result.run_id, result.git_hash.as_deref(), result.ci_environment.as_deref());
     print_report_body(result);
     print_footer(result.total_time, result.gate_waits, result.gate_wait_time, result.unreliable);
+}
+
+/// Print a group in tree style (compact, divan-like).
+#[allow(non_snake_case)]
+fn print_group_tree(comp: &ComparisonResult, _timer_res: u64) {
+    let c = should_color(&std::io::stderr());
+    let RESET = pick("\x1b[0m", c);
+    let BOLD = pick("\x1b[1m", c);
+    let DIM = pick("\x1b[2m", c);
+    let GREEN = pick("\x1b[32m", c);
+    let _RED = pick("\x1b[31m", c);
+    let YELLOW = pick("\x1b[33m", c);
+    let CYAN = pick("\x1b[36m", c);
+
+    if comp.benchmarks.is_empty() {
+        return;
+    }
+
+    let has_throughput = comp.throughput.is_some();
+    let tp_unit = comp.throughput_unit.as_deref();
+
+    // Find baseline
+    let baseline_name = comp
+        .analyses
+        .first()
+        .map(|(base, _, _)| base.as_str())
+        .unwrap_or_else(|| {
+            comp.benchmarks
+                .first()
+                .map(|b| b.name.as_str())
+                .unwrap_or("")
+        });
+
+    let baseline_analyses: std::collections::HashMap<&str, &crate::stats::PairedAnalysis> = comp
+        .analyses
+        .iter()
+        .filter(|(base, _, _)| base == baseline_name)
+        .map(|(_, cand, analysis)| (cand.as_str(), analysis))
+        .collect();
+
+    let fastest_mean = comp
+        .benchmarks
+        .iter()
+        .map(|b| b.summary.mean)
+        .fold(f64::INFINITY, f64::min);
+
+    // Compute column widths
+    let term_w = terminal_width().unwrap_or(80);
+    let max_name = term_w / 3;
+    let name_w = comp
+        .benchmarks
+        .iter()
+        .map(|b| b.name.len())
+        .max()
+        .unwrap_or(4)
+        .max(4)
+        .min(max_name);
+
+    // Build display data per benchmark
+    struct TreeRow {
+        name: String,
+        subgroup: Option<String>,
+        mean_str: String,
+        ci_str: String,
+        tp_str: String,
+        is_fastest: bool,
+        markers: String,
+    }
+
+    let (mean_divisor, mean_unit, mean_dp) = ns_unit(
+        comp.benchmarks
+            .iter()
+            .find(|b| b.name == baseline_name)
+            .unwrap_or(&comp.benchmarks[0])
+            .summary
+            .mean
+            .abs(),
+    );
+
+    let mut footnotes: Vec<String> = Vec::new();
+    let mut add_footnote = |msg: String| -> usize {
+        footnotes.push(msg);
+        footnotes.len()
+    };
+
+    // Metadata line
+    let iters = comp.iterations_per_sample;
+    let iters_str = if iters >= 1_000_000 {
+        format!("{}M", iters / 1_000_000)
+    } else if iters >= 1000 {
+        format!("{}K", iters / 1000)
+    } else {
+        format!("{iters}")
+    };
+    let mut meta = format!("{} rounds", comp.completed_rounds);
+    if iters > 0 {
+        meta.push_str(&format!(" × {iters_str} calls"));
+    }
+    if comp.completed_rounds < 10 {
+        meta.push_str(&format!(" {YELLOW}⚠ only {} rounds{RESET}", comp.completed_rounds));
+    }
+
+    let mut rows: Vec<TreeRow> = Vec::new();
+
+    for bench in &comp.benchmarks {
+        let is_baseline = bench.name == baseline_name;
+        let is_fastest =
+            (bench.summary.mean - fastest_mean).abs() < f64::EPSILON && comp.benchmarks.len() > 1;
+
+        let mean_str = format!("{:.*}", mean_dp, bench.summary.mean / mean_divisor);
+
+        // CI string: compact [lo–hi] or [lo%–hi%]
+        let ci_str = if is_baseline {
+            if let Some(ci) = &bench.mean_ci {
+                let lo = format!("{:.*}", mean_dp, ci.lower / mean_divisor);
+                let hi = format!("{:.*}", mean_dp, ci.upper / mean_divisor);
+                format!("[{lo}–{hi}]{mean_unit}")
+            } else {
+                String::new()
+            }
+        } else if let Some(analysis) = baseline_analyses.get(bench.name.as_str()) {
+            let base_mean = analysis.baseline.mean;
+            if base_mean.abs() > f64::EPSILON {
+                let lo_pct = analysis.ci_lower / base_mean * 100.0;
+                let hi_pct = analysis.ci_upper / base_mean * 100.0;
+                format!("[{lo_pct:+.1}%–{hi_pct:+.1}%]")
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
+        // Throughput
+        let tp_str = if has_throughput {
+            comp.throughput
+                .as_ref()
+                .map(|tp| {
+                    let (val, unit) = tp.compute(bench.summary.mean, tp_unit);
+                    let prefix = if unit.starts_with('G') {
+                        "G"
+                    } else if unit.starts_with('M') {
+                        "M"
+                    } else if unit.starts_with('K') {
+                        "K"
+                    } else {
+                        ""
+                    };
+                    if val >= 100.0 {
+                        format!("{val:.0}{prefix}")
+                    } else if val >= 10.0 {
+                        format!("{val:.1}{prefix}")
+                    } else {
+                        format!("{val:.2}{prefix}")
+                    }
+                })
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+
+        // Footnote markers
+        let mut markers = String::new();
+        if let Some(analysis) = baseline_analyses.get(bench.name.as_str()) {
+            if !analysis.significant {
+                let n = add_footnote("CI crosses zero".to_string());
+                markers.push_str(&format!(" [{n}]"));
+            }
+            if analysis.drift_correlation.abs() > 0.5 {
+                let dir = if analysis.drift_correlation > 0.0 {
+                    "slower"
+                } else {
+                    "faster"
+                };
+                let n = add_footnote(format!(
+                    "drift r={:.2} — later rounds {dir}",
+                    analysis.drift_correlation
+                ));
+                markers.push_str(&format!(" [{n}]"));
+            }
+        }
+        let cv = bench.summary.cv();
+        if cv > 0.20 {
+            let n = add_footnote(format!("CV={:.0}%", cv * 100.0));
+            markers.push_str(&format!(" [{n}]"));
+        }
+
+        rows.push(TreeRow {
+            name: if bench.name.len() > name_w {
+                format!("{}…", &bench.name[..name_w - 1])
+            } else {
+                bench.name.clone()
+            },
+            subgroup: bench.subgroup.clone(),
+            mean_str,
+            ci_str,
+            tp_str,
+            is_fastest,
+            markers,
+        });
+    }
+
+    // Compute column widths for alignment
+    let mean_val_w = rows.iter().map(|r| r.mean_str.len()).max().unwrap_or(1);
+    let ci_w = rows.iter().map(|r| r.ci_str.len()).max().unwrap_or(0);
+    let tp_w = rows.iter().map(|r| r.tp_str.len()).max().unwrap_or(0);
+
+    // Throughput unit for header
+    let tp_header = if has_throughput {
+        comp.throughput
+            .as_ref()
+            .map(|tp| {
+                let ref_mean = comp
+                    .benchmarks
+                    .iter()
+                    .find(|b| b.name == baseline_name)
+                    .unwrap_or(&comp.benchmarks[0])
+                    .summary
+                    .mean;
+                let (_, unit) = tp.compute(ref_mean, tp_unit);
+                let base = unit.trim_start_matches(['G', 'M', 'K', 'T']);
+                if base.is_empty() { unit } else { base.to_string() }
+            })
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    // Print group header
+    eprintln!();
+    let header_cols = format!(
+        "{:>mean_w$}{mean_unit}  {:<ci_w$}{}",
+        "mean",
+        "95% CI vs base",
+        if has_throughput {
+            format!("  {:>tp_w$}", tp_header)
+        } else {
+            String::new()
+        },
+        mean_w = mean_val_w,
+    );
+    eprintln!(
+        "  {BOLD}{}{RESET}  {DIM}{}{RESET}",
+        comp.group_name, meta,
+    );
+    eprintln!(
+        "  {:name_w$}  {DIM}{header_cols}{RESET}",
+        "",
+    );
+
+    // Group benchmarks by subgroup
+    let mut current_subgroup: Option<&str> = None;
+    let n_rows = rows.len();
+
+    for (idx, row) in rows.iter().enumerate() {
+        let is_last_in_group = idx + 1 == n_rows
+            || rows
+                .get(idx + 1)
+                .map(|next| next.subgroup != row.subgroup)
+                .unwrap_or(true);
+
+        // Subgroup header
+        let new_subgroup = row.subgroup.as_deref();
+        if new_subgroup != current_subgroup {
+            current_subgroup = new_subgroup;
+            if let Some(sg) = new_subgroup {
+                let is_last_subgroup = {
+                    // Check if any later row has a different subgroup
+                    !rows[idx + 1..].iter().any(|r| r.subgroup.as_deref() != new_subgroup)
+                };
+                let branch = if is_last_subgroup { "╰─" } else { "├─" };
+                eprintln!("  {DIM}{branch} {sg}{RESET}");
+            }
+        }
+
+        // Tree prefix
+        let (prefix, branch) = if row.subgroup.is_some() {
+            let parent_last = !rows[idx..]
+                .iter()
+                .skip(1)
+                .any(|r| r.subgroup == row.subgroup);
+            let is_last_subgroup_in_group = !rows[idx + 1..].iter().any(|r| r.subgroup != row.subgroup);
+            let vert = if is_last_subgroup_in_group { "   " } else { "│  " };
+            if parent_last || is_last_in_group {
+                (vert, "╰─")
+            } else {
+                (vert, "├─")
+            }
+        } else {
+            let is_last = idx + 1 == n_rows;
+            ("", if is_last { "╰─" } else { "├─" })
+        };
+
+        let name_color = if row.is_fastest { GREEN } else { "" };
+        let name_reset = if row.is_fastest { RESET } else { "" };
+
+        let tp_col = if has_throughput {
+            format!("  {CYAN}{:>tp_w$}{RESET}", row.tp_str)
+        } else {
+            String::new()
+        };
+
+        eprintln!(
+            "  {DIM}{prefix}{branch}{RESET} {name_color}{:<name_w$}{name_reset}  {:>mean_w$}{DIM}{mean_unit}{RESET}  {DIM}{:<ci_w$}{RESET}{tp_col}{YELLOW}{}{RESET}",
+            row.name,
+            row.mean_str,
+            row.ci_str,
+            row.markers,
+            mean_w = mean_val_w,
+        );
+    }
+
+    // Footnotes
+    if !footnotes.is_empty() {
+        for (i, note) in footnotes.iter().enumerate() {
+            eprintln!("  {YELLOW}[{}]{RESET} {DIM}{note}{RESET}", i + 1);
+        }
+    }
 }
 
 /// Generate a text-based bar chart for a group of benchmarks.
