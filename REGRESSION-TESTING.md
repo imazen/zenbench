@@ -206,7 +206,46 @@ fn bench_sort(c: &mut Criterion) {
 }
 ```
 
-### 7. Release gates
+### 7. Incremental migration from criterion
+
+You don't have to migrate all benchmarks at once. Keep both deps and
+migrate one file at a time:
+
+```toml
+# Cargo.toml — keep both during migration
+[dev-dependencies]
+criterion = { version = "0.8", features = ["html_reports"] }
+zenbench = { version = "0.1", features = ["criterion-compat"] }
+```
+
+For each bench file, change the import (no other code changes needed):
+
+```rust
+// Before:
+use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
+
+// After:
+use zenbench::criterion_compat::*;
+use zenbench::{criterion_group, criterion_main};
+```
+
+Both migrated and unmigrated bench files work side by side. Run both
+to verify parity, then drop `criterion` from Cargo.toml when done.
+
+**What you get immediately per migrated file:**
+- `--save-baseline` / `--baseline` for CI regression detection
+- Resource gating (CPU load, temperature, heavy processes)
+- Bootstrap CIs with noise threshold
+- Hardware TSC timing and stack alignment jitter
+- Allocation profiling (with `AllocProfiler`)
+- JSON/CSV/LLM/Markdown output formats
+
+**What you don't get via criterion-compat (use native API for these):**
+- Interleaved execution (criterion-compat runs sequentially, like criterion)
+- Paired statistical comparisons between benchmarks in the same group
+- Auto-convergence (criterion-compat uses fixed round count)
+
+### 8. Release gates
 
 Before publishing a crate, verify performance hasn't regressed from the
 last release:
