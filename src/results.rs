@@ -204,6 +204,14 @@ impl SuiteResult {
         crate::report::print_report(self);
     }
 
+    /// Generate a self-contained HTML report with inline SVG bar charts.
+    ///
+    /// Each group is a collapsible `<details>` section with a table and
+    /// bar chart. No external dependencies or JavaScript required.
+    pub fn to_html(&self) -> String {
+        crate::html::to_html(self)
+    }
+
     /// Generate key-value format optimized for LLM consumption and grep.
     ///
     /// One line per benchmark. Every field explicitly named. No positional

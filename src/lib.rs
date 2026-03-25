@@ -24,6 +24,7 @@ pub mod daemon;
 mod engine;
 mod format;
 mod gate;
+mod html;
 pub mod mcp;
 pub mod platform;
 mod report;
@@ -65,6 +66,7 @@ pub fn postprocess_result(result: &SuiteResult) {
         Some("llm") => print!("{}", result.to_llm()),
         Some("csv") => print!("{}", result.to_csv()),
         Some("markdown" | "md") => print!("{}", result.to_markdown()),
+        Some("html") => print!("{}", result.to_html()),
         Some("json") => {
             if let Ok(json) = serde_json::to_string_pretty(result) {
                 println!("{json}");
