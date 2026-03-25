@@ -17,6 +17,7 @@ Interleaved microbenchmarking for Rust with paired statistics, CI regression tes
   ╰─ patterns
      ├─ sequential     15.1 ±0.5µs  [-5.8%–-4.4%]          4.03G
      ╰─ mixed         401.0 ±8.1µs  [+2370%–+2385%]         156M
+
   level_9       ██████████████████████████████████████████████ 4.06 GiB/s
   level_6       ██████████████████████████████████████████████ 4.05 GiB/s
   sequential    █████████████████████████████████████████████ 4.03 GiB/s
@@ -32,26 +33,47 @@ Zenbench **interleaves**: each round, all benchmarks run in shuffled order. Roun
 
 ### vs criterion and divan
 
-| | criterion 0.8 | divan 0.1 | **zenbench 0.1** |
-|---|---|---|---|
-| **Execution** | Sequential | Sequential | **Interleaved shuffle** |
-| **Comparison** | Welch t-test | None | **Bootstrap CI + Wilcoxon** |
-| **Effect size** | None | None | **Cohen's d** |
-| **Drift detection** | None | None | **Spearman correlation** |
-| **CI regression gates** | None | None | **`--baseline`, exit codes** |
-| **Noise threshold** | ±1% (fixed) | None | **±1% (configurable)** |
-| **Per-benchmark CIs** | Bootstrap | None | **Bootstrap** |
-| **TSC timer** | No | Opt-in | **Auto (default)** |
-| **Overhead compensation** | Slope regression | Loop subtraction | **Loop subtraction** |
-| **Stack jitter** | alloca (unsafe) | None | **Safe trampoline** |
-| **Alloc profiling** | No | GlobalAlloc | **GlobalAlloc** |
-| **Deferred drop** | No | MaybeUninit | **Vec collect** |
-| **Async** | to_async() | No | **iter_async()** |
-| **Output formats** | JSON/HTML | Terminal | **JSON/CSV/LLM/Markdown** |
-| **Auto-convergence** | No | No | **CI width + stability** |
-| **Resource gating** | No | No | **Process detection** |
-| **Migration** | — | No | **Drop-in compat layer** |
-| **Display** | HTML plots | Tree | **Tree + Table + Bar chart** |
+| Feature | criterion | divan | zenbench |
+|---|:---:|:---:|:---:|
+| **Execution model** | | | |
+| Interleaved round-robin | ❌ | ❌ | ✅ |
+| Auto-convergence (stop when precise) | ❌ | ❌ | ✅ |
+| Resource gating (detect other benchmarks) | ❌ | ❌ | ✅ |
+| **Statistics** | | | |
+| Bootstrap confidence intervals | ✅ | ❌ | ✅ |
+| Paired comparison test | Welch t | ❌ | Wilcoxon |
+| Effect size metric | ❌ | ❌ | Cohen's d |
+| Drift detection (thermal/load) | ❌ | ❌ | Spearman r |
+| Noise threshold (suppress trivial diffs) | ✅ fixed 1% | ❌ | ✅ configurable |
+| **Measurement** | | | |
+| Hardware TSC timer (rdtsc/cntvct) | ❌ | ✅ opt-in | ✅ auto |
+| Overhead compensation | slope regression | loop subtraction | loop subtraction |
+| Stack alignment jitter | ✅ alloca (unsafe) | ❌ | ✅ safe trampoline |
+| Deferred drop (exclude Drop from timing) | ❌ | ✅ MaybeUninit | ✅ Vec collect |
+| Allocation profiling (GlobalAlloc) | ❌ | ✅ | ✅ |
+| **CI / Workflow** | | | |
+| Save/load baselines | ❌ | ❌ | ✅ `--baseline=` |
+| Regression exit codes (0/1/2) | ❌ | ❌ | ✅ |
+| Auto-update baseline on pass | ❌ | ❌ | ✅ `--update-on-pass` |
+| Hardware fingerprint / testbed ID | ❌ | ❌ | ✅ |
+| Cross-run variance inflation | ❌ | ❌ | ✅ pooled t-test |
+| **Output** | | | |
+| Terminal report | table | tree | tree (default) + table |
+| Bar chart | ❌ | ❌ | ✅ sorted, throughput |
+| JSON / CSV / Markdown | ✅ JSON | ❌ | ✅ JSON + CSV + LLM + MD |
+| HTML plots | ✅ | ❌ | ❌ |
+| Streaming per-group | ❌ | ❌ | ✅ |
+| Adaptive column layout | ❌ | ❌ | ✅ terminal-width aware |
+| **API** | | | |
+| Async benchmarks | ✅ to_async() | ❌ | ✅ iter_async() |
+| Thread contention testing | ❌ | ✅ threads attr | ✅ bench_contended() |
+| Thread scaling analysis | ❌ | ❌ | ✅ bench_scaling() |
+| Drop-in criterion migration | — | ❌ | ✅ zero code changes |
+| Attribute macros | ❌ | ✅ `#[divan::bench]` | ❌ |
+| **Platform** | | | |
+| Linux x86_64 / aarch64 | ✅ | ✅ | ✅ |
+| Windows x86_64 / ARM64 | ✅ | ✅ | ✅ |
+| macOS ARM64 / Intel | ✅ | ✅ | ✅ |
 
 ## Quick start
 
@@ -135,6 +157,7 @@ suite.group("scaling", |g| {
   ├─ sqrt_4t        5.8 ±0.1µs  [+36.0%–+38.8%]   1.72G
   ├─ sqrt_8t        8.5 ±0.3µs  [+91.6%–+101%]    1.17G
   ╰─ sqrt_16t      14.2 ±0.3µs  [+232%–+245%]      703M
+
   sqrt_1t   ██████████████████████████████████████████████████ 2.37G
   sqrt_2t   █████████████████████████████████████████████ 2.12G
   sqrt_4t   ████████████████████████████████████ 1.72G
@@ -171,6 +194,7 @@ suite.group("dispatch", |g| {
   ╰─ Dynamic dispatch
      ├─ StopToken                97.2 ±1.2ns  [+148%–+154%]        1.03G
      ╰─ &dyn Stop              112.5 ±3.1ns  [+176%–+193%]         889M
+
   impl Stop (FnStop)   ██████████████████████████████████████████████ 5.08G
   impl Stop (Stopper)  █████████████████████████████ 2.60G
   StopToken            ████████████ 1.03G
