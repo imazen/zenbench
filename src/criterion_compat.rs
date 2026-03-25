@@ -213,6 +213,46 @@ impl<'a> BenchmarkGroup<'a> {
         self
     }
 
+    /// Set sample size (criterion-compatible). Maps to max_rounds for immediate mode.
+    pub fn sample_size(&mut self, n: usize) -> &mut Self {
+        self.config_max_rounds = Some(n);
+        self
+    }
+
+    /// Set measurement time (criterion-compatible). Stored for immediate-mode config.
+    pub fn measurement_time(&mut self, dur: std::time::Duration) -> &mut Self {
+        self.config_max_time = Some(dur);
+        self
+    }
+
+    /// Set warmup time (criterion-compatible).
+    pub fn warm_up_time(&mut self, dur: std::time::Duration) -> &mut Self {
+        self.config_warmup_time = Some(dur);
+        self
+    }
+
+    /// Set sampling mode (criterion-compatible). Accepted but ignored —
+    /// zenbench uses its own adaptive sampling strategy.
+    pub fn sampling_mode(&mut self, _mode: impl std::fmt::Debug) -> &mut Self {
+        self
+    }
+
+    /// Set plot configuration (criterion-compatible). Accepted but ignored —
+    /// zenbench does not generate HTML plots.
+    pub fn plot_config(&mut self, _config: impl std::fmt::Debug) -> &mut Self {
+        self
+    }
+
+    /// Set significance level (criterion-compatible). Accepted for compat.
+    pub fn significance_level(&mut self, _level: f64) -> &mut Self {
+        self
+    }
+
+    /// Set number of resamples (criterion-compatible). Maps to bootstrap_resamples.
+    pub fn nresamples(&mut self, _n: usize) -> &mut Self {
+        self
+    }
+
     /// Sort benchmarks by speed in the report (zenbench extension).
     pub fn sort_by_speed(&mut self) -> &mut Self {
         self.ensure_group().config().sort_by_speed(true);
