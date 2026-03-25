@@ -1,30 +1,70 @@
-//! HTML report generation with inline SVG charts.
+//! HTML report generation with inline SVG charts and expandable details.
 //!
 //! Produces a self-contained HTML file — no external dependencies,
 //! no JavaScript required. SVG bar charts render natively in all browsers.
+//! Each benchmark has a nested `<details>` section with full statistics.
 
 use crate::format::format_ns;
 use crate::results::{ComparisonResult, SuiteResult};
 
 /// Generate a complete HTML report as a string.
 pub fn to_html(result: &SuiteResult) -> String {
-    let mut html = String::with_capacity(16_000);
+    let mut html = String::with_capacity(32_000);
 
     html.push_str(HTML_HEAD);
     html.push_str(&format!(
         "<h1>zenbench <small>{}</small></h1>\n",
         result.run_id
     ));
+
+    // Header metadata
+    html.push_str("<div class=\"header-meta\">");
     if let Some(hash) = &result.git_hash {
-        html.push_str(&format!("<p class=\"meta\">git: <code>{hash}</code></p>\n"));
+        html.push_str(&format!("<span>git: <code>{hash}</code></span>"));
+    }
+    if let Some(ci) = &result.ci_environment {
+        html.push_str(&format!("<span>ci: {ci}</span>"));
     }
     html.push_str(&format!(
-        "<p class=\"meta\">total: {:.1}s</p>\n",
+        "<span>total: {:.1}s</span>",
         result.total_time.as_secs_f64()
     ));
+    if result.gate_waits > 0 {
+        html.push_str(&format!("<span>{} noisy rounds</span>", result.gate_waits));
+    }
+    html.push_str(&format!(
+        "<span>timer: {}ns</span>",
+        result.timer_resolution_ns
+    ));
+    html.push_str(&format!(
+        "<span>overhead: {:.2}ns/iter</span>",
+        result.loop_overhead_ns
+    ));
+    if let Some(tb) = &result.testbed {
+        html.push_str(&format!(
+            "<span>{} ({}/{})</span>",
+            tb.cpu_model, tb.arch, tb.os
+        ));
+    }
+    if let Some(cal) = &result.calibration {
+        html.push_str(&format!(
+            "<span>cal: int={:.2}ns mem_bw={:.1}GiB/s lat={:.1}ns</span>",
+            cal.integer_ns, cal.memory_bw_gibps, cal.memory_lat_ns
+        ));
+    }
+    html.push_str("</div>\n");
 
     for comp in &result.comparisons {
         html.push_str(&render_group(comp));
+    }
+
+    for bench in &result.standalones {
+        html.push_str(&format!(
+            "<details><summary><h2>{}</h2></summary>\n",
+            bench.name
+        ));
+        html.push_str(&render_bench_details(bench, None));
+        html.push_str("</details>\n");
     }
 
     html.push_str("</div></body></html>");
@@ -34,21 +74,27 @@ pub fn to_html(result: &SuiteResult) -> String {
 fn render_group(comp: &ComparisonResult) -> String {
     let mut html = String::new();
     let tp_unit = comp.throughput_unit.as_deref();
+    let has_throughput = comp.throughput.is_some();
 
+    // Group header
+    let mut meta_parts = vec![format!("{} rounds", comp.completed_rounds)];
+    if comp.iterations_per_sample > 0 {
+        meta_parts.push(format!("{} calls/sample", comp.iterations_per_sample));
+    }
+    if comp.cache_firewall {
+        meta_parts.push("cache firewall".to_string());
+    }
+    if comp.cold_start {
+        meta_parts.push("cold start".to_string());
+    }
     html.push_str(&format!(
         "<details open><summary><h2>{}</h2>\
-         <span class=\"meta\">{} rounds × {} calls</span></summary>\n",
-        comp.group_name, comp.completed_rounds, comp.iterations_per_sample,
+         <span class=\"meta\">{}</span></summary>\n",
+        comp.group_name,
+        meta_parts.join(" · "),
     ));
 
-    // Table
-    let has_throughput = comp.throughput.is_some();
-    html.push_str("<table><tr><th>benchmark</th><th>mean</th><th>±mad</th>");
-    if has_throughput {
-        html.push_str("<th>throughput</th>");
-    }
-    html.push_str("</tr>\n");
-
+    // Baseline lookup
     let baseline_name = comp
         .analyses
         .first()
@@ -59,44 +105,73 @@ fn render_group(comp: &ComparisonResult) -> String {
                 .map(|b| b.name.as_str())
                 .unwrap_or("")
         });
-
     let baseline_analyses: std::collections::HashMap<&str, &crate::stats::PairedAnalysis> = comp
         .analyses
         .iter()
         .filter(|(base, _, _)| base == baseline_name)
         .map(|(_, cand, a)| (cand.as_str(), a))
         .collect();
-
     let fastest_mean = comp
         .benchmarks
         .iter()
         .map(|b| b.summary.mean)
         .fold(f64::INFINITY, f64::min);
 
+    // Main table — min, mean, ±mad, 95% CI, throughput
+    html.push_str(
+        "<table><tr><th>benchmark</th><th>min</th><th>mean</th><th>±mad</th><th>95% CI</th>",
+    );
+    if has_throughput {
+        html.push_str("<th>throughput</th>");
+    }
+    html.push_str("</tr>\n");
+
+    let mut current_subgroup: Option<&str> = None;
+
     for bench in &comp.benchmarks {
+        // Subgroup header row
+        if bench.subgroup.as_deref() != current_subgroup {
+            current_subgroup = bench.subgroup.as_deref();
+            if let Some(sg) = current_subgroup {
+                let ncols = if has_throughput { 6 } else { 5 };
+                html.push_str(&format!(
+                    "<tr class=\"subgroup\"><td colspan=\"{ncols}\">{sg}</td></tr>\n"
+                ));
+            }
+        }
+
         let is_fastest =
             (bench.summary.mean - fastest_mean).abs() < f64::EPSILON && comp.benchmarks.len() > 1;
         let cls = if is_fastest { " class=\"fastest\"" } else { "" };
 
-        let vs = if let Some(a) = baseline_analyses.get(bench.name.as_str()) {
-            let base = a.baseline.mean;
-            if base.abs() > f64::EPSILON {
-                let pct = a.pct_change;
-                let color = if pct < -1.0 {
-                    "green"
-                } else if pct > 1.0 {
-                    "red"
-                } else {
-                    "inherit"
-                };
-                format!(" <span style=\"color:{color}\">{pct:+.1}%</span>")
+        // CI column
+        let ci_str = if bench.name == baseline_name {
+            if let Some(ci) = &bench.mean_ci {
+                format!("[{}–{}]", format_ns(ci.lower), format_ns(ci.upper))
             } else {
-                String::new()
+                "—".to_string()
+            }
+        } else if let Some(a) = baseline_analyses.get(bench.name.as_str()) {
+            let bm = a.baseline.mean;
+            if bm.abs() > f64::EPSILON {
+                let lo = a.ci_lower / bm * 100.0;
+                let hi = a.ci_upper / bm * 100.0;
+                let color = if hi < 0.0 {
+                    "color:#9ece6a"
+                } else if lo > 0.0 {
+                    "color:#f7768e"
+                } else {
+                    ""
+                };
+                format!("<span style=\"{color}\">[{lo:+.1}%–{hi:+.1}%]</span>")
+            } else {
+                "—".to_string()
             }
         } else {
-            String::new()
+            "—".to_string()
         };
 
+        // Throughput
         let tp = if has_throughput {
             comp.throughput
                 .as_ref()
@@ -110,11 +185,18 @@ fn render_group(comp: &ComparisonResult) -> String {
         };
 
         html.push_str(&format!(
-            "<tr{cls}><td>{}{vs}</td><td>{}</td><td>±{}</td>{tp}</tr>\n",
+            "<tr{cls}><td>{}</td><td>{}</td><td>{}</td><td>±{}</td><td>{ci_str}</td>{tp}</tr>\n",
             bench.name,
+            format_ns(bench.summary.min),
             format_ns(bench.summary.mean),
             format_ns(bench.summary.mad),
         ));
+
+        // Expandable details per benchmark
+        let analysis = baseline_analyses.get(bench.name.as_str()).copied();
+        html.push_str("<tr class=\"detail-row\"><td colspan=\"6\">");
+        html.push_str(&render_bench_details(bench, analysis));
+        html.push_str("</td></tr>\n");
     }
     html.push_str("</table>\n");
 
@@ -122,6 +204,146 @@ fn render_group(comp: &ComparisonResult) -> String {
     html.push_str(&render_svg_bar_chart(comp));
 
     html.push_str("</details>\n");
+    html
+}
+
+fn render_bench_details(
+    bench: &crate::results::BenchmarkResult,
+    analysis: Option<&crate::stats::PairedAnalysis>,
+) -> String {
+    let mut html = String::new();
+    html.push_str("<details class=\"bench-detail\"><summary>details</summary>\n");
+    html.push_str("<div class=\"detail-grid\">\n");
+
+    // Summary stats
+    let s = &bench.summary;
+    html.push_str("<div class=\"detail-section\"><h4>Summary</h4><table class=\"detail-table\">");
+    html.push_str(&format!("<tr><td>n</td><td>{}</td></tr>", s.n));
+    html.push_str(&format!(
+        "<tr><td>min</td><td>{}</td></tr>",
+        format_ns(s.min)
+    ));
+    html.push_str(&format!(
+        "<tr><td>mean</td><td>{}</td></tr>",
+        format_ns(s.mean)
+    ));
+    html.push_str(&format!(
+        "<tr><td>median</td><td>{}</td></tr>",
+        format_ns(s.median)
+    ));
+    html.push_str(&format!(
+        "<tr><td>max</td><td>{}</td></tr>",
+        format_ns(s.max)
+    ));
+    html.push_str(&format!(
+        "<tr><td>MAD</td><td>{}</td></tr>",
+        format_ns(s.mad)
+    ));
+    html.push_str(&format!(
+        "<tr><td>std dev</td><td>{}</td></tr>",
+        format_ns(s.std_dev())
+    ));
+    html.push_str(&format!(
+        "<tr><td>CV</td><td>{:.1}%</td></tr>",
+        s.cv() * 100.0
+    ));
+    if bench.cold_start_ns > 0.0 {
+        html.push_str(&format!(
+            "<tr><td>cold start</td><td>{}</td></tr>",
+            format_ns(bench.cold_start_ns)
+        ));
+    }
+    if let Some(ci) = &bench.mean_ci {
+        html.push_str(&format!(
+            "<tr><td>mean CI</td><td>[{} – {}]</td></tr>",
+            format_ns(ci.lower),
+            format_ns(ci.upper)
+        ));
+    }
+    if let Some(slope) = bench.slope_ns {
+        html.push_str(&format!(
+            "<tr><td>slope (OLS)</td><td>{}</td></tr>",
+            format_ns(slope)
+        ));
+    }
+    html.push_str("</table></div>\n");
+
+    // Paired analysis (if vs baseline)
+    if let Some(a) = analysis {
+        html.push_str(
+            "<div class=\"detail-section\"><h4>vs Baseline</h4><table class=\"detail-table\">",
+        );
+        html.push_str(&format!(
+            "<tr><td>change</td><td>{:+.2}%</td></tr>",
+            a.pct_change
+        ));
+        html.push_str(&format!(
+            "<tr><td>significant</td><td>{}</td></tr>",
+            if a.significant { "yes" } else { "no" }
+        ));
+        html.push_str(&format!(
+            "<tr><td>Cohen's d</td><td>{:.2}</td></tr>",
+            a.cohens_d
+        ));
+        html.push_str(&format!(
+            "<tr><td>Wilcoxon p</td><td>{:.4}</td></tr>",
+            a.wilcoxon_p
+        ));
+        html.push_str(&format!(
+            "<tr><td>CI</td><td>[{} – {}]</td></tr>",
+            format_ns(a.ci_lower),
+            format_ns(a.ci_upper)
+        ));
+        html.push_str(&format!(
+            "<tr><td>drift (Spearman r)</td><td>{:.3}</td></tr>",
+            a.drift_correlation
+        ));
+        html.push_str(&format!(
+            "<tr><td>samples</td><td>{}</td></tr>",
+            a.n_samples
+        ));
+        html.push_str(&format!(
+            "<tr><td>outliers removed</td><td>{}</td></tr>",
+            a.n_outliers
+        ));
+        html.push_str("</table></div>\n");
+    }
+
+    // Alloc stats
+    #[cfg(feature = "alloc-profiling")]
+    if let Some(alloc) = &bench.alloc_stats {
+        html.push_str(
+            "<div class=\"detail-section\"><h4>Allocations</h4><table class=\"detail-table\">",
+        );
+        html.push_str(&format!(
+            "<tr><td>allocs/iter</td><td>{:.1}</td></tr>",
+            alloc.allocs_per_iter
+        ));
+        html.push_str(&format!(
+            "<tr><td>deallocs/iter</td><td>{:.1}</td></tr>",
+            alloc.deallocs_per_iter
+        ));
+        html.push_str(&format!(
+            "<tr><td>reallocs/iter</td><td>{:.1}</td></tr>",
+            alloc.reallocs_per_iter
+        ));
+        html.push_str(&format!(
+            "<tr><td>bytes/iter</td><td>{:.0}</td></tr>",
+            alloc.bytes_per_iter
+        ));
+        html.push_str("</table></div>\n");
+    }
+
+    // Tags
+    if !bench.tags.is_empty() {
+        html.push_str("<div class=\"detail-section\"><h4>Tags</h4><table class=\"detail-table\">");
+        for (k, v) in &bench.tags {
+            html.push_str(&format!("<tr><td>{k}</td><td>{v}</td></tr>"));
+        }
+        html.push_str("</table></div>\n");
+    }
+
+    html.push_str("</div></details>\n");
     html
 }
 
@@ -138,17 +360,21 @@ fn render_svg_bar_chart(comp: &ComparisonResult) -> String {
 
     let max_mean = sorted.last().map(|b| b.summary.mean).unwrap_or(1.0);
     let min_mean = sorted.first().map(|b| b.summary.mean).unwrap_or(1.0);
+    let fastest_mean = sorted
+        .first()
+        .map(|b| b.summary.mean)
+        .unwrap_or(f64::INFINITY);
 
     let bar_h = 24;
     let gap = 4;
     let label_w = 200;
     let chart_w = 400;
-    let value_w = 120;
+    let value_w = 140;
     let total_w = label_w + chart_w + value_w + 20;
     let total_h = sorted.len() * (bar_h + gap) + 10;
 
     let mut svg = format!(
-        "<svg width=\"{total_w}\" height=\"{total_h}\" xmlns=\"http://www.w3.org/2000/svg\">\n\
+        "<svg width=\"100%\" viewBox=\"0 0 {total_w} {total_h}\" xmlns=\"http://www.w3.org/2000/svg\">\n\
          <style>\n\
            text {{ font-family: -apple-system, sans-serif; font-size: 13px; fill: #c0caf5; }}\n\
            .bar {{ fill: #7aa2f7; }}\n\
@@ -157,11 +383,6 @@ fn render_svg_bar_chart(comp: &ComparisonResult) -> String {
          </style>\n\
          <rect width=\"100%\" height=\"100%\" fill=\"#1a1b26\" rx=\"6\"/>\n"
     );
-
-    let fastest_mean = sorted
-        .first()
-        .map(|b| b.summary.mean)
-        .unwrap_or(f64::INFINITY);
 
     for (i, bench) in sorted.iter().enumerate() {
         let y = i * (bar_h + gap) + 5;
@@ -210,20 +431,33 @@ const HTML_HEAD: &str = r#"<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>zenbench results</title>
 <style>
-  :root { --bg: #1a1b26; --fg: #c0caf5; --accent: #7aa2f7; --dim: #565f89; }
-  body { font-family: -apple-system, sans-serif; background: var(--bg); color: var(--fg); margin: 0; padding: 0; }
-  .container { max-width: 960px; margin: 0 auto; padding: 2rem; }
-  h1 { color: #fff; } h1 small { color: var(--dim); font-weight: normal; font-size: 0.5em; }
-  h2 { color: var(--accent); font-size: 1.2rem; margin: 0; display: inline; }
-  .meta { color: var(--dim); font-size: 0.85rem; }
-  summary { cursor: pointer; padding: 0.5rem 0; }
-  details { margin: 1rem 0; border: 1px solid #2f3549; border-radius: 8px; padding: 1rem; }
+  :root { --bg: #1a1b26; --fg: #c0caf5; --accent: #7aa2f7; --dim: #565f89; --green: #9ece6a; --red: #f7768e; --surface: #24283b; --border: #2f3549; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--fg); margin: 0; padding: 0; }
+  .container { max-width: 1000px; margin: 0 auto; padding: 2rem; }
+  h1 { color: #fff; margin-bottom: 0.5rem; } h1 small { color: var(--dim); font-weight: normal; font-size: 0.45em; }
+  h2 { color: var(--accent); font-size: 1.15rem; margin: 0; display: inline; }
+  h4 { color: var(--accent); font-size: 0.85rem; margin: 0.5rem 0 0.25rem; }
+  .meta { color: var(--dim); font-size: 0.8rem; margin-left: 1rem; }
+  .header-meta { display: flex; gap: 1.5rem; flex-wrap: wrap; color: var(--dim); font-size: 0.8rem; margin-bottom: 1rem; }
+  summary { cursor: pointer; padding: 0.4rem 0; }
+  summary:hover { opacity: 0.8; }
+  details { margin: 0.75rem 0; border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; }
   table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
-  th, td { padding: 0.3rem 0.6rem; text-align: left; border-bottom: 1px solid #2f3549; font-size: 0.9rem; }
-  th { color: var(--accent); }
-  .fastest td { color: #9ece6a; }
-  svg { margin: 0.5rem 0; display: block; }
-  code { background: #24283b; padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.85em; }
+  th, td { padding: 0.25rem 0.5rem; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+  th { color: var(--accent); font-weight: 600; font-size: 0.8rem; }
+  td { font-variant-numeric: tabular-nums; }
+  .fastest td { color: var(--green); }
+  .subgroup td { color: var(--dim); font-style: italic; font-size: 0.8rem; border-bottom: none; padding-top: 0.5rem; }
+  .detail-row td { padding: 0; border-bottom: none; }
+  .bench-detail { border: none; margin: 0; padding: 0 0 0 1rem; }
+  .bench-detail summary { font-size: 0.75rem; color: var(--dim); padding: 0.1rem 0; }
+  .detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.5rem; padding: 0.5rem 0; }
+  .detail-section { background: var(--surface); border-radius: 6px; padding: 0.5rem 0.75rem; }
+  .detail-table { margin: 0; }
+  .detail-table td { font-size: 0.8rem; padding: 0.15rem 0.4rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
+  .detail-table td:first-child { color: var(--dim); width: 45%; }
+  svg { margin: 0.75rem 0; display: block; max-width: 100%; }
+  code { background: var(--surface); padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.85em; }
 </style>
 </head>
 <body><div class="container">
