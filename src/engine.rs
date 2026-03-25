@@ -378,14 +378,14 @@ fn run_comparison_group(
             break;
         }
 
-        // Resource gate: cap the wait to remaining wall-clock budget so we
-        // don't burn 30s on a gate when max_time is 10s.
-        // After min_rounds, use 3x measurement budget as wall cap.
-        // During min_rounds, allow up to 10x to ensure we get enough data.
-        let wall_multiplier = if round < config.min_rounds { 5 } else { 3 };
+        // Resource gate: use max_wall_time as the budget, not max_time.
+        // max_time is the measurement budget (short for fast benchmarks);
+        // max_wall_time is the user's patience limit (default 120s).
+        // Previously used max_time × 3 which starved fast benchmarks
+        // on noisy systems — they'd exhaust the 30s gate budget in 5 rounds.
+        // Fixes: https://github.com/imazen/zenbench/issues/3
         let wall_remaining = config
-            .max_time
-            .saturating_mul(wall_multiplier)
+            .max_wall_time
             .saturating_sub(group_start.elapsed());
         if round >= config.min_rounds && wall_remaining.is_zero() {
             break;
