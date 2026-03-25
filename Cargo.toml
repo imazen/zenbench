@@ -3,32 +3,28 @@ name = "zenbench"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.89"
-description = "Interleaved microbenchmarking with resource gating, paired statistics, and fire-and-forget mode"
+description = "Interleaved microbenchmarking with paired statistics, CI regression testing, and hardware-adaptive measurement"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/imazen/zenbench"
 keywords = ["benchmark", "performance", "profiling", "testing"]
 categories = ["development-tools", "development-tools::profiling"]
+readme = "README.md"
 
 [features]
 default = ["cli", "daemon", "precise-timing", "alloc-profiling"]
 cli = ["dep:clap"]
 daemon = []
 cpu-time = ["dep:cpu-time"]
-# Enables hardware TSC timer (rdtsc/rdtscp on x86_64, cntvct_el0 on aarch64)
+# Hardware TSC timer (rdtsc/rdtscp on x86_64, cntvct_el0 on aarch64)
 # and asm fences for stronger dead-code-elimination prevention.
-# Requires unsafe code in the timing module only.
 precise-timing = []
-# Enables AllocProfiler for tracking heap allocations per benchmark.
+# AllocProfiler for tracking heap allocations per benchmark.
 # Install as #[global_allocator] in your bench binary to activate.
-# Requires unsafe code in the alloc module only.
 alloc-profiling = []
-# Drop-in criterion compatibility layer. NOT default — opt-in for migration.
+# Drop-in criterion compatibility layer. Opt-in for migration.
 criterion-compat = []
-# Enables async benchmarking via Bencher::to_async(runtime).
-# Requires tokio runtime. Uses block_on() inside sync loop — same as criterion.
+# Async benchmarking via Bencher::iter_async(runtime, || async { ... }).
 async = ["dep:tokio"]
-# MCP server support (future)
-# mcp = []
 
 [[bin]]
 name = "zenbench"
@@ -40,14 +36,14 @@ name = "zenbench-mcp"
 path = "src/bin/zenbench-mcp.rs"
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sysinfo = "0.38"
-fs4 = { version = "0.13", features = ["sync"] }
-clap = { version = "4", features = ["derive"], optional = true }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+sysinfo = "0.38.4"
+fs4 = { version = "0.13.1", features = ["sync"] }
+clap = { version = "4.6.0", features = ["derive"], optional = true }
 cpu-time = { version = "1.0.0", optional = true }
-terminal_size = "0.4"
-tokio = { version = "1", features = ["rt"], optional = true }
+terminal_size = "0.4.4"
+tokio = { version = "1.50.0", features = ["rt"], optional = true }
 
 [[bench]]
 name = "sorting"
@@ -70,6 +66,6 @@ name = "alloc_profiling"
 harness = false
 
 [dev-dependencies]
-divan = "0.1"
-criterion = { version = "0.8", features = ["html_reports"] }
-tokio = { version = "1", features = ["rt", "macros"] }
+divan = "0.1.21"
+criterion = { version = "0.8.2", features = ["html_reports"] }
+tokio = { version = "1.50.0", features = ["rt", "macros"] }
