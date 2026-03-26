@@ -48,8 +48,6 @@ jobs:
             name: Windows ARM64
           - os: macos-latest
             name: macOS ARM64
-          - os: macos-26-intel
-            name: macOS Intel
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
