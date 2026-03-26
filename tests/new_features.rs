@@ -1072,8 +1072,7 @@ fn baseline_statistical_gating_prevents_false_positive() {
     // Should NOT be flagged even with a 1% threshold.
     let baseline = make_result(100.0, 20.0);
     let current = make_result(103.0, 20.0);
-    let comparison =
-        zenbench::baseline::compare_against_baseline(&baseline, &current, 1.0);
+    let comparison = zenbench::baseline::compare_against_baseline(&baseline, &current, 1.0);
     assert_eq!(
         comparison.regressions, 0,
         "3% shift with std_dev=20 should NOT be flagged (t=0.75 < 2.0)"
@@ -1082,8 +1081,7 @@ fn baseline_statistical_gating_prevents_false_positive() {
     // Scenario 2: large shift (30%), same noise.
     // t = 30/4 = 7.5 → significant. Should be caught.
     let regressed = make_result(130.0, 20.0);
-    let comparison2 =
-        zenbench::baseline::compare_against_baseline(&baseline, &regressed, 5.0);
+    let comparison2 = zenbench::baseline::compare_against_baseline(&baseline, &regressed, 5.0);
     assert!(
         comparison2.regressions > 0,
         "30% shift with std_dev=20 SHOULD be flagged (t=7.5 > 2.0)"
