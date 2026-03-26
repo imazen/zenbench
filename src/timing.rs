@@ -365,8 +365,13 @@ mod tests {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     fn tsc_reads_increase() {
         let a = tsc_start();
-        // Do some work to ensure the counter advances
-        std::hint::black_box(0u64);
+        // Spin enough to guarantee the counter advances even on low-freq
+        // counters like aarch64 cntvct_el0 (~24 MHz on Apple Silicon).
+        let mut x = 0u64;
+        for i in 0..1000 {
+            x = x.wrapping_add(std::hint::black_box(i));
+        }
+        std::hint::black_box(x);
         let b = tsc_end();
         assert!(b > a, "TSC should advance: {a} -> {b}");
     }
