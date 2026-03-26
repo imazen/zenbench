@@ -204,23 +204,12 @@ fn render_group(comp: &ComparisonResult) -> String {
         .map(|b| b.summary.mean)
         .fold(f64::INFINITY, f64::min);
 
-    // Main table — min, mean, ±mad, 95% CI, throughput
-    let ncols_header = if has_throughput { 6 } else { 5 };
-    let tp_header = if has_throughput {
-        "<span class=\"bench-tp\">throughput</span>"
-    } else {
-        ""
-    };
-    html.push_str(&format!(
-        "<table><tr><td colspan=\"{ncols_header}\"><div class=\"bench-row bench-header\">\
-         <span class=\"bench-name\">benchmark</span>\
-         <span class=\"bench-min\">min</span>\
-         <span class=\"bench-mean\">mean</span>\
-         <span class=\"bench-mad\">±mad</span>\
-         <span class=\"bench-ci\">95% CI</span>\
-         {tp_header}\
-         </div></td></tr>\n"
-    ));
+    // Main table — real columns for alignment
+    html.push_str("<table><tr class=\"header-row\"><th>benchmark</th><th>min</th><th>mean</th><th>±mad</th><th>95% CI</th>");
+    if has_throughput {
+        html.push_str("<th>throughput</th>");
+    }
+    html.push_str("</tr>\n");
 
     let mut current_subgroup: Option<&str> = None;
 
@@ -267,39 +256,44 @@ fn render_group(comp: &ComparisonResult) -> String {
             "—".to_string()
         };
 
-        // Throughput
+        // Throughput cell
         let tp = if has_throughput {
             comp.throughput
                 .as_ref()
                 .map(|tp| {
                     let (val, unit) = tp.compute(bench.summary.mean, tp_unit);
-                    format!("<span class=\"bench-tp\">{val:.2} {unit}</span>")
+                    format!("<td>{val:.2} {unit}</td>")
                 })
-                .unwrap_or_default()
+                .unwrap_or_else(|| "<td></td>".to_string())
         } else {
             String::new()
         };
 
-        // Benchmark name is the clickable expand trigger
         let analysis = baseline_analyses.get(bench.name.as_str()).copied();
         let ncols = if has_throughput { 6 } else { 5 };
+        let bench_id = format!(
+            "b-{}-{}",
+            comp.group_name.replace(' ', "_"),
+            bench.name.replace(' ', "_")
+        );
+
+        // Data row — real table cells for column alignment
         html.push_str(&format!(
-            "<tr{cls}><td colspan=\"{ncols}\"><details class=\"bench-detail\"><summary>\
-             <span class=\"bench-row\">\
-             <span class=\"bench-name\">{}</span>\
-             <span class=\"bench-min\">{}</span>\
-             <span class=\"bench-mean\">{}</span>\
-             <span class=\"bench-mad\">±{}</span>\
-             <span class=\"bench-ci\">{ci_str}</span>\
-             {tp}\
-             </span></summary>\n",
+            "<tr{cls}>\
+             <td><input type=\"checkbox\" id=\"{bench_id}\" class=\"detail-toggle\" hidden>\
+             <label class=\"bench-toggle\" for=\"{bench_id}\">{}</label></td>\
+             <td>{}</td><td>{}</td><td>±{}</td><td>{ci_str}</td>{tp}</tr>\n",
             bench.name,
             format_ns(bench.summary.min),
             format_ns(bench.summary.mean),
             format_ns(bench.summary.mad),
         ));
+        // Detail row — hidden by default, shown when checkbox checked
+        html.push_str(&format!(
+            "<tr class=\"detail-row\"><td colspan=\"{ncols}\">\n"
+        ));
         html.push_str(&render_bench_detail_content(bench, analysis));
-        html.push_str("</details></td></tr>\n");
+        html.push_str("</td></tr>\n");
     }
     html.push_str("</table>\n");
 
@@ -589,22 +583,21 @@ const HTML_HEAD: &str = r#"<!DOCTYPE html>
   summary:hover { opacity: 0.8; }
   details { margin: 0.8rem 0; border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem 1.2rem; }
   table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
-  th, td { padding: 0.35rem 0.6rem; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.95rem; }
-  th { color: var(--accent); font-weight: 600; font-size: 0.9rem; }
+  th, td { padding: 0.5rem 0.8rem; text-align: right; font-size: 1.05rem; border: none; }
+  th { color: var(--dim); font-weight: 600; font-size: 0.85rem; border-bottom: 2px solid var(--border); }
+  th:first-child, td:first-child { text-align: left; }
   td { font-variant-numeric: tabular-nums; }
-  .fastest td { color: var(--green); }
-  .subgroup td { color: var(--dim); font-style: italic; font-size: 0.9rem; border-bottom: none; padding-top: 0.6rem; }
-  .bench-detail { border: none; margin: 0; padding: 0; }
-  .bench-detail > summary { cursor: pointer; padding: 0.4rem 0.6rem; list-style: none; }
-  .bench-detail > summary::-webkit-details-marker { display: none; }
-  .bench-detail > summary::marker { display: none; content: ''; }
-  .bench-row { display: flex; gap: 1.5rem; align-items: baseline; }
-  .bench-row > span { white-space: nowrap; }
-  .bench-name { flex: 1; }
-  .bench-name::before { content: '▸ '; color: var(--dim); font-size: 0.8rem; }
-  details[open] > summary .bench-name::before { content: '▾ '; }
-  .fastest .bench-name { color: var(--green); }
-  .bench-header { font-weight: 600; color: var(--dim); font-size: 0.85rem; }
+  .header-row th { padding-bottom: 0.4rem; }
+  tr:hover > td { background: rgba(255,255,255,0.03); }
+  .fastest > td { color: var(--green); }
+  .subgroup td { color: var(--dim); font-style: italic; font-size: 0.9rem; padding-top: 0.8rem; border-bottom: 1px solid var(--border); text-align: left; }
+  .bench-toggle { cursor: pointer; white-space: nowrap; }
+  .bench-toggle::before { content: '▸ '; color: var(--dim); }
+  .detail-toggle:checked + .bench-toggle::before { content: '▾ '; }
+  .bench-toggle:hover { opacity: 0.8; }
+  .detail-row { display: none; }
+  .detail-row td { padding: 0.2rem 0.8rem 0.6rem; border: none; }
+  tr:has(.detail-toggle:checked) + .detail-row { display: table-row; }
   .detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.6rem; padding: 0.6rem 0; }
   .detail-section { background: var(--surface); border-radius: 6px; padding: 0.6rem 0.9rem; }
   .detail-table { margin: 0; }
