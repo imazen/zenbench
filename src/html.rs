@@ -374,6 +374,12 @@ fn render_bench_detail_content(
             format_ns(ci.upper)
         ));
     }
+    if bench.timer_ticks_per_sample < 50.0 {
+        html.push_str(&format!(
+            "<tr><td>timer ticks/sample</td><td>{:.0} <span class=\"pill pill-yellow\">resolution-limited</span></td></tr>",
+            bench.timer_ticks_per_sample,
+        ));
+    }
     if let Some(slope) = bench.slope_ns {
         html.push_str(&format!(
             "<tr><td>slope (OLS)</td><td>{}</td></tr>",

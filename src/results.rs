@@ -272,6 +272,9 @@ impl SuiteResult {
                         ));
                     }
                     comparison.push(format!("significant={}", analysis.significant));
+                    if analysis.resolution_limited {
+                        comparison.push("resolution_limited=true".to_string());
+                    }
                     comparison.push(format!("effect={:.2}", analysis.cohens_d));
                     comparison.push(format!("p={:.4}", analysis.wilcoxon_p));
                 }
@@ -469,18 +472,26 @@ impl SuiteResult {
                 let mean_str = format_ns(bench.summary.mean);
 
                 // vs Base column
+                let res_flag = analyses
+                    .get(bench.name.as_str())
+                    .is_some_and(|a| a.resolution_limited);
                 let vs_base = if has_comparisons {
                     if bench.name == baseline_name {
                         mean_str.clone()
                     } else if let Some(analysis) = analyses.get(bench.name.as_str()) {
                         let base_mean = analysis.baseline.mean;
-                        if base_mean.abs() > f64::EPSILON {
+                        let ci_str = if base_mean.abs() > f64::EPSILON {
                             let lo_pct = analysis.ci_lower / base_mean * 100.0;
                             let mid_pct = analysis.ci_median / base_mean * 100.0;
                             let hi_pct = analysis.ci_upper / base_mean * 100.0;
                             format!("[{:+.1}%  {:+.1}%  {:+.1}%]", lo_pct, mid_pct, hi_pct)
                         } else {
                             format!("{:+.1}%", analysis.pct_change)
+                        };
+                        if res_flag {
+                            format!("{ci_str} \u{26a0}")
+                        } else {
+                            ci_str
                         }
                     } else {
                         String::new()
@@ -521,6 +532,15 @@ impl SuiteResult {
                 }
             }
 
+            // Resolution warning
+            let any_res_limited = comp.analyses.iter().any(|(_, _, a)| a.resolution_limited);
+            if any_res_limited {
+                out.push_str(
+                    "\n> \u{26a0} Some comparisons are below timer resolution \
+                     and cannot be distinguished by this hardware.\n",
+                );
+            }
+
             // Bar chart
             if !comp.benchmarks.is_empty() {
                 out.push('\n');
@@ -559,7 +579,7 @@ impl SuiteResult {
         // Header
         let mut header = "group,benchmark,subgroup,mean_ns,std_dev_ns,median_ns,mad_ns,min_ns,max_ns,n,cv,\
              cold_start_ns,cpu_mean_ns,cpu_efficiency,throughput_value,throughput_unit,\
-             vs_base_pct,vs_base_ci_lo_pct,vs_base_ci_hi_pct,significant,cohens_d,wilcoxon_p,drift_r"
+             vs_base_pct,vs_base_ci_lo_pct,vs_base_ci_hi_pct,significant,resolution_limited,cohens_d,wilcoxon_p,drift_r,timer_ticks_per_sample"
             .to_string();
         #[cfg(feature = "alloc-profiling")]
         header.push_str(",allocs_per_iter,deallocs_per_iter,reallocs_per_iter,bytes_per_iter");
@@ -624,51 +644,62 @@ impl SuiteResult {
                     .unwrap_or_default();
 
                 // vs-base columns
-                let (vs_pct, vs_ci_lo, vs_ci_hi, significant, cohens_d, wilcoxon_p, drift_r) =
-                    if bench.name == baseline_name {
-                        // baseline row: no comparison values
+                let (
+                    vs_pct,
+                    vs_ci_lo,
+                    vs_ci_hi,
+                    significant,
+                    res_limited,
+                    cohens_d,
+                    wilcoxon_p,
+                    drift_r,
+                ) = if bench.name == baseline_name {
+                    // baseline row: no comparison values
+                    (
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                    )
+                } else if let Some(analysis) = analyses.get(bench.name.as_str()) {
+                    let base_mean = analysis.baseline.mean;
+                    let (ci_lo, ci_hi) = if base_mean.abs() > f64::EPSILON {
                         (
-                            String::new(),
-                            String::new(),
-                            String::new(),
-                            String::new(),
-                            String::new(),
-                            String::new(),
-                            String::new(),
-                        )
-                    } else if let Some(analysis) = analyses.get(bench.name.as_str()) {
-                        let base_mean = analysis.baseline.mean;
-                        let (ci_lo, ci_hi) = if base_mean.abs() > f64::EPSILON {
-                            (
-                                format!("{:.4}", analysis.ci_lower / base_mean * 100.0),
-                                format!("{:.4}", analysis.ci_upper / base_mean * 100.0),
-                            )
-                        } else {
-                            (String::new(), String::new())
-                        };
-                        (
-                            format!("{:.4}", analysis.pct_change),
-                            ci_lo,
-                            ci_hi,
-                            format!("{}", analysis.significant),
-                            format!("{:.4}", analysis.cohens_d),
-                            format!("{:.6}", analysis.wilcoxon_p),
-                            format!("{:.4}", analysis.drift_correlation),
+                            format!("{:.4}", analysis.ci_lower / base_mean * 100.0),
+                            format!("{:.4}", analysis.ci_upper / base_mean * 100.0),
                         )
                     } else {
-                        (
-                            String::new(),
-                            String::new(),
-                            String::new(),
-                            String::new(),
-                            String::new(),
-                            String::new(),
-                            String::new(),
-                        )
+                        (String::new(), String::new())
                     };
+                    (
+                        format!("{:.4}", analysis.pct_change),
+                        ci_lo,
+                        ci_hi,
+                        format!("{}", analysis.significant),
+                        format!("{}", analysis.resolution_limited),
+                        format!("{:.4}", analysis.cohens_d),
+                        format!("{:.6}", analysis.wilcoxon_p),
+                        format!("{:.4}", analysis.drift_correlation),
+                    )
+                } else {
+                    (
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                    )
+                };
 
                 out.push_str(&format!(
-                    "{},{},{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{},{:.4},{},{},{},{},{},{},{},{},{},{},{},{}",
+                    "{},{},{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{},{:.4},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.0}",
                     csv_escape(&comp.group_name),
                     csv_escape(&bench.name),
                     subgroup,
@@ -689,9 +720,11 @@ impl SuiteResult {
                     vs_ci_lo,
                     vs_ci_hi,
                     significant,
+                    res_limited,
                     cohens_d,
                     wilcoxon_p,
                     drift_r,
+                    bench.timer_ticks_per_sample,
                 ));
                 #[cfg(feature = "alloc-profiling")]
                 if let Some(alloc) = &bench.alloc_stats {
@@ -737,8 +770,9 @@ impl SuiteResult {
                 .map(csv_escape)
                 .unwrap_or_default();
 
+            // group is empty for standalones; comparison columns empty
             out.push_str(&format!(
-                ",{},{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{},{:.4},{},{},{},,,,,,,,\n",
+                ",{},{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{},{:.4},{},{},{},,,,,,,,,,,{:.0}\n",
                 csv_escape(&bench.name),
                 subgroup,
                 bench.summary.mean,
@@ -752,6 +786,7 @@ impl SuiteResult {
                 cold,
                 cpu_mean,
                 cpu_eff,
+                bench.timer_ticks_per_sample,
             ));
         }
 
