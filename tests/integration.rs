@@ -17,12 +17,20 @@ fn run_simple_suite() -> SuiteResult {
     run_gated(GateConfig::disabled(), |suite| {
         suite.compare("simple", |group| {
             group.config().max_rounds(5).auto_rounds(false);
-            group.bench("fast", |b| b.iter(|| black_box(42u64 + 1)));
+            group.bench("fast", |b| {
+                b.iter(|| {
+                    let mut sum = 0u64;
+                    for i in 0..50 {
+                        sum = sum.wrapping_add(black_box(i));
+                    }
+                    black_box(sum)
+                })
+            });
             group.bench("slow", |b| {
                 b.iter(|| {
                     let mut sum = 0u64;
-                    for i in 0..100 {
-                        sum += black_box(i);
+                    for i in 0..5000 {
+                        sum = sum.wrapping_add(black_box(i));
                     }
                     black_box(sum)
                 })
@@ -151,22 +159,22 @@ fn cold_start_mode_forces_single_iteration() {
 fn auto_rounds_converges() {
     let result = run_gated(GateConfig::disabled(), |suite| {
         suite.compare("converge", |group| {
-            group.config().max_rounds(100).target_precision(0.05);
-            // Two benchmarks with ~10x difference — both in measurable range.
-            // Avoids sub-ns baseline which is hard to converge on.
-            group.bench("sum_100", |b| {
+            group.config().max_rounds(100).target_precision(0.10);
+            // Two benchmarks with ~10x difference — both well above timer
+            // resolution (41ns on macOS ARM64 cntvct_el0).
+            group.bench("sum_500", |b| {
                 b.iter(|| {
                     let mut v = 0u64;
-                    for i in 0..100 {
+                    for i in 0..500 {
                         v = v.wrapping_add(black_box(i));
                     }
                     black_box(v)
                 })
             });
-            group.bench("sum_1000", |b| {
+            group.bench("sum_5000", |b| {
                 b.iter(|| {
                     let mut v = 0u64;
-                    for i in 0..1000 {
+                    for i in 0..5000 {
                         v = v.wrapping_add(black_box(i));
                     }
                     black_box(v)
