@@ -63,7 +63,8 @@ Zenbench **interleaves**: each round, all benchmarks run in shuffled order. Roun
 | Terminal report | table | tree | tree (default) + table |
 | Bar chart | ❌ | ❌ | ✅ sorted, throughput |
 | JSON / CSV / Markdown | ✅ JSON | ❌ | ✅ JSON + CSV + LLM + MD |
-| HTML plots | ✅ | ❌ | ❌ |
+| HTML plots (violin/PDF/regression) | ✅ plotters.rs | ❌ | ❌ |
+| HTML report (self-contained, SVG) | ❌ | ❌ | ✅ `--format=html` |
 | Streaming per-group | ❌ | ❌ | ✅ |
 | Adaptive column layout | ❌ | ❌ | ✅ terminal-width aware |
 | **API** | | | |
