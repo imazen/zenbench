@@ -391,7 +391,9 @@ fn render_bench_detail_content(
             "<tr><td>change</td><td>{:+.2}%</td></tr>",
             a.pct_change
         ));
-        let sig_pill = if a.significant {
+        let sig_pill = if a.resolution_limited {
+            "<span class=\"pill pill-yellow\">below timer resolution</span>"
+        } else if a.significant {
             "<span class=\"pill pill-green\">yes — real difference</span>"
         } else {
             "<span class=\"pill pill-dim\">no — within noise</span>"

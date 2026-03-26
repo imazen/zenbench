@@ -269,6 +269,11 @@ pub struct PairedAnalysis {
     /// Wilcoxon signed-rank test p-value (two-sided).
     /// Non-parametric — valid even for non-normal benchmark distributions.
     pub wilcoxon_p: f64,
+    /// True when the measured difference is below the timer quantization floor.
+    /// When set, `significant` is forced to false — the hardware can't resolve
+    /// the difference regardless of what the statistics say.
+    #[serde(default)]
+    pub resolution_limited: bool,
 }
 
 impl PairedAnalysis {
@@ -286,16 +291,21 @@ impl PairedAnalysis {
         candidate: &[f64],
         iterations_per_sample: &[usize],
     ) -> Option<Self> {
-        Self::compute_with_config(baseline, candidate, iterations_per_sample, 10_000, 0.0)
+        Self::compute_with_config(baseline, candidate, iterations_per_sample, 10_000, 0.0, 0.0)
     }
 
     /// Compute paired analysis with configurable bootstrap resamples and noise threshold.
+    ///
+    /// `timer_resolution_ns`: hardware timer resolution (e.g. 41ns for macOS ARM64
+    /// cntvct_el0). Used to compute the quantization floor — differences smaller
+    /// than `timer_res / median_iterations` are undetectable by the hardware.
     pub(crate) fn compute_with_config(
         baseline: &[f64],
         candidate: &[f64],
         iterations_per_sample: &[usize],
         n_resamples: usize,
         noise_threshold: f64,
+        timer_resolution_ns: f64,
     ) -> Option<Self> {
         if baseline.len() != candidate.len()
             || baseline.len() != iterations_per_sample.len()
@@ -361,11 +371,30 @@ impl PairedAnalysis {
         // Wilcoxon signed-rank test (non-parametric)
         let wilcoxon_p = wilcoxon_signed_rank(&clean_diffs);
 
+        // Quantization floor: the smallest per-iteration difference the timer can
+        // resolve. If the CI is narrower than this, the "significance" is just
+        // quantization artifacts, not a real signal.
+        let median_iters = {
+            let mut sorted_iters: Vec<usize> = iterations_per_sample.to_vec();
+            sorted_iters.sort_unstable();
+            sorted_iters[sorted_iters.len() / 2] as f64
+        };
+        let quantization_ns = if median_iters > 0.0 {
+            timer_resolution_ns / median_iters
+        } else {
+            0.0
+        };
+        let resolution_limited =
+            quantization_ns > 0.0 && diff_summary.mean.abs() < quantization_ns * 2.0;
+
         // Significance: 95% CI must exclude zero AND the noise threshold.
         // Without noise_threshold (0.0): pure CI-based — CI must not straddle zero.
         // With noise_threshold (e.g., 0.01): CI must be entirely outside ±1% of baseline.
         // This prevents "statistically significant but unmeasurably small" reports.
-        let significant = if noise_threshold > 0.0 && base_summary.mean.abs() > f64::EPSILON {
+        // Also forced false when resolution_limited — the hardware can't resolve it.
+        let significant = if resolution_limited {
+            false
+        } else if noise_threshold > 0.0 && base_summary.mean.abs() > f64::EPSILON {
             let threshold_ns = base_summary.mean.abs() * noise_threshold;
             ci_lower > threshold_ns || ci_upper < -threshold_ns
         } else {
@@ -386,6 +415,7 @@ impl PairedAnalysis {
             ci_upper,
             drift_correlation,
             wilcoxon_p,
+            resolution_limited,
         })
     }
 }

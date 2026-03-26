@@ -58,6 +58,11 @@ pub struct BenchmarkResult {
     /// cost from constant overhead (timer, black_box, dispatch).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slope_ns: Option<f64>,
+    /// Timer ticks per sample: `(mean_ns * iterations_per_sample) / timer_resolution_ns`.
+    /// Values below ~50 mean the measurement is quantization-limited — differences
+    /// smaller than `timer_res / iterations` are undetectable.
+    #[serde(default)]
+    pub timer_ticks_per_sample: f64,
     /// Allocation statistics (when `alloc-profiling` feature is active and
     /// `AllocProfiler` is installed as the global allocator).
     #[cfg(feature = "alloc-profiling")]
@@ -76,6 +81,7 @@ impl Default for BenchmarkResult {
             cold_start_ns: 0.0,
             mean_ci: None,
             slope_ns: None,
+            timer_ticks_per_sample: 0.0,
             #[cfg(feature = "alloc-profiling")]
             alloc_stats: None,
         }
@@ -303,6 +309,12 @@ impl SuiteResult {
                     meta.push(format!(
                         "cold={}",
                         crate::format::format_ns(bench.cold_start_ns),
+                    ));
+                }
+                if bench.timer_ticks_per_sample < 50.0 {
+                    meta.push(format!(
+                        "timer_ticks={:.0} (resolution-limited)",
+                        bench.timer_ticks_per_sample,
                     ));
                 }
                 for (k, v) in &bench.tags {

@@ -507,11 +507,23 @@ fn print_report_body(result: &SuiteResult) {
                 markers.push_str(&format!("[{n}]"));
             }
             // Cold start below timer resolution
-            if bench.cold_start_ns > 0.0 && bench.cold_start_ns < timer_res * 5.0 {
-                let n = add_footnote(format!(
-                    "cold start ({:.0}ns) near timer resolution \u{2014} unreliable",
-                    bench.cold_start_ns,
-                ));
+            if bench.cold_start_ns < timer_res && timer_res > 0.0 {
+                let n = add_footnote(
+                    "cold start below timer resolution \u{2014} unreliable".to_string(),
+                );
+                markers.push_str(&format!("[{n}]"));
+            }
+            // Resolution-limited comparison
+            if comp
+                .analyses
+                .iter()
+                .find(|(_, c, _)| c == &bench.name)
+                .map(|(_, _, a)| a)
+                .is_some_and(|a| a.resolution_limited)
+            {
+                let n = add_footnote(
+                    "difference below timer resolution \u{2014} cannot distinguish".to_string(),
+                );
                 markers.push_str(&format!("[{n}]"));
             }
 

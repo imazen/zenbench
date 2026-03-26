@@ -636,6 +636,7 @@ fn run_comparison_group(
                 &iters_per_round,
                 n_resamples,
                 noise_threshold,
+                timer_resolution_ns as f64,
             ) {
                 analyses.push((names[baseline_idx].clone(), names[i].clone(), analysis));
             }
@@ -656,6 +657,7 @@ fn run_comparison_group(
                         &iters_per_round,
                         n_resamples,
                         noise_threshold,
+                        timer_resolution_ns as f64,
                     ) {
                         analyses.push((names[i].clone(), names[j].clone(), analysis));
                     }
@@ -711,6 +713,14 @@ fn run_comparison_group(
             None
         };
 
+        // Timer ticks per sample: how many timer resolution units each sample spans.
+        // Below ~50 means the measurement is quantization-limited.
+        let timer_ticks = if timer_resolution_ns > 0 {
+            (summary.mean * iterations_per_sample as f64) / timer_resolution_ns as f64
+        } else {
+            f64::INFINITY
+        };
+
         individual_results.push(BenchmarkResult {
             name: bench.name.clone(),
             summary,
@@ -720,6 +730,7 @@ fn run_comparison_group(
             cold_start_ns: cold_starts[i] as f64,
             slope_ns,
             mean_ci,
+            timer_ticks_per_sample: timer_ticks,
             #[cfg(feature = "alloc-profiling")]
             alloc_stats,
         });
@@ -798,6 +809,12 @@ fn run_standalone(
 
     let mean_ci = crate::stats::MeanCi::from_samples(&samples, config.bootstrap_resamples);
 
+    let timer_ticks = if timer_resolution_ns > 0 {
+        (summary.mean * iterations as f64) / timer_resolution_ns as f64
+    } else {
+        f64::INFINITY
+    };
+
     BenchmarkResult {
         name: bench.name.clone(),
         summary,
@@ -807,6 +824,7 @@ fn run_standalone(
         cold_start_ns: _cold_start_ns as f64,
         slope_ns: None,
         mean_ci,
+        timer_ticks_per_sample: timer_ticks,
         #[cfg(feature = "alloc-profiling")]
         alloc_stats: None,
     }
