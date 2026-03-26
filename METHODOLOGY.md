@@ -287,10 +287,10 @@ individual benchmarks.
   that's fast 90% of the time and slow 10% due to a cold cache path).
   The raw data in JSON output preserves all measurements including
   outliers.
-- *No interleaving is criterion's biggest weakness*: If system load
-  changes during measurement, earlier samples differ systematically from
-  later ones. Linear mode is especially vulnerable — later samples run
-  more iterations and are weighted differently in the regression.
+- *The effect of non-interleaving*: If system load changes during
+  measurement, earlier samples differ systematically from later ones.
+  Linear mode is especially exposed — later samples run more iterations
+  and are weighted differently in the regression.
 - *Slope regression is criterion's biggest strength*: See the "Gaps"
   section below for why this matters and how we might address it.
 
@@ -431,9 +431,9 @@ window. But the dylib approach requires special build steps and has
 platform-specific fragility (PIE patching on Linux, IAT patching on
 Windows).
 
-**tango's key weakness**: Minimal statistics. You get "significant/not
-significant" but no confidence interval on the magnitude. No way to
-distinguish "1% ± 0.2%" from "1% ± 5%".
+**tango's statistical tradeoff**: Deliberately minimal — you get
+"significant/not significant" but no confidence interval on the
+magnitude. No way to distinguish "1% ± 0.2%" from "1% ± 5%".
 
 ## What we compute
 
