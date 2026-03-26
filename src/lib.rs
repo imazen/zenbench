@@ -156,7 +156,7 @@ pub fn black_box<T>(x: T) -> T {
 
 /// Prelude for convenient imports.
 ///
-/// ```rust,ignore
+/// ```
 /// use zenbench::prelude::*;
 /// ```
 pub mod prelude {

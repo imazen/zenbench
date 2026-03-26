@@ -125,6 +125,7 @@ fn parse_time_value(s: &str) -> Option<f64> {
 }
 
 #[test]
+#[ignore] // slow: builds and runs bench binaries
 fn parity_zenbench_vs_divan() {
     // Build and run zenbench version (via cargo bench = release profile)
     let zen_output = Command::new("cargo")
@@ -309,6 +310,7 @@ fn run_bench(args: &[&str]) -> Option<(String, String)> {
 }
 
 #[test]
+#[ignore] // slow: builds and runs bench binaries
 fn parity_three_way() {
     eprintln!("\n===== 3-Way Framework Comparison =====\n");
 

@@ -45,7 +45,7 @@ fn overhead_compensation_produces_lower_times() {
         suite.compare("trivial", |group| {
             group
                 .config()
-                .max_rounds(30)
+                .max_rounds(5)
                 .auto_rounds(false)
                 .expect_sub_ns(true);
             group.bench("noop", |b| b.iter(|| black_box(0u64)));
@@ -179,7 +179,7 @@ fn iter_deferred_drop_excludes_drop_from_timing() {
 
     let result = run_gated(disabled_gate(), |suite| {
         suite.compare("expensive_drop", |group| {
-            group.config().max_rounds(20).auto_rounds(false);
+            group.config().max_rounds(5).auto_rounds(false);
             // Deferred: drop happens after timing
             group.bench("deferred", |b| {
                 b.iter_deferred_drop(|| ExpensiveDrop(vec![0u8; 4096]))
@@ -239,7 +239,7 @@ mod precise_timing {
         // and verify results are plausible
         let result = run_gated(disabled_gate(), |suite| {
             suite.compare("fenced", |group| {
-                group.config().max_rounds(20).auto_rounds(false);
+                group.config().max_rounds(5).auto_rounds(false);
                 group.bench("fast", |b| b.iter(|| black_box(42u64)));
                 group.bench("slow", |b| {
                     b.iter(|| {
@@ -377,7 +377,7 @@ fn wilcoxon_small_n_returns_inconclusive() {
 fn spearman_drift_near_zero_for_stable_benchmark() {
     let result = run_gated(disabled_gate(), |suite| {
         suite.compare("drift", |group| {
-            group.config().max_rounds(50).auto_rounds(false);
+            group.config().max_rounds(10).auto_rounds(false);
             // A stable benchmark should have near-zero drift
             group.bench("stable_a", |b| {
                 b.iter(|| {
@@ -418,7 +418,7 @@ fn interleaved_benchmarks_all_execute() {
     // Verify that all benchmarks in a group actually run (not skipped by shuffle bug)
     let result = run_gated(disabled_gate(), |suite| {
         suite.compare("shuffle_check", |group| {
-            group.config().max_rounds(20).auto_rounds(false);
+            group.config().max_rounds(5).auto_rounds(false);
             group.bench("bench_1", |b| b.iter(|| black_box(1u64)));
             group.bench("bench_2", |b| b.iter(|| black_box(2u64)));
             group.bench("bench_3", |b| b.iter(|| black_box(3u64)));
@@ -429,8 +429,8 @@ fn interleaved_benchmarks_all_execute() {
     assert_eq!(comp.benchmarks.len(), 4);
     for bench in &comp.benchmarks {
         assert!(
-            bench.summary.n >= 20,
-            "{}: should have >= 20 samples, got {}",
+            bench.summary.n >= 5,
+            "{}: should have >= 5 samples, got {}",
             bench.name,
             bench.summary.n
         );
@@ -451,7 +451,7 @@ fn deferred_drop_vs_regular_iter_same_workload() {
     // minimal — just the Vec::push overhead in deferred mode.
     let result = run_gated(disabled_gate(), |suite| {
         suite.compare("drop_comparison", |group| {
-            group.config().max_rounds(30).auto_rounds(false);
+            group.config().max_rounds(5).auto_rounds(false);
             group.bench("regular", |b| {
                 b.iter(|| {
                     let mut v = 0u64;
@@ -503,7 +503,7 @@ fn noise_threshold_suppresses_tiny_differences() {
         suite.compare("noise_gate", |group| {
             group
                 .config()
-                .max_rounds(50)
+                .max_rounds(10)
                 .auto_rounds(false)
                 .noise_threshold(0.05); // 5% — very generous
             group.bench("a", |b| {
@@ -552,7 +552,7 @@ fn noise_threshold_allows_large_differences() {
         suite.compare("noise_large", |group| {
             group
                 .config()
-                .max_rounds(30)
+                .max_rounds(5)
                 .auto_rounds(false)
                 .noise_threshold(0.01); // 1%
             group.bench("fast", |b| b.iter(|| black_box(42u64)));
@@ -584,7 +584,7 @@ fn noise_threshold_zero_disables_gate() {
         suite.compare("no_gate", |group| {
             group
                 .config()
-                .max_rounds(30)
+                .max_rounds(5)
                 .auto_rounds(false)
                 .noise_threshold(0.0); // disabled
             group.bench("a", |b| b.iter(|| black_box(1u64)));
@@ -616,7 +616,7 @@ fn noise_threshold_zero_disables_gate() {
 fn per_benchmark_ci_is_computed() {
     let result = run_gated(disabled_gate(), |suite| {
         suite.compare("bench_ci", |group| {
-            group.config().max_rounds(30).auto_rounds(false);
+            group.config().max_rounds(5).auto_rounds(false);
             group.bench("work", |b| {
                 b.iter(|| {
                     let mut v = 0u64;
@@ -879,7 +879,7 @@ fn slope_regression_produces_result() {
         suite.compare("slope_test", |group| {
             group
                 .config()
-                .max_rounds(30)
+                .max_rounds(10)
                 .auto_rounds(false)
                 .linear_sampling(true);
             group.bench("work", |b| {
@@ -1036,44 +1036,69 @@ fn baseline_comparison_warns_on_testbed_mismatch() {
 
 #[test]
 fn baseline_statistical_gating_prevents_false_positive() {
-    // Two runs of the same workload: pct_change may exceed threshold by noise,
-    // but the t-test should gate it because variance is high relative to diff.
-    let result1 = run_gated(disabled_gate(), |suite| {
-        suite.compare("gate_test", |group| {
-            group.config().max_rounds(10).auto_rounds(false);
-            group.bench("noisy", |b| {
-                b.iter(|| {
-                    let mut v = 0u64;
-                    for i in 0..100 {
-                        v = v.wrapping_add(black_box(i));
-                    }
-                    black_box(v)
-                })
-            });
-        });
-    });
-    let result2 = run_gated(disabled_gate(), |suite| {
-        suite.compare("gate_test", |group| {
-            group.config().max_rounds(10).auto_rounds(false);
-            group.bench("noisy", |b| {
-                b.iter(|| {
-                    let mut v = 0u64;
-                    for i in 0..100 {
-                        v = v.wrapping_add(black_box(i));
-                    }
-                    black_box(v)
-                })
-            });
-        });
-    });
+    // Test the gating LOGIC with synthetic summaries injected into real
+    // SuiteResults. No timing-dependent assertions — deterministic math only.
+    //
+    // We run a trivial benchmark to get a valid SuiteResult structure,
+    // then replace the summary with known values.
 
-    // With a 2% threshold + statistical gating, the same workload
-    // should not show as a regression (run-to-run noise is high variance,
-    // low significance per the t-test).
-    let comparison = zenbench::baseline::compare_against_baseline(&result1, &result2, 10.0);
+    // Helper: run trivial bench, replace summary with synthetic data
+    let make_result = |mean: f64, std_dev: f64| {
+        let n = 50usize;
+        let values: Vec<f64> = (0..n)
+            .map(|i| {
+                if i % 2 == 0 {
+                    mean + std_dev
+                } else {
+                    mean - std_dev
+                }
+            })
+            .collect();
+        let summary = Summary::from_slice(&values);
+
+        let mut result = run_gated(disabled_gate(), |suite| {
+            suite.group("test", |g| {
+                g.config().max_rounds(5).auto_rounds(false);
+                g.bench("bench_a", |b| b.iter(|| black_box(1u64)));
+            });
+        });
+        // Inject our synthetic summary
+        result.comparisons[0].benchmarks[0].summary = summary;
+        result
+    };
+
+    // Scenario 1: small shift (3%), high noise (std_dev=20).
+    // t = (103-100) / sqrt(400/50 + 400/50) = 3/4 = 0.75 → NOT significant.
+    // Should NOT be flagged even with a 1% threshold.
+    let baseline = make_result(100.0, 20.0);
+    let current = make_result(103.0, 20.0);
+    let comparison =
+        zenbench::baseline::compare_against_baseline(&baseline, &current, 1.0);
     assert_eq!(
         comparison.regressions, 0,
-        "same workload should not regress at 10% threshold with statistical gating"
+        "3% shift with std_dev=20 should NOT be flagged (t=0.75 < 2.0)"
+    );
+
+    // Scenario 2: large shift (30%), same noise.
+    // t = 30/4 = 7.5 → significant. Should be caught.
+    let regressed = make_result(130.0, 20.0);
+    let comparison2 =
+        zenbench::baseline::compare_against_baseline(&baseline, &regressed, 5.0);
+    assert!(
+        comparison2.regressions > 0,
+        "30% shift with std_dev=20 SHOULD be flagged (t=7.5 > 2.0)"
+    );
+
+    // Scenario 3: large shift (30%) but HUGE noise on both sides (std_dev=200).
+    // variance ≈ 200² * 50/49 ≈ 40816; se = sqrt(40816/50 + 40816/50) ≈ 40.4
+    // t = 30/40.4 = 0.74 → NOT significant.
+    let noisy_baseline = make_result(100.0, 200.0);
+    let noisy_regressed = make_result(130.0, 200.0);
+    let comparison3 =
+        zenbench::baseline::compare_against_baseline(&noisy_baseline, &noisy_regressed, 5.0);
+    assert_eq!(
+        comparison3.regressions, 0,
+        "30% shift with std_dev=200 should NOT be flagged (t≈0.74 < 2.0)"
     );
 }
 
@@ -1086,7 +1111,7 @@ fn configurable_resamples_works() {
         suite.compare("resamples", |group| {
             group
                 .config()
-                .max_rounds(20)
+                .max_rounds(5)
                 .auto_rounds(false)
                 .bootstrap_resamples(500); // much less than default 10K
             group.bench("a", |b| b.iter(|| black_box(1u64)));

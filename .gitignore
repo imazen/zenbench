@@ -47,3 +47,4 @@ Thumbs.db
 .vscode/
 *.iml
 site/public/
+site/themes/

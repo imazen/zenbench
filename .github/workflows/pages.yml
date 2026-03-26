@@ -20,8 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true
+
+      - name: Fetch Zola theme
+        run: git clone --depth 1 https://github.com/hahwul/goyo site/themes/goyo
 
       - name: Install Zola
         run: |

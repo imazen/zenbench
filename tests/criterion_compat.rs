@@ -2,6 +2,7 @@
 //!
 //! These tests verify that criterion-style API patterns work unchanged
 //! through the zenbench compat layer.
+#![cfg(feature = "criterion-compat")]
 
 use zenbench::criterion_compat::*;
 use zenbench::criterion_group;

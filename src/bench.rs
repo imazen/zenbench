@@ -96,11 +96,14 @@ impl Suite {
     /// Add a benchmark group. Benchmarks within a group are interleaved
     /// and compared against each other with paired statistics.
     ///
-    /// ```rust,ignore
+    /// ```
+    /// # use zenbench::prelude::*;
+    /// # fn example(suite: &mut Suite) {
     /// suite.group("sort", |g| {
-    ///     g.bench("std", |b| b.iter(|| data.sort()));
-    ///     g.bench("unstable", |b| b.iter(|| data.sort_unstable()));
+    ///     g.bench("std", |b| b.iter(|| std::hint::black_box(42)));
+    ///     g.bench("unstable", |b| b.iter(|| std::hint::black_box(43)));
     /// });
+    /// # }
     /// ```
     pub fn group<F: FnOnce(&mut BenchGroup)>(&mut self, name: impl Into<String>, f: F) {
         let mut group = BenchGroup::new(name);
@@ -115,8 +118,12 @@ impl Suite {
 
     /// Shorthand: benchmark a single function (no group, no comparison).
     ///
-    /// ```rust,ignore
+    /// ```
+    /// # use zenbench::prelude::*;
+    /// # fn fib(n: u32) -> u32 { n }
+    /// # fn example(suite: &mut Suite) {
     /// suite.bench_fn("fibonacci", || fib(20));
+    /// # }
     /// ```
     pub fn bench_fn<O: 'static, F>(&mut self, name: impl Into<String>, mut f: F)
     where
@@ -252,13 +259,18 @@ impl BenchGroup {
     /// The `work` closure runs on each thread with a reference to the shared state
     /// and the thread index (0..threads).
     ///
-    /// ```rust,ignore
+    /// ```
+    /// # use zenbench::prelude::*;
+    /// # use std::sync::{Arc, Mutex};
+    /// # use std::collections::HashMap;
+    /// # fn example(group: &mut BenchGroup) {
     /// group.bench_contended("mutex_map", 8,
     ///     || Arc::new(Mutex::new(HashMap::new())),
     ///     |b, shared, thread_id| {
     ///         b.iter(|| { shared.lock().unwrap().insert(thread_id, 42); })
     ///     },
     /// );
+    /// # }
     /// ```
     pub fn bench_contended<S, Setup, Work>(
         &mut self,
@@ -321,13 +333,16 @@ impl BenchGroup {
     /// Each thread gets its own thread index (0..threads) but no shared state.
     /// For shared-state contention testing, use [`BenchGroup::bench_contended`] instead.
     ///
-    /// ```rust,ignore
+    /// ```
+    /// # use zenbench::prelude::*;
+    /// # fn example(group: &mut BenchGroup) {
     /// // Compare 1, 2, 4 threads doing independent work
     /// for threads in [1, 2, 4] {
     ///     group.bench_parallel(format!("{threads}t"), threads, |b, _tid| {
-    ///         b.iter(|| expensive_computation())
+    ///         b.iter(|| std::hint::black_box(42u64.wrapping_mul(7)))
     ///     });
     /// }
+    /// # }
     /// ```
     ///
     /// **Rayon / existing thread pools**: Don't use this for code that manages
@@ -380,11 +395,14 @@ impl BenchGroup {
     /// a separate benchmark in the group, interleaved and compared.
     ///
     /// Use with `Throughput::Elements(N)` to see scaling and efficiency:
-    /// ```rust,ignore
+    /// ```
+    /// # use zenbench::prelude::*;
+    /// # fn example(group: &mut BenchGroup) {
     /// group.throughput(Throughput::Elements(10_000));
     /// group.bench_scaling("sqrt_work", |b, _tid| {
-    ///     b.iter(|| expensive_computation())
+    ///     b.iter(|| std::hint::black_box(42u64.wrapping_mul(7)))
     /// });
+    /// # }
     /// ```
     ///
     /// The 1-thread benchmark is the baseline. The report shows how
@@ -439,11 +457,14 @@ impl BenchGroup {
     /// compared across subgroups within the same comparison group. The label
     /// appears as a section header in the table and bar chart.
     ///
-    /// ```rust,ignore
+    /// ```
+    /// # use zenbench::prelude::*;
+    /// # fn example(group: &mut BenchGroup) {
     /// group.subgroup("Ok path");
-    /// group.bench("no_error", |b| { /* ... */ });
+    /// group.bench("no_error", |b| b.iter(|| std::hint::black_box(1)));
     /// group.subgroup("Error path");
-    /// group.bench("with_backtrace", |b| { /* ... */ });
+    /// group.bench("with_backtrace", |b| b.iter(|| std::hint::black_box(2)));
+    /// # }
     /// ```
     pub fn subgroup(&mut self, label: impl Into<String>) -> &mut Self {
         self.current_subgroup = Some(label.into());
@@ -895,12 +916,15 @@ impl Bencher {
     /// per-iteration overhead.
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```
+    /// # use zenbench::prelude::*;
+    /// # fn example(b: &mut Bencher) {
     /// b.iter_deferred_drop(|| {
     ///     let mut v = Vec::with_capacity(1024);
     ///     v.extend(0..1024);
     ///     v  // Drop of this Vec is excluded from timing
     /// });
+    /// # }
     /// ```
     #[inline(never)]
     pub fn iter_deferred_drop<O, F: FnMut() -> O>(&mut self, mut f: F) {

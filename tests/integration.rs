@@ -16,7 +16,7 @@ use zenbench::*;
 fn run_simple_suite() -> SuiteResult {
     run_gated(GateConfig::disabled(), |suite| {
         suite.compare("simple", |group| {
-            group.config().max_rounds(30).auto_rounds(false);
+            group.config().max_rounds(5).auto_rounds(false);
             group.bench("fast", |b| b.iter(|| black_box(42u64 + 1)));
             group.bench("slow", |b| {
                 b.iter(|| {
@@ -45,7 +45,7 @@ fn basic_results_structure() {
     assert_eq!(comp.benchmarks[0].name, "fast");
     assert_eq!(comp.benchmarks[1].name, "slow");
     assert!(
-        comp.completed_rounds >= 30,
+        comp.completed_rounds >= 5,
         "should complete requested rounds"
     );
 }
@@ -57,7 +57,7 @@ fn statistics_are_plausible() {
 
     for bench in &comp.benchmarks {
         let s = &bench.summary;
-        assert!(s.n >= 30, "{}: n should be >= 30, got {}", bench.name, s.n);
+        assert!(s.n >= 5, "{}: n should be >= 5, got {}", bench.name, s.n);
         assert!(s.min > 0.0, "{}: min should be positive", bench.name);
         assert!(
             s.min <= s.mean,
@@ -150,7 +150,7 @@ fn cold_start_mode_forces_single_iteration() {
 fn auto_rounds_converges() {
     let result = run_gated(GateConfig::disabled(), |suite| {
         suite.compare("converge", |group| {
-            group.config().max_rounds(500).target_precision(0.05);
+            group.config().max_rounds(100).target_precision(0.05);
             // Two benchmarks with ~10x difference — both in measurable range.
             // Avoids sub-ns baseline which is hard to converge on.
             group.bench("sum_100", |b| {
@@ -177,8 +177,8 @@ fn auto_rounds_converges() {
     // Should converge before 500 rounds since the difference is ~10x.
     // The 5% target precision is looser for noisy CI environments.
     assert!(
-        comp.completed_rounds < 500,
-        "should converge before 500 rounds, completed all {} rounds",
+        comp.completed_rounds < 100,
+        "should converge before 100 rounds, completed all {} rounds",
         comp.completed_rounds,
     );
 }

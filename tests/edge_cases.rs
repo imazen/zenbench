@@ -101,7 +101,7 @@ fn max_wall_time_stops_measurement() {
             group
                 .config()
                 .max_rounds(100000)
-                .max_wall_time(std::time::Duration::from_secs(2))
+                .max_wall_time(std::time::Duration::from_millis(200))
                 .auto_rounds(false);
             group.bench("a", |b| b.iter(|| black_box(1)));
             group.bench("b", |b| b.iter(|| black_box(2)));

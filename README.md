@@ -89,7 +89,7 @@ name = "my_bench"
 harness = false
 ```
 
-```rust
+```rust,no_run
 use zenbench::prelude::*;
 
 fn bench_sort(suite: &mut Suite) {
@@ -142,7 +142,7 @@ Full CI guide with GitHub Actions workflows: [REGRESSION-TESTING.md](REGRESSION-
 
 ## Thread scaling
 
-```rust
+```rust,ignore
 suite.group("scaling", |g| {
     g.throughput(Throughput::Elements(10_000));
     g.bench_scaling("work", |b, _tid| {
@@ -169,7 +169,7 @@ suite.group("scaling", |g| {
 
 ## Subgroups and organization
 
-```rust
+```rust,ignore
 suite.group("dispatch", |g| {
     g.throughput(Throughput::Elements(100));
     g.throughput_unit("checks");
@@ -215,7 +215,7 @@ zenbench = { version = "0.1", features = ["criterion-compat"] }  # add
 
 Change one import per file — **zero code changes** to benchmark functions:
 
-```rust
+```rust,ignore
 // Before:
 use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
 
@@ -241,7 +241,7 @@ cargo bench -- --format=md            # markdown tables (stdout)
 
 ## API reference
 
-```rust
+```rust,ignore
 use zenbench::prelude::*;
 
 // Interleaved comparison group
@@ -271,7 +271,7 @@ g.bench_scaling("work", |b, _tid| b.iter(|| compute()));
 
 ## Configuration
 
-```rust
+```rust,ignore
 group.config()
     .max_rounds(200)              // default 200
     .noise_threshold(0.02)        // ±2% significance gate
