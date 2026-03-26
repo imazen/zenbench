@@ -205,13 +205,22 @@ fn render_group(comp: &ComparisonResult) -> String {
         .fold(f64::INFINITY, f64::min);
 
     // Main table — min, mean, ±mad, 95% CI, throughput
-    html.push_str(
-        "<table><tr><th>benchmark</th><th>min</th><th>mean</th><th>±mad</th><th>95% CI</th>",
-    );
-    if has_throughput {
-        html.push_str("<th>throughput</th>");
-    }
-    html.push_str("</tr>\n");
+    let ncols_header = if has_throughput { 6 } else { 5 };
+    let tp_header = if has_throughput {
+        "<span class=\"bench-tp\">throughput</span>"
+    } else {
+        ""
+    };
+    html.push_str(&format!(
+        "<table><tr><td colspan=\"{ncols_header}\"><div class=\"bench-row bench-header\">\
+         <span class=\"bench-name\">benchmark</span>\
+         <span class=\"bench-min\">min</span>\
+         <span class=\"bench-mean\">mean</span>\
+         <span class=\"bench-mad\">±mad</span>\
+         <span class=\"bench-ci\">95% CI</span>\
+         {tp_header}\
+         </div></td></tr>\n"
+    ));
 
     let mut current_subgroup: Option<&str> = None;
 
@@ -264,9 +273,9 @@ fn render_group(comp: &ComparisonResult) -> String {
                 .as_ref()
                 .map(|tp| {
                     let (val, unit) = tp.compute(bench.summary.mean, tp_unit);
-                    format!("<td>{val:.2} {unit}</td>")
+                    format!("<span class=\"bench-tp\">{val:.2} {unit}</span>")
                 })
-                .unwrap_or_else(|| "<td></td>".to_string())
+                .unwrap_or_default()
         } else {
             String::new()
         };
@@ -275,16 +284,19 @@ fn render_group(comp: &ComparisonResult) -> String {
         let analysis = baseline_analyses.get(bench.name.as_str()).copied();
         let ncols = if has_throughput { 6 } else { 5 };
         html.push_str(&format!(
-            "<tr{cls}><td>{}</td><td>{}</td><td>{}</td><td>±{}</td><td>{ci_str}</td>{tp}</tr>\n",
+            "<tr{cls}><td colspan=\"{ncols}\"><details class=\"bench-detail\"><summary>\
+             <span class=\"bench-row\">\
+             <span class=\"bench-name\">{}</span>\
+             <span class=\"bench-min\">{}</span>\
+             <span class=\"bench-mean\">{}</span>\
+             <span class=\"bench-mad\">±{}</span>\
+             <span class=\"bench-ci\">{ci_str}</span>\
+             {tp}\
+             </span></summary>\n",
             bench.name,
             format_ns(bench.summary.min),
             format_ns(bench.summary.mean),
             format_ns(bench.summary.mad),
-        ));
-        html.push_str(&format!(
-            "<tr class=\"detail-row\"><td colspan=\"{ncols}\"><details class=\"bench-detail\">\
-             <summary>{} — full details</summary>\n",
-            bench.name,
         ));
         html.push_str(&render_bench_detail_content(bench, analysis));
         html.push_str("</details></td></tr>\n");
@@ -582,9 +594,17 @@ const HTML_HEAD: &str = r#"<!DOCTYPE html>
   td { font-variant-numeric: tabular-nums; }
   .fastest td { color: var(--green); }
   .subgroup td { color: var(--dim); font-style: italic; font-size: 0.9rem; border-bottom: none; padding-top: 0.6rem; }
-  .detail-row td { padding: 0; border-bottom: none; }
-  .bench-detail { border: none; margin: 0; padding: 0.2rem 0 0.2rem 1rem; }
-  .bench-detail > summary { font-size: 0.85rem; color: var(--dim); padding: 0.2rem 0; }
+  .bench-detail { border: none; margin: 0; padding: 0; }
+  .bench-detail > summary { cursor: pointer; padding: 0.4rem 0.6rem; list-style: none; }
+  .bench-detail > summary::-webkit-details-marker { display: none; }
+  .bench-detail > summary::marker { display: none; content: ''; }
+  .bench-row { display: flex; gap: 1.5rem; align-items: baseline; }
+  .bench-row > span { white-space: nowrap; }
+  .bench-name { flex: 1; }
+  .bench-name::before { content: '▸ '; color: var(--dim); font-size: 0.8rem; }
+  details[open] > summary .bench-name::before { content: '▾ '; }
+  .fastest .bench-name { color: var(--green); }
+  .bench-header { font-weight: 600; color: var(--dim); font-size: 0.85rem; }
   .detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.6rem; padding: 0.6rem 0; }
   .detail-section { background: var(--surface); border-radius: 6px; padding: 0.6rem 0.9rem; }
   .detail-table { margin: 0; }
