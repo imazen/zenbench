@@ -60,6 +60,28 @@ jobs:
       - name: Integration tests (real benchmarks)
         run: cargo test --test integration -- --nocapture
 
+  cross:
+    name: Cross (${{ matrix.target }})
+    needs: lint
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - i686-unknown-linux-gnu
+          - armv7-unknown-linux-gnueabihf
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: taiki-e/install-action@cross
+      - uses: Swatinem/rust-cache@v2
+      - name: Test (all features)
+        run: cross test --target ${{ matrix.target }} --all-features
+      - name: Test (no default features)
+        run: cross test --target ${{ matrix.target }} --no-default-features
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest

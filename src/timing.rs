@@ -153,6 +153,20 @@ pub fn tsc_end() -> u64 {
     val
 }
 
+// Stubs for architectures without hardware counter support.
+// TscTimer::new() returns None on these platforms, so tsc_ticks_per_ns is
+// always None and the if-let branches calling these are never taken at runtime.
+// They must exist for compilation.
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+pub fn tsc_start() -> u64 {
+    0
+}
+
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+pub fn tsc_end() -> u64 {
+    0
+}
+
 // ── TSC Frequency Calibration ───────────────────────────────────────────
 
 /// Calibrate the TSC/counter frequency by measuring against `Instant`.
@@ -313,6 +327,10 @@ pub struct TscTimer;
 impl TscTimer {
     pub fn new() -> Option<Self> {
         None
+    }
+
+    pub fn ticks_per_ns(&self) -> f64 {
+        0.0
     }
 }
 
