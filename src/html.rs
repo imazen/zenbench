@@ -711,9 +711,208 @@ fn render_chart(comp: &ComparisonResult) -> String {
     }
 }
 
-/// Render a chart as a standalone SVG (for file export via `save_charts`).
+/// Render a chart as a standalone SVG for README/docs embedding.
+///
+/// Uses `@media (prefers-color-scheme)` so one SVG works in both light and
+/// dark contexts (e.g., GitHub). Includes ±MAD error indicators and
+/// proper labeling with group name as title.
 pub(crate) fn render_chart_standalone(comp: &ComparisonResult) -> String {
-    render_chart(comp)
+    if let Some(matrix) = detect_matrix(comp) {
+        render_readme_matrix_svg(comp, &matrix)
+    } else {
+        render_chart(comp)
+    }
+}
+
+/// Standalone dual-theme matrix chart for README embedding.
+fn render_readme_matrix_svg(comp: &ComparisonResult, matrix: &MatrixChart) -> String {
+    let tp_unit = comp.throughput_unit.as_deref();
+    let has_throughput = comp.throughput.is_some();
+
+    let bar_h: usize = 24;
+    let bar_gap: usize = 4;
+    let section_gap: usize = 22;
+    let header_h: usize = 24;
+    let title_h: usize = 32;
+    let legend_h: usize = 32;
+    let label_w: usize = 160;
+    let chart_w: usize = 420;
+    let value_w: usize = 160; // wider for "123.4ms ±1.2"
+    let total_w = label_w + chart_w + value_w + 20;
+
+    let section_h = matrix.variants.len() * (bar_h + bar_gap) + header_h + section_gap;
+    let total_h = title_h + legend_h + matrix.params.len() * section_h + 10;
+
+    let mut svg = format!(
+        "<svg width=\"100%\" viewBox=\"0 0 {total_w} {total_h}\" \
+         xmlns=\"http://www.w3.org/2000/svg\">\n\
+         <style>\n\
+           text {{ font-family: -apple-system, 'Segoe UI', system-ui, sans-serif; }}\n\
+           .title {{ font-size: 14px; font-weight: 600; }}\n\
+           .param {{ font-size: 12px; font-weight: 600; }}\n\
+           .label {{ font-size: 11px; }}\n\
+           .value {{ font-size: 10.5px; }}\n\
+           .mad {{ font-size: 9.5px; }}\n\
+           .legend {{ font-size: 11px; }}\n\
+           @media (prefers-color-scheme: dark) {{\n\
+             .bg {{ fill: #1a1b26; }}\n\
+             .title {{ fill: #c0caf5; }}\n\
+             .param {{ fill: #a9b1d6; }}\n\
+             .label {{ fill: #c0caf5; }}\n\
+             .value {{ fill: #a9b1d6; }}\n\
+             .mad {{ fill: #565f89; }}\n\
+             .legend {{ fill: #a9b1d6; }}\n\
+             .whisker {{ stroke: #565f89; }}\n\
+           }}\n\
+           @media (prefers-color-scheme: light) {{\n\
+             .bg {{ fill: #ffffff; }}\n\
+             .title {{ fill: #24292f; }}\n\
+             .param {{ fill: #57606a; }}\n\
+             .label {{ fill: #24292f; }}\n\
+             .value {{ fill: #57606a; }}\n\
+             .mad {{ fill: #8b949e; }}\n\
+             .legend {{ fill: #57606a; }}\n\
+             .whisker {{ stroke: #8b949e; }}\n\
+           }}\n\
+         </style>\n\
+         <rect class=\"bg\" width=\"100%\" height=\"100%\" rx=\"6\"/>\n"
+    );
+
+    // Title
+    svg.push_str(&format!(
+        "<text x=\"{x}\" y=\"22\" class=\"title\">{}</text>\n",
+        comp.group_name,
+        x = label_w,
+    ));
+
+    // Legend
+    let mut lx: usize = 12;
+    let ly = title_h + 6;
+    for (vi, variant) in matrix.variants.iter().enumerate() {
+        let color = PALETTE[vi % PALETTE.len()];
+        svg.push_str(&format!(
+            "<rect x=\"{lx}\" y=\"{ly}\" width=\"12\" height=\"12\" rx=\"2\" fill=\"{color}\"/>\n\
+             <text x=\"{}\" y=\"{}\" class=\"legend\">{variant}</text>\n",
+            lx + 16,
+            ly + 10,
+        ));
+        lx += 16 + variant.len() * 7 + 14;
+    }
+
+    let mut y = title_h + legend_h;
+
+    for (pi, param) in matrix.params.iter().enumerate() {
+        // Section header
+        svg.push_str(&format!(
+            "<text x=\"{label_w}\" y=\"{}\" class=\"param\">{param}</text>\n",
+            y + 16,
+        ));
+        y += header_h;
+
+        // Per-section max for scaling
+        let section_max = matrix
+            .variants
+            .iter()
+            .enumerate()
+            .filter_map(|(vi, _)| {
+                matrix.cells.get(&(vi, pi)).map(|&bi| {
+                    let b = &comp.benchmarks[bi];
+                    b.summary.mean + b.summary.mad // include MAD in scale
+                })
+            })
+            .fold(0.0_f64, f64::max);
+
+        let section_min = matrix
+            .variants
+            .iter()
+            .enumerate()
+            .filter_map(|(vi, _)| {
+                matrix
+                    .cells
+                    .get(&(vi, pi))
+                    .map(|&bi| comp.benchmarks[bi].summary.mean)
+            })
+            .fold(f64::INFINITY, f64::min);
+
+        for (vi, variant) in matrix.variants.iter().enumerate() {
+            let color = PALETTE[vi % PALETTE.len()];
+
+            if let Some(&bi) = matrix.cells.get(&(vi, pi)) {
+                let bench = &comp.benchmarks[bi];
+                let mean = bench.summary.mean;
+                let mad = bench.summary.mad;
+
+                let frac = if has_throughput && section_min > 0.0 {
+                    section_min / mean
+                } else {
+                    mean / section_max
+                };
+                let bar_w = (frac * chart_w as f64).max(3.0) as usize;
+
+                let is_fastest = (mean - section_min).abs() < f64::EPSILON
+                    && matrix.variants.len() > 1;
+                let opacity = if is_fastest { "0.95" } else { "0.75" };
+
+                let mean_str = if has_throughput {
+                    comp.throughput
+                        .as_ref()
+                        .map(|tp| tp.format(mean, tp_unit))
+                        .unwrap_or_default()
+                } else {
+                    format_ns(mean)
+                };
+
+                let mad_str = format_ns(mad);
+
+                let label = if variant.len() > 20 {
+                    format!("{}...", &variant[..18])
+                } else {
+                    variant.clone()
+                };
+
+                let ty = y + bar_h / 2;
+                let lx = label_w - 8;
+                let vx = label_w + bar_w + 8;
+                let bh = bar_h - 2;
+
+                // MAD whisker line
+                let mad_frac = mad / section_max;
+                let whisker_w = (mad_frac * chart_w as f64).max(1.0).min(40.0) as usize;
+                let whisker_x = label_w + bar_w;
+                let whisker_top = y + 4;
+                let whisker_bot = y + bh - 4;
+
+                svg.push_str(&format!(
+                    "<text x=\"{lx}\" y=\"{ty}\" text-anchor=\"end\" \
+                     dominant-baseline=\"middle\" class=\"label\">{label}</text>\n\
+                     <rect x=\"{label_w}\" y=\"{y}\" width=\"{bar_w}\" \
+                     height=\"{bh}\" rx=\"3\" fill=\"{color}\" opacity=\"{opacity}\"/>\n\
+                     <line x1=\"{whisker_x}\" y1=\"{ty}\" \
+                     x2=\"{}\" y2=\"{ty}\" \
+                     class=\"whisker\" stroke-width=\"1.5\"/>\n\
+                     <line x1=\"{}\" y1=\"{whisker_top}\" \
+                     x2=\"{}\" y2=\"{whisker_bot}\" \
+                     class=\"whisker\" stroke-width=\"1\"/>\n\
+                     <text x=\"{vx}\" y=\"{}\" \
+                     dominant-baseline=\"middle\" class=\"value\">{mean_str}</text>\n\
+                     <text x=\"{vx}\" y=\"{}\" \
+                     dominant-baseline=\"middle\" class=\"mad\">\u{00b1}{mad_str}</text>\n",
+                    whisker_x + whisker_w,  // whisker horizontal end
+                    whisker_x + whisker_w,  // whisker cap x
+                    whisker_x + whisker_w,  // whisker cap x
+                    ty - 5,                 // value text (above center)
+                    ty + 6,                 // MAD text (below center)
+                ));
+            }
+
+            y += bar_h + bar_gap;
+        }
+
+        y += section_gap;
+    }
+
+    svg.push_str("</svg>\n");
+    svg
 }
 
 fn render_svg_bar_chart(comp: &ComparisonResult) -> String {

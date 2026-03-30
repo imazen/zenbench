@@ -88,6 +88,13 @@ enum Commands {
         /// Output as CSV.
         #[arg(long)]
         csv: bool,
+
+        /// Save standalone SVG charts to a directory.
+        ///
+        /// Produces dual-theme SVGs (light/dark via prefers-color-scheme)
+        /// with ±MAD error bars, suitable for README embedding.
+        #[arg(long, value_name = "DIR")]
+        save_charts: Option<PathBuf>,
     },
 
     /// Compare two result files.
@@ -175,7 +182,8 @@ fn main() {
             json,
             markdown,
             csv,
-        } => cmd_results(&project, &run_id, json, markdown, csv),
+            save_charts,
+        } => cmd_results(&project, &run_id, json, markdown, csv, save_charts.as_deref()),
         Commands::Compare {
             baseline,
             candidate,
@@ -417,13 +425,27 @@ fn cmd_kill(project: &Path, target: &str) {
     }
 }
 
-fn cmd_results(project: &Path, run_id: &str, json: bool, markdown: bool, csv: bool) {
+fn cmd_results(
+    project: &Path,
+    run_id: &str,
+    json: bool,
+    markdown: bool,
+    csv: bool,
+    save_charts: Option<&Path>,
+) {
     // Check if it's a direct file path first
     let file_path = PathBuf::from(run_id);
     if file_path.exists() && file_path.extension().is_some_and(|e| e == "json") {
         match zenbench::SuiteResult::load(&file_path) {
             Ok(result) => {
                 output_result(&result, json, markdown, csv);
+                if let Some(dir) = save_charts {
+                    if let Err(e) = result.save_charts(dir) {
+                        eprintln!("Error saving charts: {e}");
+                    } else {
+                        eprintln!("Charts saved to {}", dir.display());
+                    }
+                }
                 return;
             }
             Err(e) => {
@@ -454,7 +476,16 @@ fn cmd_results(project: &Path, run_id: &str, json: bool, markdown: bool, csv: bo
         Ok(state) => {
             if let Some(result_path) = &state.result_path {
                 match zenbench::SuiteResult::load(result_path) {
-                    Ok(result) => output_result(&result, json, markdown, csv),
+                    Ok(result) => {
+                        output_result(&result, json, markdown, csv);
+                        if let Some(dir) = save_charts {
+                            if let Err(e) = result.save_charts(dir) {
+                                eprintln!("Error saving charts: {e}");
+                            } else {
+                                eprintln!("Charts saved to {}", dir.display());
+                            }
+                        }
+                    }
                     Err(e) => {
                         eprintln!("Error loading results from {}: {e}", result_path.display());
                         if !result_path.exists() {
