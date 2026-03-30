@@ -297,8 +297,8 @@ fn render_group(comp: &ComparisonResult) -> String {
     }
     html.push_str("</table>\n");
 
-    // SVG bar chart
-    html.push_str(&render_svg_bar_chart(comp));
+    // SVG bar chart — matrix layout when benchmarks have variant/param names
+    html.push_str(&render_chart(comp));
 
     html.push_str("</details>\n");
     html
@@ -495,6 +495,227 @@ fn render_bench_detail_content(
     html
 }
 
+// ---- Matrix chart support ----
+
+/// Colors for grouped bar charts. Visually distinct on dark (#1a1b26) background.
+const PALETTE: &[&str] = &[
+    "#7aa2f7", // blue (Tokyo Night accent)
+    "#9ece6a", // green
+    "#e0af68", // amber
+    "#f7768e", // pink
+    "#bb9af7", // purple
+    "#73daca", // teal
+    "#ff9e64", // orange
+    "#2ac3de", // cyan
+];
+
+/// Parsed matrix structure: benchmarks with `variant/param` names.
+struct MatrixChart {
+    /// Parameter values in order of first appearance (e.g., "256x256", "512x512").
+    params: Vec<String>,
+    /// Variant names sorted alphabetically for deterministic color assignment.
+    variants: Vec<String>,
+    /// (variant_idx, param_idx) → benchmark index in the ComparisonResult.
+    cells: std::collections::HashMap<(usize, usize), usize>,
+}
+
+/// Try to detect matrix structure from benchmark names containing `/`.
+fn detect_matrix(comp: &ComparisonResult) -> Option<MatrixChart> {
+    let mut param_order: Vec<String> = Vec::new();
+    let mut variant_set: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut entries: Vec<(String, String, usize)> = Vec::new(); // (variant, param, bench_idx)
+
+    for (i, bench) in comp.benchmarks.iter().enumerate() {
+        if let Some(slash) = bench.name.rfind('/') {
+            let variant = bench.name[..slash].to_string();
+            let param = bench.name[slash + 1..].to_string();
+            if !param.is_empty() && !variant.is_empty() {
+                if !param_order.contains(&param) {
+                    param_order.push(param.clone());
+                }
+                variant_set.insert(variant.clone());
+                entries.push((variant, param, i));
+            }
+        }
+    }
+
+    // Need at least 2 variants and 2 params to form a matrix
+    if variant_set.len() < 2 || param_order.len() < 2 {
+        return None;
+    }
+    // All benchmarks should have the `/` pattern (no mixed flat+matrix)
+    if entries.len() != comp.benchmarks.len() {
+        return None;
+    }
+
+    let mut variants: Vec<String> = variant_set.into_iter().collect();
+    variants.sort();
+
+    let variant_idx = |v: &str| variants.iter().position(|x| x == v).unwrap();
+    let param_idx = |p: &str| param_order.iter().position(|x| x == p).unwrap();
+
+    let mut cells = std::collections::HashMap::new();
+    for (variant, param, bench_idx) in &entries {
+        cells.insert((variant_idx(variant), param_idx(param)), *bench_idx);
+    }
+
+    Some(MatrixChart {
+        params: param_order,
+        variants,
+        cells,
+    })
+}
+
+/// Render a grouped bar chart SVG for matrix-structured benchmarks.
+fn render_matrix_svg_bar_chart(comp: &ComparisonResult, matrix: &MatrixChart) -> String {
+    let tp_unit = comp.throughput_unit.as_deref();
+    let has_throughput = comp.throughput.is_some();
+
+    let bar_h: usize = 22;
+    let bar_gap: usize = 3;
+    let section_gap: usize = 18;
+    let header_h: usize = 20;
+    let legend_h: usize = 30;
+    let label_w: usize = 180;
+    let chart_w: usize = 400;
+    let value_w: usize = 130;
+    let total_w = label_w + chart_w + value_w + 20;
+
+    // Calculate total height
+    let section_h = matrix.variants.len() * (bar_h + bar_gap) + header_h + section_gap;
+    let total_h = legend_h + matrix.params.len() * section_h + 10;
+
+    let mut svg = format!(
+        "<svg width=\"100%\" viewBox=\"0 0 {total_w} {total_h}\" xmlns=\"http://www.w3.org/2000/svg\">\n\
+         <style>\n\
+           text {{ font-family: -apple-system, sans-serif; font-size: 12px; fill: #c0caf5; }}\n\
+           .param {{ font-size: 13px; font-weight: 600; fill: #a9b1d6; }}\n\
+           .value {{ font-size: 11px; fill: #737aa2; }}\n\
+           .legend {{ font-size: 11px; fill: #a9b1d6; }}\n\
+         </style>\n\
+         <rect width=\"100%\" height=\"100%\" fill=\"#1a1b26\" rx=\"6\"/>\n"
+    );
+
+    // Legend
+    let mut lx = 12;
+    for (vi, variant) in matrix.variants.iter().enumerate() {
+        let color = PALETTE[vi % PALETTE.len()];
+        svg.push_str(&format!(
+            "<rect x=\"{lx}\" y=\"8\" width=\"12\" height=\"12\" rx=\"2\" fill=\"{color}\"/>\n\
+             <text x=\"{}\" y=\"18\" class=\"legend\">{variant}</text>\n",
+            lx + 16,
+        ));
+        lx += 16 + variant.len() * 7 + 14;
+    }
+
+    let mut y = legend_h;
+
+    for (pi, param) in matrix.params.iter().enumerate() {
+        // Section header
+        svg.push_str(&format!(
+            "<text x=\"{label_w}\" y=\"{}\" class=\"param\">{param}</text>\n",
+            y + 14,
+        ));
+        y += header_h;
+
+        // Per-section max for scaling
+        let section_max = matrix
+            .variants
+            .iter()
+            .enumerate()
+            .filter_map(|(vi, _)| {
+                matrix
+                    .cells
+                    .get(&(vi, pi))
+                    .map(|&bi| comp.benchmarks[bi].summary.mean)
+            })
+            .fold(0.0_f64, f64::max);
+
+        let section_min = matrix
+            .variants
+            .iter()
+            .enumerate()
+            .filter_map(|(vi, _)| {
+                matrix
+                    .cells
+                    .get(&(vi, pi))
+                    .map(|&bi| comp.benchmarks[bi].summary.mean)
+            })
+            .fold(f64::INFINITY, f64::min);
+
+        for (vi, variant) in matrix.variants.iter().enumerate() {
+            let color = PALETTE[vi % PALETTE.len()];
+
+            if let Some(&bi) = matrix.cells.get(&(vi, pi)) {
+                let bench = &comp.benchmarks[bi];
+                let mean = bench.summary.mean;
+
+                // Scale: slowest fills chart_w, fastest is proportionally shorter
+                let frac = if has_throughput && section_min > 0.0 {
+                    section_min / mean // throughput: faster = longer bar
+                } else {
+                    mean / section_max // time: slower = longer bar
+                };
+                let bar_w = (frac * chart_w as f64).max(3.0) as usize;
+
+                let is_fastest = (mean - section_min).abs() < f64::EPSILON
+                    && matrix.variants.len() > 1;
+                let opacity = if is_fastest { "1.0" } else { "0.8" };
+
+                let value = if has_throughput {
+                    comp.throughput
+                        .as_ref()
+                        .map(|tp| tp.format(mean, tp_unit))
+                        .unwrap_or_default()
+                } else {
+                    format_ns(mean)
+                };
+
+                // Truncate variant name for label
+                let label = if variant.len() > 22 {
+                    format!("{}...", &variant[..20])
+                } else {
+                    variant.clone()
+                };
+
+                let ty = y + bar_h / 2;
+                let lx = label_w - 8;
+                let vx = label_w + bar_w + 6;
+                let bh = bar_h - 2;
+                svg.push_str(&format!(
+                    "<text x=\"{lx}\" y=\"{ty}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>\n\
+                     <rect x=\"{label_w}\" y=\"{y}\" width=\"{bar_w}\" height=\"{bh}\" rx=\"3\" fill=\"{color}\" opacity=\"{opacity}\"/>\n\
+                     <text x=\"{vx}\" y=\"{ty}\" class=\"value\" dominant-baseline=\"middle\">{value}</text>\n",
+                ));
+            }
+
+            y += bar_h + bar_gap;
+        }
+
+        y += section_gap;
+    }
+
+    svg.push_str("</svg>\n");
+    svg
+}
+
+/// Dispatch to matrix or flat chart based on benchmark name structure.
+///
+/// Used internally by the HTML report. For standalone SVG export, use
+/// [`render_chart_standalone`].
+fn render_chart(comp: &ComparisonResult) -> String {
+    if let Some(matrix) = detect_matrix(comp) {
+        render_matrix_svg_bar_chart(comp, &matrix)
+    } else {
+        render_svg_bar_chart(comp)
+    }
+}
+
+/// Render a chart as a standalone SVG (for file export via `save_charts`).
+pub(crate) fn render_chart_standalone(comp: &ComparisonResult) -> String {
+    render_chart(comp)
+}
+
 fn render_svg_bar_chart(comp: &ComparisonResult) -> String {
     if comp.benchmarks.len() < 2 {
         return String::new();
@@ -570,6 +791,133 @@ fn render_svg_bar_chart(comp: &ComparisonResult) -> String {
 
     svg.push_str("</svg>\n");
     svg
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::results::{BenchmarkResult, ComparisonResult};
+    use crate::stats::Summary;
+
+    fn make_bench(name: &str, mean: f64) -> BenchmarkResult {
+        let mut b = BenchmarkResult::default();
+        b.name = name.to_string();
+        // Create a summary with approximately the desired mean
+        b.summary = Summary::from_slice(&[mean * 0.95, mean, mean * 1.05]);
+        b
+    }
+
+    fn make_comp(name: &str, benches: Vec<BenchmarkResult>) -> ComparisonResult {
+        ComparisonResult {
+            group_name: name.to_string(),
+            benchmarks: benches,
+            analyses: Vec::new(),
+            completed_rounds: 30,
+            throughput: None,
+            cache_firewall: false,
+            cache_firewall_bytes: 0,
+            baseline_only: false,
+            throughput_unit: None,
+            sort_by_speed: false,
+            expect_sub_ns: false,
+            cold_start: false,
+            iterations_per_sample: 100,
+        }
+    }
+
+    #[test]
+    fn detect_matrix_valid() {
+        let comp = make_comp(
+            "decode",
+            vec![
+                make_bench("mozjpeg/256x256", 275.0),
+                make_bench("zune/256x256", 255.0),
+                make_bench("zenjpeg/256x256", 246.0),
+                make_bench("mozjpeg/512x512", 1060.0),
+                make_bench("zune/512x512", 1080.0),
+                make_bench("zenjpeg/512x512", 1030.0),
+            ],
+        );
+        let m = detect_matrix(&comp).expect("should detect matrix");
+        assert_eq!(m.variants, ["mozjpeg", "zenjpeg", "zune"]);
+        assert_eq!(m.params, ["256x256", "512x512"]);
+        assert_eq!(m.cells.len(), 6);
+    }
+
+    #[test]
+    fn detect_matrix_flat_names() {
+        let comp = make_comp(
+            "sort",
+            vec![
+                make_bench("std_sort", 100.0),
+                make_bench("unstable", 80.0),
+            ],
+        );
+        assert!(detect_matrix(&comp).is_none());
+    }
+
+    #[test]
+    fn detect_matrix_single_param() {
+        let comp = make_comp(
+            "decode",
+            vec![
+                make_bench("mozjpeg/256x256", 275.0),
+                make_bench("zune/256x256", 255.0),
+            ],
+        );
+        // Only one parameter — not a matrix
+        assert!(detect_matrix(&comp).is_none());
+    }
+
+    #[test]
+    fn detect_matrix_single_variant() {
+        let comp = make_comp(
+            "decode",
+            vec![
+                make_bench("zenjpeg/256x256", 246.0),
+                make_bench("zenjpeg/512x512", 1030.0),
+            ],
+        );
+        // Only one variant — not a matrix
+        assert!(detect_matrix(&comp).is_none());
+    }
+
+    #[test]
+    fn render_matrix_produces_svg() {
+        let comp = make_comp(
+            "decode",
+            vec![
+                make_bench("mozjpeg/256", 275.0),
+                make_bench("zenjpeg/256", 200.0),
+                make_bench("mozjpeg/512", 1060.0),
+                make_bench("zenjpeg/512", 900.0),
+            ],
+        );
+        let svg = render_chart(&comp);
+        assert!(svg.contains("<svg"), "should produce SVG");
+        assert!(svg.contains("256"), "should contain param labels");
+        assert!(svg.contains("512"), "should contain param labels");
+        assert!(svg.contains("mozjpeg"), "should contain variant in legend");
+        assert!(svg.contains("zenjpeg"), "should contain variant in legend");
+        assert!(svg.contains(PALETTE[0]), "should use palette colors");
+    }
+
+    #[test]
+    fn flat_chart_for_non_matrix() {
+        let comp = make_comp(
+            "sort",
+            vec![
+                make_bench("std_sort", 100.0),
+                make_bench("unstable", 80.0),
+                make_bench("parallel", 50.0),
+            ],
+        );
+        let svg = render_chart(&comp);
+        assert!(svg.contains("<svg"), "should produce SVG");
+        assert!(svg.contains("std_sort"), "should contain bench names");
+        // Should NOT have matrix structure (no param sections)
+        assert!(!svg.contains("class=\"param\""), "should be flat chart");
+    }
 }
 
 const HTML_HEAD: &str = r#"<!DOCTYPE html>

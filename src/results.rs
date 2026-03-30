@@ -218,6 +218,25 @@ impl SuiteResult {
         crate::html::to_html(self)
     }
 
+    /// Save each comparison group's SVG bar chart as a standalone `.svg` file.
+    ///
+    /// Files are named `{group_name}.svg` (with `/` replaced by `_`).
+    /// Matrix-structured groups (benchmark names with `variant/param` format)
+    /// automatically render as grouped bar charts with per-section scaling.
+    pub fn save_charts(&self, dir: impl AsRef<Path>) -> std::io::Result<()> {
+        let dir = dir.as_ref();
+        std::fs::create_dir_all(dir)?;
+        for comp in &self.comparisons {
+            let svg = crate::html::render_chart_standalone(comp);
+            if svg.is_empty() {
+                continue;
+            }
+            let filename = comp.group_name.replace('/', "_").replace(' ', "_");
+            std::fs::write(dir.join(format!("{filename}.svg")), &svg)?;
+        }
+        Ok(())
+    }
+
     /// Generate key-value format optimized for LLM consumption and grep.
     ///
     /// One line per benchmark. Every field explicitly named. No positional
