@@ -107,6 +107,11 @@ enum Commands {
         #[cfg(feature = "charts")]
         #[arg(long, default_value = "light")]
         chart_theme: String,
+
+        /// Use vertical bars instead of horizontal for --publish-charts.
+        #[cfg(feature = "charts")]
+        #[arg(long)]
+        vertical: bool,
     },
 
     /// Compare two result files.
@@ -199,12 +204,25 @@ fn main() {
             publish_charts,
             #[cfg(feature = "charts")]
             chart_theme,
+            #[cfg(feature = "charts")]
+            vertical,
         } => {
             #[cfg(feature = "charts")]
-            let pub_charts = publish_charts.as_deref().map(|d| (d, chart_theme.as_str()));
+            let pub_config = publish_charts.as_deref().map(|d| {
+                let config = zenbench::charts::ChartConfig {
+                    theme: chart_theme.clone(),
+                    orientation: if vertical {
+                        zenbench::charts::ChartOrientation::Vertical
+                    } else {
+                        zenbench::charts::ChartOrientation::Horizontal
+                    },
+                    ..Default::default()
+                };
+                (d, config)
+            });
             #[cfg(not(feature = "charts"))]
-            let pub_charts: Option<(&Path, &str)> = None;
-            cmd_results(&project, &run_id, json, markdown, csv, save_charts.as_deref(), pub_charts)
+            let pub_config: Option<(&Path, ())> = None;
+            cmd_results(&project, &run_id, json, markdown, csv, save_charts.as_deref(), pub_config)
         }
         Commands::Compare {
             baseline,
@@ -454,7 +472,8 @@ fn cmd_results(
     markdown: bool,
     csv: bool,
     save_charts: Option<&Path>,
-    publish_charts: Option<(&Path, &str)>,
+    #[cfg(feature = "charts")] publish_config: Option<(&Path, zenbench::charts::ChartConfig)>,
+    #[cfg(not(feature = "charts"))] publish_config: Option<(&Path, ())>,
 ) {
     let save_all_charts = |result: &zenbench::SuiteResult| {
         if let Some(dir) = save_charts {
@@ -465,15 +484,18 @@ fn cmd_results(
             }
         }
         #[cfg(feature = "charts")]
-        if let Some((dir, theme)) = publish_charts {
-            if let Err(e) = result.save_publication_charts(dir, theme) {
+        if let Some((dir, ref config)) = publish_config {
+            if let Err(e) = result.save_publication_charts(dir, config) {
                 eprintln!("Error saving publication charts: {e}");
             } else {
-                eprintln!("Publication charts ({theme}) saved to {}", dir.display());
+                eprintln!(
+                    "Publication charts ({}, {:?}) saved to {}",
+                    config.theme, config.orientation, dir.display()
+                );
             }
         }
         #[cfg(not(feature = "charts"))]
-        let _ = publish_charts;
+        let _ = publish_config;
     };
 
     // Check if it's a direct file path first

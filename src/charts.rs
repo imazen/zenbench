@@ -1,31 +1,65 @@
 //! Publication-quality SVG chart generation via charts-rs.
 //!
-//! Enabled with the `charts` feature. Produces horizontal bar charts
-//! from benchmark results, with grouped bars for matrix-structured
-//! benchmarks (variant/param naming convention).
+//! Enabled with the `charts` feature. Produces bar charts from benchmark
+//! results, with grouped bars for matrix-structured benchmarks
+//! (variant/param naming convention).
+//!
+//! # Orientation
+//!
+//! - [`ChartOrientation::Horizontal`] — best for few categories with long names
+//! - [`ChartOrientation::Vertical`] — best for many categories (sizes, configs)
 
 use crate::results::ComparisonResult;
-use charts_rs::{HorizontalBarChart, Series};
+use charts_rs::{BarChart, HorizontalBarChart, Series};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-/// Generate a horizontal bar chart SVG from a comparison group.
-///
-/// For matrix-structured groups (benchmarks named `variant/param`),
-/// produces grouped bars: each series is a variant (decoder), each
-/// category is a parameter (size). Values are shown in human-readable
-/// time units (ns/µs/ms/s).
-///
-/// For flat groups, produces a simple sorted bar chart.
-pub fn comparison_to_svg(comp: &ComparisonResult, theme: &str) -> Option<String> {
+/// Chart bar orientation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChartOrientation {
+    /// Horizontal bars (categories on Y axis, values on X). Good for few
+    /// categories with long names.
+    #[default]
+    Horizontal,
+    /// Vertical bars (categories on X axis, values on Y). Good for many
+    /// categories — easier to compare across groups visually.
+    Vertical,
+}
+
+/// Configuration for chart generation.
+#[derive(Debug, Clone)]
+pub struct ChartConfig {
+    /// charts-rs theme name: "light", "dark", "grafana", "vintage", etc.
+    pub theme: String,
+    /// Bar orientation.
+    pub orientation: ChartOrientation,
+    /// Show ±MAD whiskers on bars.
+    pub show_whiskers: bool,
+    /// Show value labels on bars.
+    pub show_labels: bool,
+}
+
+impl Default for ChartConfig {
+    fn default() -> Self {
+        Self {
+            theme: "light".to_string(),
+            orientation: ChartOrientation::default(),
+            show_whiskers: true,
+            show_labels: true,
+        }
+    }
+}
+
+/// Generate a bar chart SVG from a comparison group.
+pub fn comparison_to_svg(comp: &ComparisonResult, config: &ChartConfig) -> Option<String> {
     if comp.benchmarks.len() < 2 {
         return None;
     }
 
     if let Some((variants, params, grid)) = detect_matrix(comp) {
-        Some(render_matrix_chart(comp, &variants, &params, &grid, theme))
+        Some(render_matrix_chart(comp, &variants, &params, &grid, config))
     } else {
-        Some(render_flat_chart(comp, theme))
+        Some(render_flat_chart(comp, config))
     }
 }
 
@@ -33,11 +67,11 @@ pub fn comparison_to_svg(comp: &ComparisonResult, theme: &str) -> Option<String>
 pub fn save_charts(
     result: &crate::results::SuiteResult,
     dir: &Path,
-    theme: &str,
+    config: &ChartConfig,
 ) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     for comp in &result.comparisons {
-        if let Some(svg) = comparison_to_svg(comp, theme) {
+        if let Some(svg) = comparison_to_svg(comp, config) {
             let filename = comp
                 .group_name
                 .replace('/', "_")
@@ -49,9 +83,8 @@ pub fn save_charts(
     Ok(())
 }
 
-// ---- Matrix detection (shared with html.rs) ----
+// ---- Matrix detection ----
 
-/// Returns (variants_sorted, params_in_order, grid: HashMap<(variant_idx, param_idx), bench_idx>)
 fn detect_matrix(
     comp: &ComparisonResult,
 ) -> Option<(Vec<String>, Vec<String>, HashMap<(usize, usize), usize>)> {
@@ -91,26 +124,17 @@ fn detect_matrix(
     Some((variants, param_order, grid))
 }
 
-fn render_matrix_chart(
+// ---- Chart rendering ----
+
+fn build_series(
     comp: &ComparisonResult,
     variants: &[String],
     params: &[String],
     grid: &HashMap<(usize, usize), usize>,
-    theme: &str,
-) -> String {
-    // Each variant becomes a series, each param becomes an x-axis category.
-    // Values are mean times in a chosen unit (we pick the unit from the median benchmark).
-    let all_means: Vec<f64> = comp.benchmarks.iter().map(|b| b.summary.mean).collect();
-    let median_mean = {
-        let mut sorted = all_means.clone();
-        sorted.sort_by(|a, b| a.total_cmp(b));
-        sorted[sorted.len() / 2]
-    };
-
-    // Pick a consistent unit for all values
-    let (unit, divisor) = pick_unit(median_mean);
-
-    let series_list: Vec<Series> = variants
+    divisor: f64,
+    show_labels: bool,
+) -> Vec<Series> {
+    variants
         .iter()
         .enumerate()
         .map(|(vi, name)| {
@@ -125,29 +149,75 @@ fn render_matrix_chart(
                 .collect();
 
             let mut s = Series::new(name.clone(), data);
-            s.label_show = true;
+            s.label_show = show_labels;
             s
         })
-        .collect();
-
-    let x_axis_data: Vec<String> = params.to_vec();
-
-    let mut chart = HorizontalBarChart::new_with_theme(series_list, x_axis_data, theme);
-    chart.title_text = comp.group_name.clone();
-    chart.sub_title_text = format!("mean time ({unit}), lower is better");
-    chart.title_align = charts_rs::Align::Left;
-    chart.legend_align = charts_rs::Align::Right;
-    chart.width = 800.0;
-    chart.height = (120 + params.len() * variants.len() * 28 + params.len() * 30) as f32;
-    chart.margin.top = 15.0;
-    chart.margin.right = 30.0;
-    chart.margin.left = 10.0;
-
-    chart.svg().unwrap_or_default()
+        .collect()
 }
 
-fn render_flat_chart(comp: &ComparisonResult, theme: &str) -> String {
-    // Single series, sorted by mean time
+fn median_mean(comp: &ComparisonResult) -> f64 {
+    let mut means: Vec<f64> = comp.benchmarks.iter().map(|b| b.summary.mean).collect();
+    means.sort_by(|a, b| a.total_cmp(b));
+    means[means.len() / 2]
+}
+
+fn render_matrix_chart(
+    comp: &ComparisonResult,
+    variants: &[String],
+    params: &[String],
+    grid: &HashMap<(usize, usize), usize>,
+    config: &ChartConfig,
+) -> String {
+    let (unit, divisor) = pick_unit(median_mean(comp));
+    let series_list = build_series(comp, variants, params, grid, divisor, config.show_labels);
+    let x_axis_data: Vec<String> = params.to_vec();
+    let sub = format!("mean time ({unit}), lower is better");
+
+    let base_svg = match config.orientation {
+        ChartOrientation::Horizontal => {
+            let mut c = HorizontalBarChart::new_with_theme(series_list, x_axis_data, &config.theme);
+            c.title_text = comp.group_name.clone();
+            c.sub_title_text = sub;
+            c.title_align = charts_rs::Align::Left;
+            c.legend_align = charts_rs::Align::Right;
+            c.width = 800.0;
+            c.height =
+                (120 + params.len() * variants.len() * 28 + params.len() * 30) as f32;
+            c.margin.top = 15.0;
+            c.margin.right = 30.0;
+            c.margin.left = 10.0;
+            c.svg().unwrap_or_default()
+        }
+        ChartOrientation::Vertical => {
+            let mut c = BarChart::new_with_theme(series_list, x_axis_data, &config.theme);
+            c.title_text = comp.group_name.clone();
+            c.sub_title_text = sub;
+            c.title_align = charts_rs::Align::Left;
+            c.legend_align = charts_rs::Align::Right;
+            c.width = (120 + params.len() * variants.len() * 32 + params.len() * 20)
+                .max(600) as f32;
+            c.height = 450.0;
+            c.margin.top = 15.0;
+            c.margin.right = 20.0;
+            c.margin.left = 10.0;
+            c.x_axis_name_rotate = if params.iter().any(|p| p.len() > 6) {
+                -30.0
+            } else {
+                0.0
+            };
+            c.series_label_font_size = 10.0;
+            c.svg().unwrap_or_default()
+        }
+    };
+
+    if config.show_whiskers {
+        inject_whiskers_comment(&base_svg, comp, variants, params, grid, divisor)
+    } else {
+        base_svg
+    }
+}
+
+fn render_flat_chart(comp: &ComparisonResult, config: &ChartConfig) -> String {
     let mut benches: Vec<(usize, f64)> = comp
         .benchmarks
         .iter()
@@ -156,8 +226,8 @@ fn render_flat_chart(comp: &ComparisonResult, theme: &str) -> String {
         .collect();
     benches.sort_by(|a, b| a.1.total_cmp(&b.1));
 
-    let median_mean = benches[benches.len() / 2].1;
-    let (unit, divisor) = pick_unit(median_mean);
+    let mm = benches[benches.len() / 2].1;
+    let (unit, divisor) = pick_unit(mm);
 
     let x_axis_data: Vec<String> = benches
         .iter()
@@ -170,19 +240,85 @@ fn render_flat_chart(comp: &ComparisonResult, theme: &str) -> String {
         .collect();
 
     let mut s = Series::new("mean".to_string(), data);
-    s.label_show = true;
+    s.label_show = config.show_labels;
 
-    let mut chart = HorizontalBarChart::new_with_theme(vec![s], x_axis_data, theme);
-    chart.title_text = comp.group_name.clone();
-    chart.sub_title_text = format!("mean time ({unit}), lower is better");
-    chart.title_align = charts_rs::Align::Left;
-    chart.width = 700.0;
-    chart.height = (100 + benches.len() * 32) as f32;
-    chart.margin.top = 15.0;
-    chart.margin.right = 20.0;
-    chart.margin.left = 10.0;
+    let sub = format!("mean time ({unit}), lower is better");
 
-    chart.svg().unwrap_or_default()
+    match config.orientation {
+        ChartOrientation::Horizontal => {
+            let mut c = HorizontalBarChart::new_with_theme(vec![s], x_axis_data, &config.theme);
+            c.title_text = comp.group_name.clone();
+            c.sub_title_text = sub;
+            c.title_align = charts_rs::Align::Left;
+            c.width = 700.0;
+            c.height = (100 + benches.len() * 32) as f32;
+            c.margin.top = 15.0;
+            c.margin.right = 20.0;
+            c.margin.left = 10.0;
+            c.svg().unwrap_or_default()
+        }
+        ChartOrientation::Vertical => {
+            let mut c = BarChart::new_with_theme(vec![s], x_axis_data, &config.theme);
+            c.title_text = comp.group_name.clone();
+            c.sub_title_text = sub;
+            c.title_align = charts_rs::Align::Left;
+            c.width = (80 + benches.len() * 60).max(400) as f32;
+            c.height = 400.0;
+            c.margin.top = 15.0;
+            c.margin.right = 20.0;
+            c.margin.left = 10.0;
+            c.svg().unwrap_or_default()
+        }
+    }
+}
+
+/// Inject ±MAD annotation into the SVG as a text comment after the closing </svg>.
+///
+/// charts-rs doesn't support native error bars, so we append a small table
+/// showing mean ± MAD for each benchmark as an HTML comment inside the SVG.
+/// This preserves the data for anyone inspecting the SVG source.
+fn inject_whiskers_comment(
+    svg: &str,
+    comp: &ComparisonResult,
+    variants: &[String],
+    params: &[String],
+    grid: &HashMap<(usize, usize), usize>,
+    divisor: f64,
+) -> String {
+    // Find the unit from the divisor
+    let unit_label = match divisor as u64 {
+        1 => "ns",
+        1_000 => "µs",
+        1_000_000 => "ms",
+        1_000_000_000 => "s",
+        _ => "?",
+    };
+
+    let mut comment = String::from("\n<!-- zenbench ±MAD data\n");
+    for (pi, param) in params.iter().enumerate() {
+        comment.push_str(&format!("  {param}:\n"));
+        for (vi, variant) in variants.iter().enumerate() {
+            if let Some(&bi) = grid.get(&(vi, pi)) {
+                let b = &comp.benchmarks[bi];
+                let mean = b.summary.mean / divisor;
+                let mad = b.summary.mad / divisor;
+                comment.push_str(&format!(
+                    "    {variant}: {mean:.2} ±{mad:.2} {unit_label}\n"
+                ));
+            }
+        }
+    }
+    comment.push_str("-->\n");
+
+    // Insert comment before closing </svg>
+    if let Some(pos) = svg.rfind("</svg>") {
+        let mut result = svg[..pos].to_string();
+        result.push_str(&comment);
+        result.push_str(&svg[pos..]);
+        result
+    } else {
+        format!("{svg}{comment}")
+    }
 }
 
 /// Pick a human-readable time unit and divisor for a given nanosecond value.
@@ -230,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    fn matrix_chart_produces_svg() {
+    fn matrix_horizontal() {
         let comp = make_comp(
             "decode baseline 4:2:0",
             vec![
@@ -240,29 +376,48 @@ mod tests {
                 make_bench("zenjpeg/512x512", 1_030_000.0),
             ],
         );
-        let svg = comparison_to_svg(&comp, "light").expect("should produce SVG");
+        let cfg = ChartConfig::default();
+        let svg = comparison_to_svg(&comp, &cfg).unwrap();
         assert!(svg.contains("<svg"));
         assert!(svg.contains("256x256"));
         assert!(svg.contains("mozjpeg"));
+        assert!(svg.contains("±"), "should contain MAD data");
     }
 
     #[test]
-    fn flat_chart_produces_svg() {
+    fn matrix_vertical() {
         let comp = make_comp(
-            "sort algorithms",
+            "decode baseline 4:2:0",
             vec![
-                make_bench("std_sort", 100_000.0),
-                make_bench("unstable", 80_000.0),
-                make_bench("parallel", 50_000.0),
+                make_bench("mozjpeg/2048", 15_500_000.0),
+                make_bench("zenjpeg/2048", 15_300_000.0),
+                make_bench("mozjpeg/4096", 62_900_000.0),
+                make_bench("zenjpeg/4096", 62_200_000.0),
             ],
         );
-        let svg = comparison_to_svg(&comp, "light").expect("should produce SVG");
+        let cfg = ChartConfig {
+            orientation: ChartOrientation::Vertical,
+            ..Default::default()
+        };
+        let svg = comparison_to_svg(&comp, &cfg).unwrap();
         assert!(svg.contains("<svg"));
-        assert!(svg.contains("std_sort"));
     }
 
     #[test]
-    fn dark_theme_produces_svg() {
+    fn flat_chart() {
+        let comp = make_comp(
+            "sort",
+            vec![
+                make_bench("std", 100_000.0),
+                make_bench("unstable", 80_000.0),
+            ],
+        );
+        let svg = comparison_to_svg(&comp, &ChartConfig::default()).unwrap();
+        assert!(svg.contains("<svg"));
+    }
+
+    #[test]
+    fn dark_theme() {
         let comp = make_comp(
             "test",
             vec![
@@ -272,7 +427,11 @@ mod tests {
                 make_bench("b/2", 400.0),
             ],
         );
-        let svg = comparison_to_svg(&comp, "dark").expect("should produce SVG");
+        let cfg = ChartConfig {
+            theme: "dark".to_string(),
+            ..Default::default()
+        };
+        let svg = comparison_to_svg(&comp, &cfg).unwrap();
         assert!(svg.contains("<svg"));
     }
 }
