@@ -135,8 +135,11 @@ fn render_matrix_chart(
     let mut chart = HorizontalBarChart::new_with_theme(series_list, x_axis_data, theme);
     chart.title_text = comp.group_name.clone();
     chart.sub_title_text = format!("mean time ({unit}), lower is better");
+    chart.title_align = charts_rs::Align::Left;
+    chart.legend_align = charts_rs::Align::Right;
     chart.width = 800.0;
-    chart.height = (100 + params.len() * variants.len() * 28 + params.len() * 30) as f32;
+    chart.height = (120 + params.len() * variants.len() * 28 + params.len() * 30) as f32;
+    chart.margin.top = 15.0;
     chart.margin.right = 30.0;
     chart.margin.left = 10.0;
 
@@ -172,8 +175,10 @@ fn render_flat_chart(comp: &ComparisonResult, theme: &str) -> String {
     let mut chart = HorizontalBarChart::new_with_theme(vec![s], x_axis_data, theme);
     chart.title_text = comp.group_name.clone();
     chart.sub_title_text = format!("mean time ({unit}), lower is better");
+    chart.title_align = charts_rs::Align::Left;
     chart.width = 700.0;
     chart.height = (100 + benches.len() * 32) as f32;
+    chart.margin.top = 15.0;
     chart.margin.right = 20.0;
     chart.margin.left = 10.0;
 
