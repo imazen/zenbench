@@ -237,6 +237,23 @@ impl SuiteResult {
         Ok(())
     }
 
+    /// Save publication-quality SVG charts via charts-rs.
+    ///
+    /// Requires the `charts` feature. Produces polished horizontal bar charts
+    /// with proper fonts, gridlines, legends, and value labels. Supports
+    /// `"light"`, `"dark"`, `"grafana"`, `"vintage"`, and other charts-rs themes.
+    ///
+    /// For matrix-structured groups (benchmarks named `variant/param`),
+    /// produces grouped bar charts with one series per variant.
+    #[cfg(feature = "charts")]
+    pub fn save_publication_charts(
+        &self,
+        dir: impl AsRef<Path>,
+        theme: &str,
+    ) -> std::io::Result<()> {
+        crate::charts::save_charts(self, dir.as_ref(), theme)
+    }
+
     /// Generate key-value format optimized for LLM consumption and grep.
     ///
     /// One line per benchmark. Every field explicitly named. No positional

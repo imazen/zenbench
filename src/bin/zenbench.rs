@@ -95,6 +95,18 @@ enum Commands {
         /// with ±MAD error bars, suitable for README embedding.
         #[arg(long, value_name = "DIR")]
         save_charts: Option<PathBuf>,
+
+        /// Save publication-quality SVG charts via charts-rs.
+        ///
+        /// Requires the `charts` feature. Theme: light, dark, grafana, vintage, etc.
+        #[cfg(feature = "charts")]
+        #[arg(long, value_name = "DIR")]
+        publish_charts: Option<PathBuf>,
+
+        /// Theme for --publish-charts (default: light).
+        #[cfg(feature = "charts")]
+        #[arg(long, default_value = "light")]
+        chart_theme: String,
     },
 
     /// Compare two result files.
@@ -183,7 +195,17 @@ fn main() {
             markdown,
             csv,
             save_charts,
-        } => cmd_results(&project, &run_id, json, markdown, csv, save_charts.as_deref()),
+            #[cfg(feature = "charts")]
+            publish_charts,
+            #[cfg(feature = "charts")]
+            chart_theme,
+        } => {
+            #[cfg(feature = "charts")]
+            let pub_charts = publish_charts.as_deref().map(|d| (d, chart_theme.as_str()));
+            #[cfg(not(feature = "charts"))]
+            let pub_charts: Option<(&Path, &str)> = None;
+            cmd_results(&project, &run_id, json, markdown, csv, save_charts.as_deref(), pub_charts)
+        }
         Commands::Compare {
             baseline,
             candidate,
@@ -432,20 +454,35 @@ fn cmd_results(
     markdown: bool,
     csv: bool,
     save_charts: Option<&Path>,
+    publish_charts: Option<(&Path, &str)>,
 ) {
+    let save_all_charts = |result: &zenbench::SuiteResult| {
+        if let Some(dir) = save_charts {
+            if let Err(e) = result.save_charts(dir) {
+                eprintln!("Error saving charts: {e}");
+            } else {
+                eprintln!("Charts saved to {}", dir.display());
+            }
+        }
+        #[cfg(feature = "charts")]
+        if let Some((dir, theme)) = publish_charts {
+            if let Err(e) = result.save_publication_charts(dir, theme) {
+                eprintln!("Error saving publication charts: {e}");
+            } else {
+                eprintln!("Publication charts ({theme}) saved to {}", dir.display());
+            }
+        }
+        #[cfg(not(feature = "charts"))]
+        let _ = publish_charts;
+    };
+
     // Check if it's a direct file path first
     let file_path = PathBuf::from(run_id);
     if file_path.exists() && file_path.extension().is_some_and(|e| e == "json") {
         match zenbench::SuiteResult::load(&file_path) {
             Ok(result) => {
                 output_result(&result, json, markdown, csv);
-                if let Some(dir) = save_charts {
-                    if let Err(e) = result.save_charts(dir) {
-                        eprintln!("Error saving charts: {e}");
-                    } else {
-                        eprintln!("Charts saved to {}", dir.display());
-                    }
-                }
+                save_all_charts(&result);
                 return;
             }
             Err(e) => {
@@ -478,13 +515,7 @@ fn cmd_results(
                 match zenbench::SuiteResult::load(result_path) {
                     Ok(result) => {
                         output_result(&result, json, markdown, csv);
-                        if let Some(dir) = save_charts {
-                            if let Err(e) = result.save_charts(dir) {
-                                eprintln!("Error saving charts: {e}");
-                            } else {
-                                eprintln!("Charts saved to {}", dir.display());
-                            }
-                        }
+                        save_all_charts(&result);
                     }
                     Err(e) => {
                         eprintln!("Error loading results from {}: {e}", result_path.display());

@@ -18,6 +18,8 @@ mod bench;
 pub mod calibration;
 mod checks;
 mod ci;
+#[cfg(feature = "charts")]
+pub mod charts;
 #[cfg(feature = "criterion-compat")]
 pub mod criterion_compat;
 pub mod daemon;
