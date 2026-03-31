@@ -658,8 +658,8 @@ fn render_matrix_svg_bar_chart(comp: &ComparisonResult, matrix: &MatrixChart) ->
                 };
                 let bar_w = (frac * chart_w as f64).max(3.0) as usize;
 
-                let is_fastest = (mean - section_min).abs() < f64::EPSILON
-                    && matrix.variants.len() > 1;
+                let is_fastest =
+                    (mean - section_min).abs() < f64::EPSILON && matrix.variants.len() > 1;
                 let opacity = if is_fastest { "1.0" } else { "0.8" };
 
                 let value = if has_throughput {
@@ -849,8 +849,8 @@ fn render_readme_matrix_svg(comp: &ComparisonResult, matrix: &MatrixChart) -> St
                 };
                 let bar_w = (frac * chart_w as f64).max(3.0) as usize;
 
-                let is_fastest = (mean - section_min).abs() < f64::EPSILON
-                    && matrix.variants.len() > 1;
+                let is_fastest =
+                    (mean - section_min).abs() < f64::EPSILON && matrix.variants.len() > 1;
                 let opacity = if is_fastest { "0.95" } else { "0.75" };
 
                 let mean_str = if has_throughput {
@@ -897,11 +897,11 @@ fn render_readme_matrix_svg(comp: &ComparisonResult, matrix: &MatrixChart) -> St
                      dominant-baseline=\"middle\" class=\"value\">{mean_str}</text>\n\
                      <text x=\"{vx}\" y=\"{}\" \
                      dominant-baseline=\"middle\" class=\"mad\">\u{00b1}{mad_str}</text>\n",
-                    whisker_x + whisker_w,  // whisker horizontal end
-                    whisker_x + whisker_w,  // whisker cap x
-                    whisker_x + whisker_w,  // whisker cap x
-                    ty - 5,                 // value text (above center)
-                    ty + 6,                 // MAD text (below center)
+                    whisker_x + whisker_w, // whisker horizontal end
+                    whisker_x + whisker_w, // whisker cap x
+                    whisker_x + whisker_w, // whisker cap x
+                    ty - 5,                // value text (above center)
+                    ty + 6,                // MAD text (below center)
                 ));
             }
 
@@ -1047,10 +1047,7 @@ mod tests {
     fn detect_matrix_flat_names() {
         let comp = make_comp(
             "sort",
-            vec![
-                make_bench("std_sort", 100.0),
-                make_bench("unstable", 80.0),
-            ],
+            vec![make_bench("std_sort", 100.0), make_bench("unstable", 80.0)],
         );
         assert!(detect_matrix(&comp).is_none());
     }

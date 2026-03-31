@@ -181,8 +181,7 @@ fn render_matrix_chart(
             c.title_align = charts_rs::Align::Left;
             c.legend_align = charts_rs::Align::Right;
             c.width = 800.0;
-            c.height =
-                (120 + params.len() * variants.len() * 28 + params.len() * 30) as f32;
+            c.height = (120 + params.len() * variants.len() * 28 + params.len() * 30) as f32;
             c.margin.top = 15.0;
             c.margin.right = 30.0;
             c.margin.left = 10.0;
@@ -194,8 +193,8 @@ fn render_matrix_chart(
             c.sub_title_text = sub;
             c.title_align = charts_rs::Align::Left;
             c.legend_align = charts_rs::Align::Right;
-            c.width = (120 + params.len() * variants.len() * 32 + params.len() * 20)
-                .max(600) as f32;
+            c.width =
+                (120 + params.len() * variants.len() * 32 + params.len() * 20).max(600) as f32;
             c.height = 450.0;
             c.margin.top = 15.0;
             c.margin.right = 20.0;

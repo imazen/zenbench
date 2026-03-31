@@ -222,7 +222,15 @@ fn main() {
             });
             #[cfg(not(feature = "charts"))]
             let pub_config: Option<(&Path, ())> = None;
-            cmd_results(&project, &run_id, json, markdown, csv, save_charts.as_deref(), pub_config)
+            cmd_results(
+                &project,
+                &run_id,
+                json,
+                markdown,
+                csv,
+                save_charts.as_deref(),
+                pub_config,
+            )
         }
         Commands::Compare {
             baseline,
@@ -490,7 +498,9 @@ fn cmd_results(
             } else {
                 eprintln!(
                     "Publication charts ({}, {:?}) saved to {}",
-                    config.theme, config.orientation, dir.display()
+                    config.theme,
+                    config.orientation,
+                    dir.display()
                 );
             }
         }
