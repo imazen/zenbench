@@ -231,7 +231,7 @@ impl SuiteResult {
             if svg.is_empty() {
                 continue;
             }
-            let filename = comp.group_name.replace('/', "_").replace(' ', "_");
+            let filename = comp.group_name.replace(['/', ' '], "_");
             std::fs::write(dir.join(format!("{filename}.svg")), &svg)?;
         }
         Ok(())

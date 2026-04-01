@@ -72,11 +72,7 @@ pub fn save_charts(
     std::fs::create_dir_all(dir)?;
     for comp in &result.comparisons {
         if let Some(svg) = comparison_to_svg(comp, config) {
-            let filename = comp
-                .group_name
-                .replace('/', "_")
-                .replace(' ', "_")
-                .replace(':', "_");
+            let filename = comp.group_name.replace(['/', ' ', ':'], "_");
             std::fs::write(dir.join(format!("{filename}.svg")), &svg)?;
         }
     }
@@ -85,6 +81,7 @@ pub fn save_charts(
 
 // ---- Matrix detection ----
 
+#[allow(clippy::type_complexity)]
 fn detect_matrix(
     comp: &ComparisonResult,
 ) -> Option<(Vec<String>, Vec<String>, HashMap<(usize, usize), usize>)> {
@@ -340,10 +337,11 @@ mod tests {
     use crate::stats::Summary;
 
     fn make_bench(name: &str, mean_ns: f64) -> BenchmarkResult {
-        let mut b = BenchmarkResult::default();
-        b.name = name.to_string();
-        b.summary = Summary::from_slice(&[mean_ns * 0.95, mean_ns, mean_ns * 1.05]);
-        b
+        BenchmarkResult {
+            name: name.to_string(),
+            summary: Summary::from_slice(&[mean_ns * 0.95, mean_ns, mean_ns * 1.05]),
+            ..Default::default()
+        }
     }
 
     fn make_comp(name: &str, benches: Vec<BenchmarkResult>) -> ComparisonResult {

@@ -877,7 +877,7 @@ fn render_readme_matrix_svg(comp: &ComparisonResult, matrix: &MatrixChart) -> St
 
                 // MAD whisker line
                 let mad_frac = mad / section_max;
-                let whisker_w = (mad_frac * chart_w as f64).max(1.0).min(40.0) as usize;
+                let whisker_w = (mad_frac * chart_w as f64).clamp(1.0, 40.0) as usize;
                 let whisker_x = label_w + bar_w;
                 let whisker_top = y + 4;
                 let whisker_bot = y + bh - 4;
@@ -992,6 +992,60 @@ fn render_svg_bar_chart(comp: &ComparisonResult) -> String {
     svg
 }
 
+const HTML_HEAD: &str = r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zenbench results</title>
+<style>
+  :root { --bg: #1a1b26; --fg: #c0caf5; --accent: #7aa2f7; --dim: #737aa2; --green: #9ece6a; --red: #f7768e; --yellow: #e0af68; --surface: #24283b; --border: #2f3549; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--fg); margin: 0; padding: 0; font-size: 15px; line-height: 1.5; }
+  .container { max-width: 1060px; margin: 0 auto; padding: 2rem; }
+  h1 { color: #fff; margin-bottom: 0.5rem; font-size: 1.8rem; } h1 small { color: var(--dim); font-weight: normal; font-size: 0.4em; }
+  h2 { color: var(--accent); font-size: 1.2rem; margin: 0; display: inline; }
+  h4 { color: var(--accent); font-size: 0.95rem; margin: 0.6rem 0 0.3rem; }
+  .meta { color: var(--dim); font-size: 0.9rem; margin-left: 1rem; }
+  .header-meta { display: flex; gap: 1.5rem; flex-wrap: wrap; color: var(--dim); font-size: 0.9rem; margin-bottom: 1.2rem; padding: 0.6rem 0.8rem; background: var(--surface); border-radius: 6px; }
+  summary { cursor: pointer; padding: 0.5rem 0; }
+  summary:hover { opacity: 0.8; }
+  details { margin: 0.8rem 0; border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem 1.2rem; }
+  table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
+  th, td { padding: 0.5rem 0.8rem; text-align: right; font-size: 1.05rem; border: none; }
+  th { color: var(--dim); font-weight: 600; font-size: 0.85rem; border-bottom: 2px solid var(--border); }
+  th:first-child, td:first-child { text-align: left; }
+  td { font-variant-numeric: tabular-nums; }
+  .header-row th { padding-bottom: 0.4rem; }
+  tr:hover > td { background: rgba(255,255,255,0.03); }
+  .fastest > td { color: var(--green); }
+  .subgroup td { color: var(--dim); font-style: italic; font-size: 0.9rem; padding-top: 0.8rem; border-bottom: 1px solid var(--border); text-align: left; }
+  .bench-toggle { cursor: pointer; white-space: nowrap; }
+  .bench-toggle::before { content: '▸ '; color: var(--dim); }
+  .detail-toggle:checked + .bench-toggle::before { content: '▾ '; }
+  .bench-toggle:hover { opacity: 0.8; }
+  .detail-row { display: none; }
+  .detail-row td { padding: 0.2rem 0.8rem 0.6rem; border: none; }
+  tr:has(.detail-toggle:checked) + .detail-row { display: table-row; }
+  .detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.6rem; padding: 0.6rem 0; }
+  .detail-section { background: var(--surface); border-radius: 6px; padding: 0.6rem 0.9rem; }
+  .detail-table { margin: 0; }
+  .detail-table td { font-size: 0.9rem; padding: 0.2rem 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
+  .detail-table td:first-child { color: var(--dim); width: 45%; }
+  .explain { font-size: 0.8rem; color: var(--dim); font-style: italic; margin-top: 0.15rem; }
+  .methodology { font-size: 0.85rem; color: var(--dim); margin: 0.3rem 0 0.6rem; line-height: 1.6; }
+  .methodology strong { color: var(--fg); font-weight: 500; }
+  .pill { display: inline-block; font-size: 0.75rem; padding: 0.1em 0.5em; border-radius: 10px; font-weight: 600; }
+  .pill-green { background: rgba(158,206,106,0.15); color: var(--green); }
+  .pill-red { background: rgba(247,118,142,0.15); color: var(--red); }
+  .pill-yellow { background: rgba(224,175,104,0.15); color: var(--yellow); }
+  .pill-dim { background: rgba(115,122,162,0.15); color: var(--dim); }
+  svg { margin: 0.8rem 0; display: block; max-width: 100%; }
+  code { background: var(--surface); padding: 0.15em 0.4em; border-radius: 3px; font-size: 0.9em; }
+</style>
+</head>
+<body><div class="container">
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -999,11 +1053,11 @@ mod tests {
     use crate::stats::Summary;
 
     fn make_bench(name: &str, mean: f64) -> BenchmarkResult {
-        let mut b = BenchmarkResult::default();
-        b.name = name.to_string();
-        // Create a summary with approximately the desired mean
-        b.summary = Summary::from_slice(&[mean * 0.95, mean, mean * 1.05]);
-        b
+        BenchmarkResult {
+            name: name.to_string(),
+            summary: Summary::from_slice(&[mean * 0.95, mean, mean * 1.05]),
+            ..Default::default()
+        }
     }
 
     fn make_comp(name: &str, benches: Vec<BenchmarkResult>) -> ComparisonResult {
@@ -1115,57 +1169,3 @@ mod tests {
         assert!(!svg.contains("class=\"param\""), "should be flat chart");
     }
 }
-
-const HTML_HEAD: &str = r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>zenbench results</title>
-<style>
-  :root { --bg: #1a1b26; --fg: #c0caf5; --accent: #7aa2f7; --dim: #737aa2; --green: #9ece6a; --red: #f7768e; --yellow: #e0af68; --surface: #24283b; --border: #2f3549; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--fg); margin: 0; padding: 0; font-size: 15px; line-height: 1.5; }
-  .container { max-width: 1060px; margin: 0 auto; padding: 2rem; }
-  h1 { color: #fff; margin-bottom: 0.5rem; font-size: 1.8rem; } h1 small { color: var(--dim); font-weight: normal; font-size: 0.4em; }
-  h2 { color: var(--accent); font-size: 1.2rem; margin: 0; display: inline; }
-  h4 { color: var(--accent); font-size: 0.95rem; margin: 0.6rem 0 0.3rem; }
-  .meta { color: var(--dim); font-size: 0.9rem; margin-left: 1rem; }
-  .header-meta { display: flex; gap: 1.5rem; flex-wrap: wrap; color: var(--dim); font-size: 0.9rem; margin-bottom: 1.2rem; padding: 0.6rem 0.8rem; background: var(--surface); border-radius: 6px; }
-  summary { cursor: pointer; padding: 0.5rem 0; }
-  summary:hover { opacity: 0.8; }
-  details { margin: 0.8rem 0; border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem 1.2rem; }
-  table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
-  th, td { padding: 0.5rem 0.8rem; text-align: right; font-size: 1.05rem; border: none; }
-  th { color: var(--dim); font-weight: 600; font-size: 0.85rem; border-bottom: 2px solid var(--border); }
-  th:first-child, td:first-child { text-align: left; }
-  td { font-variant-numeric: tabular-nums; }
-  .header-row th { padding-bottom: 0.4rem; }
-  tr:hover > td { background: rgba(255,255,255,0.03); }
-  .fastest > td { color: var(--green); }
-  .subgroup td { color: var(--dim); font-style: italic; font-size: 0.9rem; padding-top: 0.8rem; border-bottom: 1px solid var(--border); text-align: left; }
-  .bench-toggle { cursor: pointer; white-space: nowrap; }
-  .bench-toggle::before { content: '▸ '; color: var(--dim); }
-  .detail-toggle:checked + .bench-toggle::before { content: '▾ '; }
-  .bench-toggle:hover { opacity: 0.8; }
-  .detail-row { display: none; }
-  .detail-row td { padding: 0.2rem 0.8rem 0.6rem; border: none; }
-  tr:has(.detail-toggle:checked) + .detail-row { display: table-row; }
-  .detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.6rem; padding: 0.6rem 0; }
-  .detail-section { background: var(--surface); border-radius: 6px; padding: 0.6rem 0.9rem; }
-  .detail-table { margin: 0; }
-  .detail-table td { font-size: 0.9rem; padding: 0.2rem 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
-  .detail-table td:first-child { color: var(--dim); width: 45%; }
-  .explain { font-size: 0.8rem; color: var(--dim); font-style: italic; margin-top: 0.15rem; }
-  .methodology { font-size: 0.85rem; color: var(--dim); margin: 0.3rem 0 0.6rem; line-height: 1.6; }
-  .methodology strong { color: var(--fg); font-weight: 500; }
-  .pill { display: inline-block; font-size: 0.75rem; padding: 0.1em 0.5em; border-radius: 10px; font-weight: 600; }
-  .pill-green { background: rgba(158,206,106,0.15); color: var(--green); }
-  .pill-red { background: rgba(247,118,142,0.15); color: var(--red); }
-  .pill-yellow { background: rgba(224,175,104,0.15); color: var(--yellow); }
-  .pill-dim { background: rgba(115,122,162,0.15); color: var(--dim); }
-  svg { margin: 0.8rem 0; display: block; max-width: 100%; }
-  code { background: var(--surface); padding: 0.15em 0.4em; border-radius: 3px; font-size: 0.9em; }
-</style>
-</head>
-<body><div class="container">
-"#;
