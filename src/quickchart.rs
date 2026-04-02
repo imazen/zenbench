@@ -43,8 +43,8 @@ impl Default for QuickChartConfig {
     fn default() -> Self {
         Self {
             width: 700,
-            bar_height: 22,
-            padding: 56,
+            bar_height: 18,
+            padding: 36,
             format: "png".to_string(),
             background: "080808".to_string(),
             prefer_throughput: true,
@@ -294,7 +294,7 @@ fn build_grouped_chart_url(
             "\"datasets\":[{datasets}]",
             "}},",
             "\"options\":{{",
-            "\"layout\":{{\"padding\":{{\"top\":2,\"bottom\":2,\"left\":0,\"right\":12}}}},",
+            "\"layout\":{{\"padding\":{{\"top\":0,\"bottom\":0,\"left\":0,\"right\":4}}}},",
             "\"plugins\":{{\"datalabels\":{{",
             "\"anchor\":\"end\",\"align\":\"end\",",
             "\"color\":\"#cccccc\",",
@@ -302,15 +302,20 @@ fn build_grouped_chart_url(
             "\"formatter\":\"{formatter}\"",
             "}}}},",
             "\"scales\":{{",
-            "\"xAxes\":[{{\"ticks\":{{\"beginAtZero\":true,\"fontColor\":\"#666666\",\"fontSize\":10}},",
-            "\"gridLines\":{{\"color\":\"#1a1a1a\",\"zeroLineColor\":\"#333333\"}}}}],",
-            "\"yAxes\":[{{\"ticks\":{{\"fontColor\":\"#bbbbbb\",\"fontSize\":11}},",
-            "\"gridLines\":{{\"color\":\"#111111\"}}}}]",
+            "\"xAxes\":[{{",
+            "\"ticks\":{{\"beginAtZero\":true,\"fontColor\":\"#666666\",\"fontSize\":10,\"padding\":2}},",
+            "\"gridLines\":{{\"color\":\"#1a1a1a\",\"zeroLineColor\":\"#333333\",\"drawTicks\":false}}",
+            "}}],",
+            "\"yAxes\":[{{",
+            "\"ticks\":{{\"fontColor\":\"#bbbbbb\",\"fontSize\":11,\"padding\":4}},",
+            "\"gridLines\":{{\"color\":\"#111111\",\"drawTicks\":false}},",
+            "\"barPercentage\":0.85,\"categoryPercentage\":0.9",
+            "}}]",
             "}},",
             "\"legend\":{{\"display\":true,\"position\":\"bottom\",",
-            "\"labels\":{{\"fontColor\":\"#888888\",\"fontSize\":10,\"padding\":8}}}},",
+            "\"labels\":{{\"fontColor\":\"#888888\",\"fontSize\":10,\"padding\":6}}}},",
             "\"title\":{{\"display\":true,\"fontColor\":\"#00cc33\",\"fontSize\":12,",
-            "\"text\":\"{title}\"}}",
+            "\"padding\":4,\"text\":\"{title}\"}}",
             "}}",
             "}}"
         ),
@@ -322,7 +327,7 @@ fn build_grouped_chart_url(
 
     // Height: each param gets bars for all variants, plus legend space
     let bars_per_param = matrix.variants.len() as u32;
-    let legend_extra = 20; // bottom legend
+    let legend_extra = 16; // bottom legend
     let height = config.padding
         + legend_extra
         + (matrix.params.len() as u32) * bars_per_param * config.bar_height;
@@ -372,7 +377,7 @@ fn build_single_dataset_json(
             "\"datasets\":[{{\"data\":[{data}],\"backgroundColor\":[{colors}]}}]",
             "}},",
             "\"options\":{{",
-            "\"layout\":{{\"padding\":{{\"top\":2,\"bottom\":2,\"left\":0,\"right\":12}}}},",
+            "\"layout\":{{\"padding\":{{\"top\":0,\"bottom\":0,\"left\":0,\"right\":4}}}},",
             "\"plugins\":{{\"datalabels\":{{",
             "\"anchor\":\"end\",\"align\":\"end\",",
             "\"color\":\"#cccccc\",",
@@ -380,14 +385,19 @@ fn build_single_dataset_json(
             "\"formatter\":\"{formatter}\"",
             "}}}},",
             "\"scales\":{{",
-            "\"xAxes\":[{{\"ticks\":{{\"beginAtZero\":true,\"fontColor\":\"#666666\",\"fontSize\":10}},",
-            "\"gridLines\":{{\"color\":\"#1a1a1a\",\"zeroLineColor\":\"#333333\"}}}}],",
-            "\"yAxes\":[{{\"ticks\":{{\"fontColor\":\"#bbbbbb\",\"fontSize\":11}},",
-            "\"gridLines\":{{\"color\":\"#111111\"}}}}]",
+            "\"xAxes\":[{{",
+            "\"ticks\":{{\"beginAtZero\":true,\"fontColor\":\"#666666\",\"fontSize\":10,\"padding\":2}},",
+            "\"gridLines\":{{\"color\":\"#1a1a1a\",\"zeroLineColor\":\"#333333\",\"drawTicks\":false}}",
+            "}}],",
+            "\"yAxes\":[{{",
+            "\"ticks\":{{\"fontColor\":\"#bbbbbb\",\"fontSize\":11,\"padding\":4}},",
+            "\"gridLines\":{{\"color\":\"#111111\",\"drawTicks\":false}},",
+            "\"barPercentage\":0.8,\"categoryPercentage\":0.9",
+            "}}]",
             "}},",
             "\"legend\":{{\"display\":false}},",
             "\"title\":{{\"display\":true,\"fontColor\":\"#00cc33\",\"fontSize\":12,",
-            "\"text\":\"{title}\"}}",
+            "\"padding\":4,\"text\":\"{title}\"}}",
             "}}",
             "}}"
         ),
