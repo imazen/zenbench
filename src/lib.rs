@@ -29,6 +29,7 @@ mod gate;
 mod html;
 pub mod mcp;
 pub mod platform;
+pub mod quickchart;
 mod report;
 mod results;
 mod stats;
