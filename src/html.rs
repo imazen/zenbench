@@ -510,17 +510,17 @@ const PALETTE: &[&str] = &[
 ];
 
 /// Parsed matrix structure: benchmarks with `variant/param` names.
-struct MatrixChart {
+pub(crate) struct MatrixChart {
     /// Parameter values in order of first appearance (e.g., "256x256", "512x512").
-    params: Vec<String>,
+    pub(crate) params: Vec<String>,
     /// Variant names sorted alphabetically for deterministic color assignment.
-    variants: Vec<String>,
+    pub(crate) variants: Vec<String>,
     /// (variant_idx, param_idx) → benchmark index in the ComparisonResult.
-    cells: std::collections::HashMap<(usize, usize), usize>,
+    pub(crate) cells: std::collections::HashMap<(usize, usize), usize>,
 }
 
 /// Try to detect matrix structure from benchmark names containing `/`.
-fn detect_matrix(comp: &ComparisonResult) -> Option<MatrixChart> {
+pub(crate) fn detect_matrix(comp: &ComparisonResult) -> Option<MatrixChart> {
     let mut param_order: Vec<String> = Vec::new();
     let mut variant_set: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut entries: Vec<(String, String, usize)> = Vec::new(); // (variant, param, bench_idx)

@@ -112,6 +112,11 @@ fn build_chart_url(comp: &ComparisonResult, config: &QuickChartConfig) -> Option
         return None;
     }
 
+    // Detect matrix structure (variant/param naming) for grouped charts
+    if let Some(matrix) = crate::html::detect_matrix(comp) {
+        return build_grouped_chart_url(comp, &matrix, config);
+    }
+
     let use_throughput = config.prefer_throughput && comp.throughput.is_some();
 
     // Collect bar data
@@ -166,7 +171,6 @@ fn build_chart_url(comp: &ComparisonResult, config: &QuickChartConfig) -> Option
     // Determine unit and format values
     let (display_values, unit_suffix) = if use_throughput {
         let tp = comp.throughput.as_ref().unwrap();
-        // Use the unit from the first benchmark (they're all the same throughput config)
         let (_, unit) = tp.compute(
             comp.benchmarks[0].summary.mean,
             comp.throughput_unit.as_deref(),
@@ -176,6 +180,9 @@ fn build_chart_url(comp: &ComparisonResult, config: &QuickChartConfig) -> Option
     } else {
         format_time_values(&bars)
     };
+
+    let (title, formatter) =
+        build_title_and_formatter(&comp.group_name, &unit_suffix, use_throughput);
 
     // Build labels, data, colors arrays
     let labels: Vec<String> = bars
@@ -191,18 +198,170 @@ fn build_chart_url(comp: &ComparisonResult, config: &QuickChartConfig) -> Option
         .map(|b| format!("\"{}\"", config.color_for(&b.label, b.is_fastest)))
         .collect();
 
-    // Title with unit hint
-    let title = if use_throughput {
-        format!("{} ({}, higher = better)", comp.group_name, unit_suffix)
+    let chart_json = build_single_dataset_json(&labels, &data, &bg_colors, &title, &formatter);
+
+    let height = config.padding + (bars.len() as u32) * config.bar_height;
+    Some(finish_url(comp, config, &chart_json, height))
+}
+
+/// Build a grouped (multi-dataset) chart for matrix-structured benchmarks.
+///
+/// Labels are the parameter values (e.g., "256x256", "1024x1024").
+/// Each variant becomes a dataset with its own color and legend entry.
+fn build_grouped_chart_url(
+    comp: &ComparisonResult,
+    matrix: &crate::html::MatrixChart,
+    config: &QuickChartConfig,
+) -> Option<QuickChartUrl> {
+    let use_throughput = config.prefer_throughput && comp.throughput.is_some();
+
+    // Determine unit from all benchmarks
+    let unit_suffix = if use_throughput {
+        let tp = comp.throughput.as_ref().unwrap();
+        let (_, unit) = tp.compute(
+            comp.benchmarks[0].summary.mean,
+            comp.throughput_unit.as_deref(),
+        );
+        unit
     } else {
-        format!("{} ({}, lower = better)", comp.group_name, unit_suffix)
+        // Pick unit from the median benchmark value
+        let mut all_means: Vec<f64> = comp.benchmarks.iter().map(|b| b.summary.mean).collect();
+        all_means.sort_by(|a, b| a.total_cmp(b));
+        let median_ns = all_means[all_means.len() / 2];
+        let (_, unit, _) = crate::format::ns_unit(median_ns.abs());
+        unit.to_string()
     };
 
-    // Build the formatter
-    let formatter = format!("(v)=>v+' {}'", escape_json(&unit_suffix));
+    let (divisor, _, _) = if use_throughput {
+        (1.0, "", 0)
+    } else {
+        let mut all_means: Vec<f64> = comp.benchmarks.iter().map(|b| b.summary.mean).collect();
+        all_means.sort_by(|a, b| a.total_cmp(b));
+        crate::format::ns_unit(all_means[all_means.len() / 2].abs())
+    };
 
-    // Build Chart.js config JSON (compact, no unnecessary whitespace)
+    let (title, formatter) =
+        build_title_and_formatter(&comp.group_name, &unit_suffix, use_throughput);
+
+    // Labels = parameter values
+    let labels: Vec<String> = matrix
+        .params
+        .iter()
+        .map(|p| format!("\"{}\"", escape_json(p)))
+        .collect();
+
+    // One dataset per variant
+    let mut datasets: Vec<String> = Vec::new();
+    for (vi, variant) in matrix.variants.iter().enumerate() {
+        let color = &GROUPED_PALETTE[vi % GROUPED_PALETTE.len()];
+
+        let data: Vec<String> = matrix
+            .params
+            .iter()
+            .enumerate()
+            .map(|(pi, _)| {
+                if let Some(&bi) = matrix.cells.get(&(vi, pi)) {
+                    let bench = &comp.benchmarks[bi];
+                    let value = if use_throughput {
+                        let tp = comp.throughput.as_ref().unwrap();
+                        let (val, _) =
+                            tp.compute(bench.summary.mean, comp.throughput_unit.as_deref());
+                        val
+                    } else {
+                        bench.summary.mean / divisor
+                    };
+                    format_chart_value(value)
+                } else {
+                    "0".to_string()
+                }
+            })
+            .collect();
+
+        datasets.push(format!(
+            "{{\"label\":\"{}\",\"data\":[{}],\"backgroundColor\":\"{}\"}}",
+            escape_json(variant),
+            data.join(","),
+            color,
+        ));
+    }
+
     let chart_json = format!(
+        concat!(
+            "{{",
+            "\"type\":\"horizontalBar\",",
+            "\"data\":{{",
+            "\"labels\":[{labels}],",
+            "\"datasets\":[{datasets}]",
+            "}},",
+            "\"options\":{{",
+            "\"plugins\":{{\"datalabels\":{{",
+            "\"anchor\":\"end\",\"align\":\"end\",",
+            "\"color\":\"#cccccc\",",
+            "\"font\":{{\"weight\":\"bold\",\"size\":11}},",
+            "\"formatter\":\"{formatter}\"",
+            "}}}},",
+            "\"scales\":{{",
+            "\"xAxes\":[{{\"ticks\":{{\"beginAtZero\":true,\"fontColor\":\"#666666\",\"fontSize\":12}},",
+            "\"gridLines\":{{\"color\":\"#1a1a1a\",\"zeroLineColor\":\"#333333\"}}}}],",
+            "\"yAxes\":[{{\"ticks\":{{\"fontColor\":\"#bbbbbb\",\"fontSize\":12}},",
+            "\"gridLines\":{{\"color\":\"#111111\"}}}}]",
+            "}},",
+            "\"legend\":{{\"display\":true,\"position\":\"bottom\",\"labels\":{{\"fontColor\":\"#888888\"}}}},",
+            "\"title\":{{\"display\":true,\"fontColor\":\"#00cc33\",\"fontSize\":14,",
+            "\"text\":\"{title}\"}}",
+            "}}",
+            "}}"
+        ),
+        labels = labels.join(","),
+        datasets = datasets.join(","),
+        formatter = escape_json(&formatter),
+        title = escape_json(&title),
+    );
+
+    // Height: each param gets bars for all variants, plus legend space
+    let bars_per_param = matrix.variants.len() as u32;
+    let legend_extra = 30; // bottom legend
+    let height = config.padding
+        + legend_extra
+        + (matrix.params.len() as u32) * bars_per_param * config.bar_height;
+
+    Some(finish_url(comp, config, &chart_json, height))
+}
+
+/// Grouped chart color palette — visually distinct on dark background.
+const GROUPED_PALETTE: &[&str] = &[
+    "#00ff41", // phosphor green (primary)
+    "#007722", // dark green (secondary)
+    "#2196f3", // blue
+    "#ff9800", // amber
+    "#bb9af7", // purple
+    "#73daca", // teal
+    "#f7768e", // pink
+    "#ff9e64", // orange
+];
+
+fn build_title_and_formatter(
+    group_name: &str,
+    unit_suffix: &str,
+    use_throughput: bool,
+) -> (String, String) {
+    let title = if use_throughput {
+        format!("{} ({}, higher = better)", group_name, unit_suffix)
+    } else {
+        format!("{} ({}, lower = better)", group_name, unit_suffix)
+    };
+    let formatter = format!("(v)=>v+' {}'", escape_json(unit_suffix));
+    (title, formatter)
+}
+
+fn build_single_dataset_json(
+    labels: &[String],
+    data: &[String],
+    bg_colors: &[String],
+    title: &str,
+    formatter: &str,
+) -> String {
+    format!(
         concat!(
             "{{",
             "\"type\":\"horizontalBar\",",
@@ -232,25 +391,26 @@ fn build_chart_url(comp: &ComparisonResult, config: &QuickChartConfig) -> Option
         labels = labels.join(","),
         data = data.join(","),
         colors = bg_colors.join(","),
-        formatter = escape_json(&formatter),
-        title = escape_json(&title),
-    );
+        formatter = escape_json(formatter),
+        title = escape_json(title),
+    )
+}
 
-    // Compute height based on bar count
-    let height = config.padding + (bars.len() as u32) * config.bar_height;
-
-    // URL-encode the chart JSON
-    let encoded = url_encode(&chart_json);
-
+fn finish_url(
+    comp: &ComparisonResult,
+    config: &QuickChartConfig,
+    chart_json: &str,
+    height: u32,
+) -> QuickChartUrl {
+    let encoded = url_encode(chart_json);
     let url = format!(
         "https://quickchart.io/chart?w={}&h={}&bkg=%23{}&f={}&c={}",
         config.width, height, config.background, config.format, encoded
     );
-
-    Some(QuickChartUrl {
+    QuickChartUrl {
         group_name: comp.group_name.clone(),
         url,
-    })
+    }
 }
 
 /// Convert time values (ns) to a display-friendly unit, returning scaled values and unit string.
@@ -541,5 +701,128 @@ mod tests {
         let md = suite.to_quickchart_markdown(&QuickChartConfig::default());
         assert!(md.starts_with("![Sort](https://quickchart.io/chart?"));
         assert!(md.contains("w=700"));
+    }
+
+    // --- Grouped (matrix) chart tests ---
+
+    #[test]
+    fn grouped_chart_detected_for_matrix_names() {
+        // Benchmarks named "variant/param" should produce a grouped chart
+        let comp = make_comparison(
+            "SrcOver blend",
+            vec![
+                make_benchmark("BRAG8/256x256", 29.0),
+                make_benchmark("BRAG8/1024x1024", 20.0),
+                make_benchmark("sw-composite/256x256", 13.0),
+                make_benchmark("sw-composite/1024x1024", 11.0),
+            ],
+            None,
+        );
+        let config = QuickChartConfig::default();
+        let result = build_chart_url(&comp, &config).unwrap();
+
+        // Should have legend enabled (grouped chart) and datasets with labels
+        let decoded = url_decode_rough(&result.url);
+        assert!(
+            decoded.contains("\"legend\":{\"display\":true"),
+            "grouped chart should enable legend"
+        );
+        assert!(
+            decoded.contains("\"label\":\"BRAG8\""),
+            "should have variant as dataset label"
+        );
+        assert!(
+            decoded.contains("\"label\":\"sw-composite\""),
+            "should have second variant as dataset label"
+        );
+    }
+
+    #[test]
+    fn grouped_chart_has_param_labels() {
+        let comp = make_comparison(
+            "blend",
+            vec![
+                make_benchmark("fast/small", 10.0),
+                make_benchmark("fast/large", 20.0),
+                make_benchmark("slow/small", 30.0),
+                make_benchmark("slow/large", 40.0),
+            ],
+            None,
+        );
+        let config = QuickChartConfig::default();
+        let result = build_chart_url(&comp, &config).unwrap();
+        let decoded = url_decode_rough(&result.url);
+        // Labels should be the params, not the full "variant/param" names
+        assert!(decoded.contains("\"small\""), "params should be labels");
+        assert!(decoded.contains("\"large\""), "params should be labels");
+    }
+
+    #[test]
+    fn grouped_chart_uses_palette_colors() {
+        let comp = make_comparison(
+            "test",
+            vec![
+                make_benchmark("a/x", 10.0),
+                make_benchmark("a/y", 20.0),
+                make_benchmark("b/x", 30.0),
+                make_benchmark("b/y", 40.0),
+            ],
+            None,
+        );
+        let config = QuickChartConfig::default();
+        let result = build_chart_url(&comp, &config).unwrap();
+        let decoded = url_decode_rough(&result.url);
+        // First variant gets first palette color
+        assert!(
+            decoded.contains(GROUPED_PALETTE[0]),
+            "first variant should get first palette color"
+        );
+    }
+
+    #[test]
+    fn flat_names_produce_single_dataset() {
+        // Names without "/" should NOT trigger grouped chart
+        let comp = make_comparison(
+            "flat",
+            vec![make_benchmark("alpha", 10.0), make_benchmark("beta", 20.0)],
+            None,
+        );
+        let config = QuickChartConfig::default();
+        let result = build_chart_url(&comp, &config).unwrap();
+        let decoded = url_decode_rough(&result.url);
+        assert!(
+            decoded.contains("\"legend\":{\"display\":false"),
+            "flat chart should hide legend"
+        );
+    }
+
+    /// Rough URL decode for test assertions (only handles %XX).
+    fn url_decode_rough(url: &str) -> String {
+        let mut out = String::new();
+        let bytes = url.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'%' && i + 2 < bytes.len() {
+                let hi = hex_val(bytes[i + 1]);
+                let lo = hex_val(bytes[i + 2]);
+                if let (Some(h), Some(l)) = (hi, lo) {
+                    out.push((h << 4 | l) as char);
+                    i += 3;
+                    continue;
+                }
+            }
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+        out
+    }
+
+    fn hex_val(b: u8) -> Option<u8> {
+        match b {
+            b'0'..=b'9' => Some(b - b'0'),
+            b'A'..=b'F' => Some(b - b'A' + 10),
+            b'a'..=b'f' => Some(b - b'a' + 10),
+            _ => None,
+        }
     }
 }
