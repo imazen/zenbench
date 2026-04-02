@@ -838,4 +838,44 @@ mod tests {
             _ => None,
         }
     }
+
+    #[test]
+    #[ignore] // run with: cargo test print_demo_urls -- --ignored --nocapture
+    fn print_demo_urls() {
+        // Flat chart
+        let flat = make_comparison(
+            "JPEG Decode 4K",
+            vec![
+                make_benchmark("zenjpeg", 12_400_000.0),
+                make_benchmark("mozjpeg", 18_600_000.0),
+                make_benchmark("libjpeg-turbo", 15_200_000.0),
+                make_benchmark("image crate", 31_000_000.0),
+            ],
+            None,
+        );
+        // Grouped chart
+        let grouped = make_comparison(
+            "SrcOver Blend",
+            vec![
+                make_benchmark("BRAG8/256x256", 1_600_000.0),
+                make_benchmark("BRAG8/1024x1024", 20_000_000.0),
+                make_benchmark("sw-composite/256x256", 6_000_000.0),
+                make_benchmark("sw-composite/1024x1024", 29_000_000.0),
+                make_benchmark("naive/256x256", 13_000_000.0),
+                make_benchmark("naive/1024x1024", 89_000_000.0),
+            ],
+            None,
+        );
+        let config = QuickChartConfig {
+            colors: vec![
+                ("mozjpeg".into(), "#ff9800".into()),
+                ("libjpeg".into(), "#2196f3".into()),
+            ],
+            ..Default::default()
+        };
+        let flat_url = build_chart_url(&flat, &config).unwrap();
+        let grouped_url = build_chart_url(&grouped, &config).unwrap();
+        eprintln!("\n=== FLAT ===\n{}\n", flat_url.url);
+        eprintln!("=== GROUPED ===\n{}\n", grouped_url.url);
+    }
 }
