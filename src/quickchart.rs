@@ -43,8 +43,8 @@ impl Default for QuickChartConfig {
     fn default() -> Self {
         Self {
             width: 700,
-            bar_height: 28,
-            padding: 80,
+            bar_height: 22,
+            padding: 56,
             format: "png".to_string(),
             background: "080808".to_string(),
             prefer_throughput: true,
@@ -294,20 +294,22 @@ fn build_grouped_chart_url(
             "\"datasets\":[{datasets}]",
             "}},",
             "\"options\":{{",
+            "\"layout\":{{\"padding\":{{\"top\":2,\"bottom\":2,\"left\":0,\"right\":12}}}},",
             "\"plugins\":{{\"datalabels\":{{",
             "\"anchor\":\"end\",\"align\":\"end\",",
             "\"color\":\"#cccccc\",",
-            "\"font\":{{\"weight\":\"bold\",\"size\":11}},",
+            "\"font\":{{\"weight\":\"bold\",\"size\":10}},",
             "\"formatter\":\"{formatter}\"",
             "}}}},",
             "\"scales\":{{",
-            "\"xAxes\":[{{\"ticks\":{{\"beginAtZero\":true,\"fontColor\":\"#666666\",\"fontSize\":12}},",
+            "\"xAxes\":[{{\"ticks\":{{\"beginAtZero\":true,\"fontColor\":\"#666666\",\"fontSize\":10}},",
             "\"gridLines\":{{\"color\":\"#1a1a1a\",\"zeroLineColor\":\"#333333\"}}}}],",
-            "\"yAxes\":[{{\"ticks\":{{\"fontColor\":\"#bbbbbb\",\"fontSize\":12}},",
+            "\"yAxes\":[{{\"ticks\":{{\"fontColor\":\"#bbbbbb\",\"fontSize\":11}},",
             "\"gridLines\":{{\"color\":\"#111111\"}}}}]",
             "}},",
-            "\"legend\":{{\"display\":true,\"position\":\"bottom\",\"labels\":{{\"fontColor\":\"#888888\"}}}},",
-            "\"title\":{{\"display\":true,\"fontColor\":\"#00cc33\",\"fontSize\":14,",
+            "\"legend\":{{\"display\":true,\"position\":\"bottom\",",
+            "\"labels\":{{\"fontColor\":\"#888888\",\"fontSize\":10,\"padding\":8}}}},",
+            "\"title\":{{\"display\":true,\"fontColor\":\"#00cc33\",\"fontSize\":12,",
             "\"text\":\"{title}\"}}",
             "}}",
             "}}"
@@ -320,7 +322,7 @@ fn build_grouped_chart_url(
 
     // Height: each param gets bars for all variants, plus legend space
     let bars_per_param = matrix.variants.len() as u32;
-    let legend_extra = 30; // bottom legend
+    let legend_extra = 20; // bottom legend
     let height = config.padding
         + legend_extra
         + (matrix.params.len() as u32) * bars_per_param * config.bar_height;
@@ -370,20 +372,21 @@ fn build_single_dataset_json(
             "\"datasets\":[{{\"data\":[{data}],\"backgroundColor\":[{colors}]}}]",
             "}},",
             "\"options\":{{",
+            "\"layout\":{{\"padding\":{{\"top\":2,\"bottom\":2,\"left\":0,\"right\":12}}}},",
             "\"plugins\":{{\"datalabels\":{{",
             "\"anchor\":\"end\",\"align\":\"end\",",
             "\"color\":\"#cccccc\",",
-            "\"font\":{{\"weight\":\"bold\",\"size\":13}},",
+            "\"font\":{{\"weight\":\"bold\",\"size\":11}},",
             "\"formatter\":\"{formatter}\"",
             "}}}},",
             "\"scales\":{{",
-            "\"xAxes\":[{{\"ticks\":{{\"beginAtZero\":true,\"fontColor\":\"#666666\",\"fontSize\":12}},",
+            "\"xAxes\":[{{\"ticks\":{{\"beginAtZero\":true,\"fontColor\":\"#666666\",\"fontSize\":10}},",
             "\"gridLines\":{{\"color\":\"#1a1a1a\",\"zeroLineColor\":\"#333333\"}}}}],",
-            "\"yAxes\":[{{\"ticks\":{{\"fontColor\":\"#bbbbbb\",\"fontSize\":12}},",
+            "\"yAxes\":[{{\"ticks\":{{\"fontColor\":\"#bbbbbb\",\"fontSize\":11}},",
             "\"gridLines\":{{\"color\":\"#111111\"}}}}]",
             "}},",
             "\"legend\":{{\"display\":false}},",
-            "\"title\":{{\"display\":true,\"fontColor\":\"#00cc33\",\"fontSize\":14,",
+            "\"title\":{{\"display\":true,\"fontColor\":\"#00cc33\",\"fontSize\":12,",
             "\"text\":\"{title}\"}}",
             "}}",
             "}}"
