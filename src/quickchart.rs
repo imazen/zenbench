@@ -842,7 +842,7 @@ mod tests {
     #[test]
     #[ignore] // run with: cargo test print_demo_urls -- --ignored --nocapture
     fn print_demo_urls() {
-        // Flat chart
+        // 1. Flat with custom colors
         let flat = make_comparison(
             "JPEG Decode 4K",
             vec![
@@ -853,7 +853,26 @@ mod tests {
             ],
             None,
         );
-        // Grouped chart
+        let config_colored = QuickChartConfig {
+            colors: vec![
+                ("mozjpeg".into(), "#ff9800".into()),
+                ("libjpeg".into(), "#2196f3".into()),
+            ],
+            ..Default::default()
+        };
+
+        // 2. Throughput chart
+        let throughput = make_comparison(
+            "PNG Encode",
+            vec![
+                make_benchmark("zenpng", 8_000_000.0),
+                make_benchmark("libpng", 22_000_000.0),
+                make_benchmark("image crate", 35_000_000.0),
+            ],
+            Some(Throughput::Bytes(12_000_000)), // 12 MB image
+        );
+
+        // 3. Grouped (matrix)
         let grouped = make_comparison(
             "SrcOver Blend",
             vec![
@@ -866,16 +885,32 @@ mod tests {
             ],
             None,
         );
-        let config = QuickChartConfig {
-            colors: vec![
-                ("mozjpeg".into(), "#ff9800".into()),
-                ("libjpeg".into(), "#2196f3".into()),
-            ],
-            ..Default::default()
-        };
-        let flat_url = build_chart_url(&flat, &config).unwrap();
-        let grouped_url = build_chart_url(&grouped, &config).unwrap();
-        eprintln!("\n=== FLAT ===\n{}\n", flat_url.url);
-        eprintln!("=== GROUPED ===\n{}\n", grouped_url.url);
+
+        // 4. Minimal 2-bar
+        let minimal = make_comparison(
+            "Hash Function",
+            vec![make_benchmark("xxhash", 42.0), make_benchmark("fnv", 78.0)],
+            None,
+        );
+
+        let default_config = QuickChartConfig::default();
+
+        eprintln!("\n=== FLAT (custom colors) ===");
+        eprintln!("{}\n", build_chart_url(&flat, &config_colored).unwrap().url);
+        eprintln!("=== THROUGHPUT ===");
+        eprintln!(
+            "{}\n",
+            build_chart_url(&throughput, &default_config).unwrap().url
+        );
+        eprintln!("=== GROUPED ===");
+        eprintln!(
+            "{}\n",
+            build_chart_url(&grouped, &default_config).unwrap().url
+        );
+        eprintln!("=== MINIMAL (2 bars) ===");
+        eprintln!(
+            "{}\n",
+            build_chart_url(&minimal, &default_config).unwrap().url
+        );
     }
 }
