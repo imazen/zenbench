@@ -15,28 +15,212 @@ pub struct QuickChartUrl {
     pub url: String,
 }
 
+/// Theme colors for a QuickChart chart.
+///
+/// Controls every color in the rendered chart. Use the preset constructors
+/// (`phosphor`, `ocean`, `ember`, `arctic`, `sunset`, `mono`) or build your own.
+#[derive(Debug, Clone)]
+pub struct ColorScheme {
+    /// Background hex (without `#`). Becomes the `bkg` URL param.
+    pub background: String,
+    /// Title text color.
+    pub title: String,
+    /// Data label color (the value text on each bar).
+    pub data_label: String,
+    /// Y-axis label color (benchmark names).
+    pub bar_label: String,
+    /// X-axis tick color (numeric scale).
+    pub axis_tick: String,
+    /// Grid line color.
+    pub grid: String,
+    /// Zero-line color on the x-axis.
+    pub grid_zero: String,
+    /// Legend label color (grouped charts).
+    pub legend: String,
+    /// Color for the fastest bar in single-dataset charts.
+    pub fastest: String,
+    /// Default bar color (non-fastest, no name match).
+    pub default_bar: String,
+    /// Palette for grouped (matrix) charts — one color per variant.
+    pub grouped_palette: Vec<String>,
+}
+
+impl ColorScheme {
+    /// **Phosphor** — green-on-black terminal aesthetic. The default.
+    pub fn phosphor() -> Self {
+        Self {
+            background: "080808".into(),
+            title: "#33ff66".into(),
+            data_label: "#eeeeee".into(),
+            bar_label: "#dddddd".into(),
+            axis_tick: "#999999".into(),
+            grid: "#1a1a1a".into(),
+            grid_zero: "#333333".into(),
+            legend: "#cccccc".into(),
+            fastest: "#00ff41".into(),
+            default_bar: "#666666".into(),
+            grouped_palette: vec![
+                "#00ff41".into(),
+                "#007722".into(),
+                "#2196f3".into(),
+                "#ff9800".into(),
+                "#bb9af7".into(),
+                "#73daca".into(),
+                "#f7768e".into(),
+                "#ff9e64".into(),
+            ],
+        }
+    }
+
+    /// **Ocean** — deep navy with cyan and teal accents.
+    pub fn ocean() -> Self {
+        Self {
+            background: "0a1628".into(),
+            title: "#56d4e8".into(),
+            data_label: "#e0e8f0".into(),
+            bar_label: "#c8d4e0".into(),
+            axis_tick: "#7090aa".into(),
+            grid: "#152238".into(),
+            grid_zero: "#2a3f5a".into(),
+            legend: "#a0b8cc".into(),
+            fastest: "#00e5ff".into(),
+            default_bar: "#3a5a7c".into(),
+            grouped_palette: vec![
+                "#00e5ff".into(),
+                "#0288d1".into(),
+                "#26c6da".into(),
+                "#66bb6a".into(),
+                "#ab47bc".into(),
+                "#ff7043".into(),
+                "#ffa726".into(),
+                "#78909c".into(),
+            ],
+        }
+    }
+
+    /// **Ember** — warm charcoal with orange and gold.
+    pub fn ember() -> Self {
+        Self {
+            background: "1a1210".into(),
+            title: "#ffb74d".into(),
+            data_label: "#f0e0d0".into(),
+            bar_label: "#dcc8b0".into(),
+            axis_tick: "#998070".into(),
+            grid: "#2a1e1a".into(),
+            grid_zero: "#4a3530".into(),
+            legend: "#ccaa88".into(),
+            fastest: "#ff9100".into(),
+            default_bar: "#6d4c41".into(),
+            grouped_palette: vec![
+                "#ff9100".into(),
+                "#ff6d00".into(),
+                "#ffca28".into(),
+                "#ef5350".into(),
+                "#ab47bc".into(),
+                "#66bb6a".into(),
+                "#42a5f5".into(),
+                "#8d6e63".into(),
+            ],
+        }
+    }
+
+    /// **Arctic** — cool blue-gray with ice blue highlights.
+    pub fn arctic() -> Self {
+        Self {
+            background: "0e1520".into(),
+            title: "#81d4fa".into(),
+            data_label: "#e8f0f8".into(),
+            bar_label: "#c0d8e8".into(),
+            axis_tick: "#6888a0".into(),
+            grid: "#162030".into(),
+            grid_zero: "#283848".into(),
+            legend: "#90b0c8".into(),
+            fastest: "#40c4ff".into(),
+            default_bar: "#455a64".into(),
+            grouped_palette: vec![
+                "#40c4ff".into(),
+                "#0091ea".into(),
+                "#80deea".into(),
+                "#a5d6a7".into(),
+                "#ce93d8".into(),
+                "#ffcc80".into(),
+                "#ef9a9a".into(),
+                "#b0bec5".into(),
+            ],
+        }
+    }
+
+    /// **Sunset** — deep purple with magenta and coral.
+    pub fn sunset() -> Self {
+        Self {
+            background: "1a0e24".into(),
+            title: "#f48fb1".into(),
+            data_label: "#f0e0f0".into(),
+            bar_label: "#d8c0e0".into(),
+            axis_tick: "#907898".into(),
+            grid: "#241838".into(),
+            grid_zero: "#3a2850".into(),
+            legend: "#c0a0d0".into(),
+            fastest: "#ff4081".into(),
+            default_bar: "#5c4070".into(),
+            grouped_palette: vec![
+                "#ff4081".into(),
+                "#e040fb".into(),
+                "#ff6e40".into(),
+                "#ffab40".into(),
+                "#69f0ae".into(),
+                "#40c4ff".into(),
+                "#b388ff".into(),
+                "#ff80ab".into(),
+            ],
+        }
+    }
+
+    /// **Mono** — pure grayscale with white accent.
+    pub fn mono() -> Self {
+        Self {
+            background: "111111".into(),
+            title: "#ffffff".into(),
+            data_label: "#e0e0e0".into(),
+            bar_label: "#cccccc".into(),
+            axis_tick: "#888888".into(),
+            grid: "#1e1e1e".into(),
+            grid_zero: "#333333".into(),
+            legend: "#aaaaaa".into(),
+            fastest: "#ffffff".into(),
+            default_bar: "#555555".into(),
+            grouped_palette: vec![
+                "#ffffff".into(),
+                "#bbbbbb".into(),
+                "#888888".into(),
+                "#cccccc".into(),
+                "#999999".into(),
+                "#dddddd".into(),
+                "#aaaaaa".into(),
+                "#777777".into(),
+            ],
+        }
+    }
+}
+
 /// Configuration for QuickChart URL generation.
 #[derive(Debug, Clone)]
 pub struct QuickChartConfig {
     /// Chart width in pixels. Default: 700.
     pub width: u32,
-    /// Per-bar height in pixels, used to compute total height. Default: 28.
+    /// Per-bar height in pixels, used to compute total height. Default: 32.
     pub bar_height: u32,
-    /// Fixed vertical padding in pixels (title, axes, margins). Default: 80.
+    /// Fixed vertical padding in pixels (title, axes, margins). Default: 58.
     pub padding: u32,
     /// Image format: "png" or "svg". Default: "png".
     pub format: String,
-    /// Background color as hex (without #). Default: "080808".
-    pub background: String,
     /// Whether to use throughput values (when available) instead of time. Default: true.
     pub prefer_throughput: bool,
     /// Custom bar colors by benchmark name. When a benchmark name matches a key,
-    /// that color is used instead of the default gray.
+    /// that color is used instead of the scheme's default_bar color.
     pub colors: Vec<(String, String)>,
-    /// Default color for bars not matched by `colors`. Default: "#666666".
-    pub default_color: String,
-    /// Color for the fastest benchmark. Default: "#00ff41" (phosphor green).
-    pub fastest_color: String,
+    /// Color scheme controlling all theme colors.
+    pub scheme: ColorScheme,
 }
 
 impl Default for QuickChartConfig {
@@ -46,27 +230,33 @@ impl Default for QuickChartConfig {
             bar_height: 32,
             padding: 58,
             format: "png".to_string(),
-            background: "080808".to_string(),
             prefer_throughput: true,
             colors: Vec::new(),
-            default_color: "#666666".to_string(),
-            fastest_color: "#00ff41".to_string(),
+            scheme: ColorScheme::phosphor(),
         }
     }
 }
 
 impl QuickChartConfig {
+    /// Create a config with the given color scheme and default layout.
+    pub fn with_scheme(scheme: ColorScheme) -> Self {
+        Self {
+            scheme,
+            ..Default::default()
+        }
+    }
+
     /// Look up the color for a benchmark name.
     fn color_for(&self, name: &str, is_fastest: bool) -> &str {
         if is_fastest {
-            return &self.fastest_color;
+            return &self.scheme.fastest;
         }
         for (pattern, color) in &self.colors {
             if name.contains(pattern.as_str()) {
                 return color;
             }
         }
-        &self.default_color
+        &self.scheme.default_bar
     }
 }
 
@@ -198,7 +388,14 @@ fn build_chart_url(comp: &ComparisonResult, config: &QuickChartConfig) -> Option
         .map(|b| format!("\"{}\"", config.color_for(&b.label, b.is_fastest)))
         .collect();
 
-    let chart_json = build_single_dataset_json(&labels, &data, &bg_colors, &title, &formatter);
+    let chart_json = build_single_dataset_json(
+        &labels,
+        &data,
+        &bg_colors,
+        &title,
+        &formatter,
+        &config.scheme,
+    );
 
     let height = config.padding + (bars.len() as u32) * config.bar_height;
     Some(finish_url(comp, config, &chart_json, height))
@@ -253,7 +450,8 @@ fn build_grouped_chart_url(
     // One dataset per variant
     let mut datasets: Vec<String> = Vec::new();
     for (vi, variant) in matrix.variants.iter().enumerate() {
-        let color = &GROUPED_PALETTE[vi % GROUPED_PALETTE.len()];
+        let palette = &config.scheme.grouped_palette;
+        let color = &palette[vi % palette.len()];
 
         let data: Vec<String> = matrix
             .params
@@ -285,6 +483,7 @@ fn build_grouped_chart_url(
         ));
     }
 
+    let s = &config.scheme;
     let chart_json = format!(
         concat!(
             "{{",
@@ -297,24 +496,24 @@ fn build_grouped_chart_url(
             "\"layout\":{{\"padding\":{{\"top\":0,\"bottom\":0,\"left\":0,\"right\":4}}}},",
             "\"plugins\":{{\"datalabels\":{{",
             "\"anchor\":\"end\",\"align\":\"end\",",
-            "\"color\":\"#eeeeee\",",
+            "\"color\":\"{c_dl}\",",
             "\"font\":{{\"weight\":\"bold\",\"size\":18}},",
             "\"formatter\":\"{formatter}\"",
             "}}}},",
             "\"scales\":{{",
             "\"xAxes\":[{{",
-            "\"ticks\":{{\"beginAtZero\":true,\"fontColor\":\"#999999\",\"fontSize\":18,\"padding\":2}},",
-            "\"gridLines\":{{\"color\":\"#1a1a1a\",\"zeroLineColor\":\"#333333\",\"drawTicks\":false}}",
+            "\"ticks\":{{\"beginAtZero\":true,\"fontColor\":\"{c_xt}\",\"fontSize\":18,\"padding\":2}},",
+            "\"gridLines\":{{\"color\":\"{c_gr}\",\"zeroLineColor\":\"{c_gz}\",\"drawTicks\":false}}",
             "}}],",
             "\"yAxes\":[{{",
-            "\"ticks\":{{\"fontColor\":\"#dddddd\",\"fontSize\":20,\"padding\":6}},",
-            "\"gridLines\":{{\"color\":\"#111111\",\"drawTicks\":false}},",
+            "\"ticks\":{{\"fontColor\":\"{c_bl}\",\"fontSize\":20,\"padding\":6}},",
+            "\"gridLines\":{{\"color\":\"{c_gr}\",\"drawTicks\":false}},",
             "\"barPercentage\":0.75,\"categoryPercentage\":0.85",
             "}}]",
             "}},",
             "\"legend\":{{\"display\":true,\"position\":\"bottom\",",
-            "\"labels\":{{\"fontColor\":\"#cccccc\",\"fontSize\":18,\"padding\":8}}}},",
-            "\"title\":{{\"display\":true,\"fontColor\":\"#33ff66\",\"fontSize\":22,",
+            "\"labels\":{{\"fontColor\":\"{c_lg}\",\"fontSize\":18,\"padding\":8}}}},",
+            "\"title\":{{\"display\":true,\"fontColor\":\"{c_tt}\",\"fontSize\":22,",
             "\"padding\":6,\"text\":\"{title}\"}}",
             "}}",
             "}}"
@@ -323,6 +522,13 @@ fn build_grouped_chart_url(
         datasets = datasets.join(","),
         formatter = escape_json(&formatter),
         title = escape_json(&title),
+        c_dl = s.data_label,
+        c_xt = s.axis_tick,
+        c_gr = s.grid,
+        c_gz = s.grid_zero,
+        c_bl = s.bar_label,
+        c_lg = s.legend,
+        c_tt = s.title,
     );
 
     // Height: each param gets bars for all variants, plus legend space
@@ -334,18 +540,6 @@ fn build_grouped_chart_url(
 
     Some(finish_url(comp, config, &chart_json, height))
 }
-
-/// Grouped chart color palette — visually distinct on dark background.
-const GROUPED_PALETTE: &[&str] = &[
-    "#00ff41", // phosphor green (primary)
-    "#007722", // dark green (secondary)
-    "#2196f3", // blue
-    "#ff9800", // amber
-    "#bb9af7", // purple
-    "#73daca", // teal
-    "#f7768e", // pink
-    "#ff9e64", // orange
-];
 
 fn build_title_and_formatter(
     group_name: &str,
@@ -367,6 +561,7 @@ fn build_single_dataset_json(
     bg_colors: &[String],
     title: &str,
     formatter: &str,
+    s: &ColorScheme,
 ) -> String {
     format!(
         concat!(
@@ -380,23 +575,23 @@ fn build_single_dataset_json(
             "\"layout\":{{\"padding\":{{\"top\":0,\"bottom\":0,\"left\":0,\"right\":4}}}},",
             "\"plugins\":{{\"datalabels\":{{",
             "\"anchor\":\"end\",\"align\":\"end\",",
-            "\"color\":\"#eeeeee\",",
+            "\"color\":\"{c_dl}\",",
             "\"font\":{{\"weight\":\"bold\",\"size\":20}},",
             "\"formatter\":\"{formatter}\"",
             "}}}},",
             "\"scales\":{{",
             "\"xAxes\":[{{",
-            "\"ticks\":{{\"beginAtZero\":true,\"fontColor\":\"#999999\",\"fontSize\":18,\"padding\":2}},",
-            "\"gridLines\":{{\"color\":\"#1a1a1a\",\"zeroLineColor\":\"#333333\",\"drawTicks\":false}}",
+            "\"ticks\":{{\"beginAtZero\":true,\"fontColor\":\"{c_xt}\",\"fontSize\":18,\"padding\":2}},",
+            "\"gridLines\":{{\"color\":\"{c_gr}\",\"zeroLineColor\":\"{c_gz}\",\"drawTicks\":false}}",
             "}}],",
             "\"yAxes\":[{{",
-            "\"ticks\":{{\"fontColor\":\"#dddddd\",\"fontSize\":20,\"padding\":6}},",
-            "\"gridLines\":{{\"color\":\"#111111\",\"drawTicks\":false}},",
+            "\"ticks\":{{\"fontColor\":\"{c_bl}\",\"fontSize\":20,\"padding\":6}},",
+            "\"gridLines\":{{\"color\":\"{c_gr}\",\"drawTicks\":false}},",
             "\"barPercentage\":0.7,\"categoryPercentage\":0.85",
             "}}]",
             "}},",
             "\"legend\":{{\"display\":false}},",
-            "\"title\":{{\"display\":true,\"fontColor\":\"#33ff66\",\"fontSize\":22,",
+            "\"title\":{{\"display\":true,\"fontColor\":\"{c_tt}\",\"fontSize\":22,",
             "\"padding\":6,\"text\":\"{title}\"}}",
             "}}",
             "}}"
@@ -406,6 +601,12 @@ fn build_single_dataset_json(
         colors = bg_colors.join(","),
         formatter = escape_json(formatter),
         title = escape_json(title),
+        c_dl = s.data_label,
+        c_xt = s.axis_tick,
+        c_gr = s.grid,
+        c_gz = s.grid_zero,
+        c_bl = s.bar_label,
+        c_tt = s.title,
     )
 }
 
@@ -418,7 +619,7 @@ fn finish_url(
     let encoded = url_encode(chart_json);
     let url = format!(
         "https://quickchart.io/chart?w={}&h={}&bkg=%23{}&f={}&c={}",
-        config.width, height, config.background, config.format, encoded
+        config.width, height, config.scheme.background, config.format, encoded
     );
     QuickChartUrl {
         group_name: comp.group_name.clone(),
@@ -787,7 +988,7 @@ mod tests {
         let decoded = url_decode_rough(&result.url);
         // First variant gets first palette color
         assert!(
-            decoded.contains(GROUPED_PALETTE[0]),
+            decoded.contains(&ColorScheme::phosphor().grouped_palette[0]),
             "first variant should get first palette color"
         );
     }
@@ -895,22 +1096,43 @@ mod tests {
 
         let default_config = QuickChartConfig::default();
 
-        eprintln!("\n=== FLAT (custom colors) ===");
+        eprintln!("\n=== FLAT (phosphor, custom colors) ===");
         eprintln!("{}\n", build_chart_url(&flat, &config_colored).unwrap().url);
-        eprintln!("=== THROUGHPUT ===");
+        eprintln!("=== THROUGHPUT (phosphor) ===");
         eprintln!(
             "{}\n",
             build_chart_url(&throughput, &default_config).unwrap().url
         );
-        eprintln!("=== GROUPED ===");
+        eprintln!("=== GROUPED (phosphor) ===");
         eprintln!(
             "{}\n",
             build_chart_url(&grouped, &default_config).unwrap().url
         );
-        eprintln!("=== MINIMAL (2 bars) ===");
+        eprintln!("=== MINIMAL (phosphor) ===");
         eprintln!(
             "{}\n",
             build_chart_url(&minimal, &default_config).unwrap().url
         );
+
+        // All schemes on the flat chart
+        let schemes: &[(&str, ColorScheme)] = &[
+            ("ocean", ColorScheme::ocean()),
+            ("ember", ColorScheme::ember()),
+            ("arctic", ColorScheme::arctic()),
+            ("sunset", ColorScheme::sunset()),
+            ("mono", ColorScheme::mono()),
+        ];
+        for (name, scheme) in schemes {
+            let cfg = QuickChartConfig::with_scheme(scheme.clone());
+            eprintln!("=== FLAT ({name}) ===");
+            eprintln!("{}\n", build_chart_url(&flat, &cfg).unwrap().url);
+        }
+
+        // All schemes on the grouped chart
+        for (name, scheme) in schemes {
+            let cfg = QuickChartConfig::with_scheme(scheme.clone());
+            eprintln!("=== GROUPED ({name}) ===");
+            eprintln!("{}\n", build_chart_url(&grouped, &cfg).unwrap().url);
+        }
     }
 }
