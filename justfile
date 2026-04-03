@@ -109,6 +109,8 @@ wasm-check-all:
     just wasm-check-crate zenresize
 
 # Run WASM tests for all verified crates
-# (zenflate excluded — dev-deps don't compile for wasm32-wasip1)
+# zenflate requires local patches (codec-corpus fd-lock, zenbench fs4);
+# one threading test traps — exclude with --skip
 wasm-test-all:
     just wasm-test-both linear-srgb
+    just wasm-test zenflate

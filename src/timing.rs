@@ -21,6 +21,7 @@
 //! elimination — LLVM knows that `compiler_fence` doesn't access memory, but
 //! `asm!("")` is an opaque black box from the optimizer's perspective.
 
+#[cfg(not(target_arch = "wasm32"))]
 use core::arch::asm;
 
 // ── Fences ──────────────────────────────────────────────────────────────
@@ -39,12 +40,20 @@ use core::arch::asm;
 #[inline(always)]
 #[allow(unsafe_code)]
 pub fn asm_fence() {
-    // SAFETY: empty assembly block with no side effects.
-    // `nomem` is deliberately NOT specified — we want the compiler to assume
-    // this might read/write any memory, preventing it from reordering
-    // memory operations across the fence.
-    unsafe {
-        asm!("", options(nostack, preserves_flags));
+    // Inline asm is not stable on wasm32 — fall back to compiler_fence only.
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // SAFETY: empty assembly block with no side effects.
+        // `nomem` is deliberately NOT specified — we want the compiler to assume
+        // this might read/write any memory, preventing it from reordering
+        // memory operations across the fence.
+        unsafe {
+            asm!("", options(nostack, preserves_flags));
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
     }
 }
 

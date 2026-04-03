@@ -1069,10 +1069,14 @@ fn default_lock_dir() -> Option<PathBuf> {
 ///
 /// When multiple zenbench processes run simultaneously, they take turns
 /// via this lock. The lock is released when this struct is dropped.
+///
+/// On wasm32 this is a no-op — there are no concurrent processes.
+#[cfg(not(target_arch = "wasm32"))]
 struct ProcessLock {
     _file: std::fs::File,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl ProcessLock {
     fn acquire(dir: &std::path::Path) -> std::io::Result<Self> {
         std::fs::create_dir_all(dir)?;
@@ -1096,8 +1100,20 @@ impl ProcessLock {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Drop for ProcessLock {
     fn drop(&mut self) {
         let _ = fs4::fs_std::FileExt::unlock(&self._file);
+    }
+}
+
+/// No-op lock for wasm32 — no concurrent processes.
+#[cfg(target_arch = "wasm32")]
+struct ProcessLock;
+
+#[cfg(target_arch = "wasm32")]
+impl ProcessLock {
+    fn acquire(_dir: &std::path::Path) -> std::io::Result<Self> {
+        Ok(Self)
     }
 }
