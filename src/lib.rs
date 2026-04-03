@@ -35,6 +35,8 @@ mod results;
 mod stats;
 #[cfg(feature = "precise-timing")]
 mod timing;
+#[cfg(feature = "wasm")]
+pub mod wasm;
 
 pub use bench::{BenchGroup, Bencher, GroupConfig, Suite, Throughput};
 
