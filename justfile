@@ -77,21 +77,23 @@ wasm-check-bare crate:
         --target wasm32-unknown-unknown --lib --no-default-features
 
 # Run tests for a zen crate under wasmtime with simd128
+# Pass extra cargo args after crate name (e.g., feature overrides).
 # Usage: just wasm-test linear-srgb
-wasm-test crate:
+# Usage: just wasm-test zenflate --no-default-features --features std
+wasm-test crate *args:
     RUSTFLAGS="{{wasm_simd_flags}}" \
     CARGO_TARGET_WASM32_WASIP1_RUNNER="wasmtime" \
         cargo test \
         --manifest-path {{zen}}/{{crate}}/Cargo.toml \
-        --target {{wasm_target}} --lib
+        --target {{wasm_target}} --lib {{args}}
 
 # Run tests for a zen crate under wasmtime WITHOUT simd128 (scalar fallback)
 # Usage: just wasm-test-scalar linear-srgb
-wasm-test-scalar crate:
+wasm-test-scalar crate *args:
     CARGO_TARGET_WASM32_WASIP1_RUNNER="wasmtime" \
         cargo test \
         --manifest-path {{zen}}/{{crate}}/Cargo.toml \
-        --target {{wasm_target}} --lib
+        --target {{wasm_target}} --lib {{args}}
 
 # Run simd128 + scalar tests for a zen crate (both paths)
 # Usage: just wasm-test-both linear-srgb
@@ -109,8 +111,8 @@ wasm-check-all:
     just wasm-check-crate zenresize
 
 # Run WASM tests for all verified crates
-# zenflate requires local patches (codec-corpus fd-lock, zenbench fs4);
-# one threading test traps — exclude with --skip
+# zenflate: --no-default-features --features std excludes threads feature
+# (std::thread::scope unavailable in wasm32-wasip1 without shared memory)
 wasm-test-all:
     just wasm-test-both linear-srgb
-    just wasm-test zenflate
+    just wasm-test zenflate --no-default-features --features std
