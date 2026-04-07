@@ -223,8 +223,7 @@ impl WasmInstance {
         P: wasmtime::WasmParams,
         R: wasmtime::WasmResults,
     {
-        self.instance
-            .get_typed_func::<P, R>(&mut self.store, name)
+        self.instance.get_typed_func::<P, R>(&mut self.store, name)
     }
 
     /// Access the underlying wasmtime [`Instance`](wasmtime::Instance).
