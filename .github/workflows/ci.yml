@@ -103,7 +103,9 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@1.85.0
       - uses: Swatinem/rust-cache@v2
-      - name: Check MSRV compiles
-        run: cargo check --all-features
+      - name: Check MSRV compiles (default features)
+        run: cargo check
+      - name: Check MSRV compiles (no default features)
+        run: cargo check --no-default-features
       - name: Test on MSRV
         run: cargo test --lib
