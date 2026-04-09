@@ -130,10 +130,10 @@ pub fn postprocess_result(result: &SuiteResult) {
     }
 
     // Save results if in fire-and-forget mode
-    if let Some(path) = daemon::result_path_from_env()
-        && let Err(e) = result.save(&path)
-    {
-        eprintln!("[zenbench] error saving results: {e}");
+    if let Some(path) = daemon::result_path_from_env() {
+        if let Err(e) = result.save(&path) {
+            eprintln!("[zenbench] error saving results: {e}");
+        }
     }
 }
 #[cfg(feature = "alloc-profiling")]

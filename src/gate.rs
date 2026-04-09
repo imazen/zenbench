@@ -175,9 +175,10 @@ impl ResourceGate {
             return Some(GateReason::LowRam(state.available_ram_bytes));
         }
         if let (Some(max_temp), Some(current_temp)) = (self.config.max_cpu_temp_c, state.cpu_temp_c)
-            && current_temp > max_temp
         {
-            return Some(GateReason::CpuTemp(current_temp));
+            if current_temp > max_temp {
+                return Some(GateReason::CpuTemp(current_temp));
+            }
         }
         let effective_max_heavy = self.config.max_heavy_processes;
         if state.heavy_process_count > effective_max_heavy {
@@ -270,10 +271,10 @@ impl ResourceGate {
                 .values()
                 .filter(|p| {
                     // Skip ourselves
-                    if let Some(our) = our_pid
-                        && p.pid() == our
-                    {
-                        return false;
+                    if let Some(our) = our_pid {
+                        if p.pid() == our {
+                            return false;
+                        }
                     }
 
                     let name = p.name().to_string_lossy().to_lowercase();

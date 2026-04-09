@@ -71,10 +71,10 @@ impl SystemMonitor {
             .values()
             .filter(|p| {
                 // Exclude ourselves
-                if let Some(our) = our_pid
-                    && p.pid() == our
-                {
-                    return false;
+                if let Some(our) = our_pid {
+                    if p.pid() == our {
+                        return false;
+                    }
                 }
                 p.cpu_usage() > 10.0
             })

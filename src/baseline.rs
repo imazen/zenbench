@@ -143,14 +143,14 @@ pub fn compare_against_baseline(
     let mut warnings = Vec::new();
 
     // Staleness checks
-    if let (Some(base_hash), Some(curr_hash)) = (&baseline.git_hash, &current.git_hash)
-        && base_hash != curr_hash
-    {
-        warnings.push(format!(
-            "git hash differs: baseline={} current={}",
-            &base_hash[..base_hash.len().min(8)],
-            &curr_hash[..curr_hash.len().min(8)],
-        ));
+    if let (Some(base_hash), Some(curr_hash)) = (&baseline.git_hash, &current.git_hash) {
+        if base_hash != curr_hash {
+            warnings.push(format!(
+                "git hash differs: baseline={} current={}",
+                &base_hash[..base_hash.len().min(8)],
+                &curr_hash[..curr_hash.len().min(8)],
+            ));
+        }
     }
 
     if let (Some(base_tb), Some(curr_tb)) = (&baseline.testbed, &current.testbed) {

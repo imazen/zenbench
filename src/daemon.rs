@@ -86,19 +86,21 @@ pub fn list_runs(project_root: &Path) -> std::io::Result<Vec<RunState>> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.extension().is_some_and(|e| e == "json")
-            && !path
-                .file_name()
-                .is_some_and(|n| n.to_string_lossy().contains(".results."))
-            && let Ok(data) = std::fs::read_to_string(&path)
-            && let Ok(mut state) = serde_json::from_str::<RunState>(&data)
-        {
-            // Reconcile: detect processes that finished without updating state
-            if reconcile_state(project_root, &mut state) {
-                // Save the updated state back to disk
-                let _ = save_run_state(project_root, &state);
+        let is_json = path.extension().is_some_and(|e| e == "json");
+        let is_results = path
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().contains(".results."));
+        if is_json && !is_results {
+            if let Ok(data) = std::fs::read_to_string(&path) {
+                if let Ok(mut state) = serde_json::from_str::<RunState>(&data) {
+                    // Reconcile: detect processes that finished without updating state
+                    if reconcile_state(project_root, &mut state) {
+                        // Save the updated state back to disk
+                        let _ = save_run_state(project_root, &state);
+                    }
+                    runs.push(state);
+                }
             }
-            runs.push(state);
         }
     }
 

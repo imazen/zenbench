@@ -148,11 +148,10 @@ impl Engine {
                 continue;
             }
             // Skip groups that don't match the filter
-            if let Some(filter) = group_filter
-                && group.name != filter
-                && !group.name.contains(filter)
-            {
-                continue;
+            if let Some(filter) = group_filter {
+                if group.name != filter && !group.name.contains(filter) {
+                    continue;
+                }
             }
             // Fresh gate per group — no state leaks between groups.
             // Threaded groups get gate disabled (their own threads spike CPU).

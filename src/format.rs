@@ -47,11 +47,12 @@ pub(crate) fn format_ns_range(lo: f64, mean: f64, hi: f64) -> String {
 /// Detect terminal width. Checks `COLUMNS` env var, falls back to None.
 pub(crate) fn terminal_width() -> Option<usize> {
     // 1. Explicit override via $COLUMNS (for testing / CI)
-    if let Ok(cols) = std::env::var("COLUMNS")
-        && let Ok(w) = cols.parse::<usize>()
-        && w > 0
-    {
-        return Some(w);
+    if let Ok(cols) = std::env::var("COLUMNS") {
+        if let Ok(w) = cols.parse::<usize>() {
+            if w > 0 {
+                return Some(w);
+            }
+        }
     }
     // 2. Query the actual terminal via ioctl/Win32
     terminal_size::terminal_size().map(|(w, _)| w.0 as usize)
