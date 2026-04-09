@@ -97,12 +97,13 @@ jobs:
           fail_ci_if_error: false
 
   msrv:
-    name: MSRV (1.89)
+    name: MSRV (1.85)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@cargo-hack
+      - uses: dtolnay/rust-toolchain@1.85.0
       - uses: Swatinem/rust-cache@v2
-      - name: Check MSRV
-        run: cargo hack check --rust-version
+      - name: Check MSRV compiles
+        run: cargo check --all-features
+      - name: Test on MSRV
+        run: cargo test --lib
