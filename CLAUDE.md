@@ -2,7 +2,7 @@
 
 ## What this is
 
-Interleaved microbenchmarking crate for Rust. `#![forbid(unsafe_code)]`, MSRV 1.89, edition 2024, MIT/Apache-2.0. Pure Rust, no C dependencies.
+Interleaved microbenchmarking crate for Rust. `#![forbid(unsafe_code)]`, MSRV 1.85, edition 2024, MIT/Apache-2.0. Pure Rust, no C dependencies.
 
 ## Architecture
 
