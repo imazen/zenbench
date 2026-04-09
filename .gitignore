@@ -48,3 +48,14 @@ Thumbs.db
 *.iml
 site/public/
 site/themes/
+
+# Tooling noise
+.superwork/
+.claude/
+copter-report/
+.external-cache/
+Cargo.toml.original.txt
+*.rs.local
+*.profraw
+*.profdata
+fuzz-*.log
