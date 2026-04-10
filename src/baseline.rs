@@ -128,6 +128,16 @@ pub fn delete_baseline(name: &str) -> std::io::Result<()> {
     std::fs::remove_file(path)
 }
 
+/// Format a (group, bench) key for display.
+/// When group == bench (single-bench group from suite.bench()), show just the name.
+fn format_bench_key(group: &str, name: &str) -> String {
+    if group == name {
+        name.to_string()
+    } else {
+        format!("{group}::{name}")
+    }
+}
+
 /// Compare a new run against a saved baseline.
 ///
 /// `max_regression_pct`: maximum allowed regression as a percentage (e.g., 5.0 = 5%).
@@ -188,16 +198,6 @@ pub fn compare_against_baseline(
             );
         }
     }
-    for bench in &baseline.standalones {
-        baseline_map.insert(
-            ("_standalone".to_string(), bench.name.clone()),
-            BenchData {
-                mean: bench.summary.mean,
-                variance: bench.summary.variance,
-                n: bench.summary.n,
-            },
-        );
-    }
 
     let mut current_map: HashMap<(String, String), BenchData> = HashMap::new();
     for comp in &current.comparisons {
@@ -211,16 +211,6 @@ pub fn compare_against_baseline(
                 },
             );
         }
-    }
-    for bench in &current.standalones {
-        current_map.insert(
-            ("_standalone".to_string(), bench.name.clone()),
-            BenchData {
-                mean: bench.summary.mean,
-                variance: bench.summary.variance,
-                n: bench.summary.n,
-            },
-        );
     }
 
     let mut benchmarks = Vec::new();
@@ -274,13 +264,13 @@ pub fn compare_against_baseline(
                 improved,
             });
         } else {
-            missing_benchmarks.push(format!("{}::{}", key.0, key.1));
+            missing_benchmarks.push(format_bench_key(&key.0, &key.1));
         }
     }
 
     for key in current_map.keys() {
         if !baseline_map.contains_key(key) {
-            new_benchmarks.push(format!("{}::{}", key.0, key.1));
+            new_benchmarks.push(format_bench_key(&key.0, &key.1));
         }
     }
 
@@ -325,13 +315,10 @@ pub fn print_comparison_report(comparison: &BaselineComparison) {
             "  unchanged"
         };
 
+        let display_name = format_bench_key(&delta.group, &delta.name);
         eprintln!(
             "  {:<30} {:>9.1}ns → {:>9.1}ns  {:>+7.2}%  {}",
-            format!("{}::{}", delta.group, delta.name),
-            delta.baseline_mean,
-            delta.new_mean,
-            delta.pct_change,
-            marker,
+            display_name, delta.baseline_mean, delta.new_mean, delta.pct_change, marker,
         );
     }
 
@@ -443,5 +430,60 @@ mod tests {
         let _ = std::fs::create_dir_all(baseline_dir());
         // Just verify it doesn't panic
         let _ = list_baselines();
+    }
+
+    #[test]
+    fn new_single_bench_baselines_roundtrip() {
+        // suite.bench("x") produces group_name="x", bench_name="x"
+        let saved = make_result(&[("my_bench", "my_bench", 50.0)]);
+        let loaded = make_result(&[("my_bench", "my_bench", 55.0)]);
+
+        let comparison = compare_against_baseline(&saved, &loaded, 15.0);
+        assert_eq!(comparison.benchmarks.len(), 1);
+        assert!(
+            (comparison.benchmarks[0].pct_change - 10.0).abs() < 0.1,
+            "should detect ~10% change"
+        );
+        assert_eq!(comparison.missing_benchmarks.len(), 0);
+        assert_eq!(comparison.new_benchmarks.len(), 0);
+    }
+
+    #[test]
+    fn format_bench_key_collapses_matching_names() {
+        assert_eq!(format_bench_key("overhead", "overhead"), "overhead");
+    }
+
+    #[test]
+    fn format_bench_key_shows_both_when_different() {
+        assert_eq!(
+            format_bench_key("sorting", "quicksort"),
+            "sorting::quicksort"
+        );
+    }
+
+    #[test]
+    fn format_bench_key_empty_names() {
+        assert_eq!(format_bench_key("", ""), "");
+        assert_eq!(format_bench_key("g", ""), "g::");
+        assert_eq!(format_bench_key("", "b"), "::b");
+    }
+
+    #[test]
+    fn missing_single_bench_shows_clean_name() {
+        let baseline = make_result(&[("overhead", "overhead", 100.0)]);
+        let current = make_result(&[("different", "different", 100.0)]);
+        let comparison = compare_against_baseline(&baseline, &current, 5.0);
+        // "overhead" not "overhead::overhead"
+        assert_eq!(comparison.missing_benchmarks, vec!["overhead"]);
+        assert_eq!(comparison.new_benchmarks, vec!["different"]);
+    }
+
+    #[test]
+    fn missing_multi_bench_shows_group_and_name() {
+        let baseline = make_result(&[("sorting", "quicksort", 100.0)]);
+        let current = make_result(&[("sorting", "mergesort", 100.0)]);
+        let comparison = compare_against_baseline(&baseline, &current, 5.0);
+        assert_eq!(comparison.missing_benchmarks, vec!["sorting::quicksort"]);
+        assert_eq!(comparison.new_benchmarks, vec!["sorting::mergesort"]);
     }
 }

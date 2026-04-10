@@ -194,6 +194,7 @@ impl ResourceGate {
     /// more time than the measurement group has left.
     ///
     /// Returns true if conditions became favorable, false if timed out.
+    #[allow(dead_code)] // Public API for external gate users
     pub fn wait_for_clear(&mut self) -> bool {
         self.wait_for_clear_with_deadline(None)
     }
@@ -201,6 +202,7 @@ impl ResourceGate {
     /// Like [`ResourceGate::wait_for_clear`], but with an explicit deadline.
     ///
     /// The gate will wait at most `min(max_wait, deadline)`.
+    #[allow(dead_code)] // Public API for external gate users
     pub fn wait_for_clear_with_deadline(&mut self, deadline: Option<Duration>) -> bool {
         if !self.config.enabled {
             return true;
@@ -396,5 +398,89 @@ impl ResourceGate {
     /// Total time spent waiting.
     pub fn total_wait_time(&self) -> Duration {
         self.total_wait_time
+    }
+}
+
+/// Parse the `ZENBENCH_LAUNCHER_PIDS` env var value into a list of PIDs.
+/// Comma-separated, ignores invalid entries. Used by `wait_for_no_benchmarks`
+/// (integrated via PR #8 / fix/self-compare-gate).
+#[cfg(test)]
+fn parse_launcher_pids(val: &str) -> Vec<sysinfo::Pid> {
+    val.split(',')
+        .filter_map(|s| s.trim().parse::<usize>().ok().map(sysinfo::Pid::from))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_launcher_pids_single() {
+        let pids = parse_launcher_pids("12345");
+        assert_eq!(pids.len(), 1);
+        assert_eq!(pids[0], sysinfo::Pid::from(12345));
+    }
+
+    #[test]
+    fn parse_launcher_pids_multiple() {
+        let pids = parse_launcher_pids("100,200,300");
+        assert_eq!(pids.len(), 3);
+        assert_eq!(pids[0], sysinfo::Pid::from(100));
+        assert_eq!(pids[1], sysinfo::Pid::from(200));
+        assert_eq!(pids[2], sysinfo::Pid::from(300));
+    }
+
+    #[test]
+    fn parse_launcher_pids_with_whitespace() {
+        let pids = parse_launcher_pids(" 100 , 200 , 300 ");
+        assert_eq!(pids.len(), 3);
+    }
+
+    #[test]
+    fn parse_launcher_pids_empty() {
+        let pids = parse_launcher_pids("");
+        assert!(pids.is_empty());
+    }
+
+    #[test]
+    fn parse_launcher_pids_ignores_invalid() {
+        let pids = parse_launcher_pids("123,not_a_pid,456");
+        assert_eq!(pids.len(), 2);
+        assert_eq!(pids[0], sysinfo::Pid::from(123));
+        assert_eq!(pids[1], sysinfo::Pid::from(456));
+    }
+
+    #[test]
+    fn parse_launcher_pids_chained() {
+        // Simulates nested self-compare: parent appends its PID
+        let pids = parse_launcher_pids("1000,2000");
+        assert_eq!(pids.len(), 2);
+    }
+
+    #[test]
+    fn gate_disabled_skips_benchmark_check() {
+        let mut gate = ResourceGate::new(GateConfig::disabled());
+        // Should return immediately without scanning
+        gate.wait_for_no_benchmarks();
+        assert_eq!(gate.total_waits(), 0);
+    }
+
+    #[test]
+    fn gate_config_defaults_are_sane() {
+        let config = GateConfig::default();
+        assert!(config.enabled);
+        assert!(config.max_cpu_load > 0.0 && config.max_cpu_load < 1.0);
+        assert!(config.min_available_ram_bytes > 0);
+        assert!(config.max_wait > Duration::ZERO);
+        assert!(config.poll_interval > Duration::ZERO);
+    }
+
+    #[test]
+    fn gate_config_ci_is_more_permissive() {
+        let default = GateConfig::default();
+        let ci = GateConfig::ci();
+        assert!(ci.max_cpu_load >= default.max_cpu_load);
+        assert!(ci.max_heavy_processes >= default.max_heavy_processes);
     }
 }

@@ -1,5 +1,5 @@
 use crate::bench::Throughput;
-use crate::format::{format_ns, format_ns_range, ns_unit, terminal_width};
+use crate::format::{format_ns, ns_unit, terminal_width};
 use crate::results::{BenchmarkResult, ComparisonResult, SuiteResult};
 use std::io::IsTerminal;
 
@@ -74,13 +74,6 @@ struct RawRow {
     throughput: String,
     cpu: String,
     markers: String,
-}
-
-struct StandaloneRow {
-    name: String,
-    mean_range: String,
-    n: String,
-    cpu: String,
 }
 
 /// Print a human-readable report to stderr (with ANSI colors).
@@ -166,7 +159,7 @@ pub fn detect_style() -> ReportStyle {
     ReportStyle::Tree // default: tree
 }
 
-/// Print all comparison groups and standalones (no header/footer).
+/// Print all comparison groups (no header/footer).
 #[allow(non_snake_case)]
 fn print_report_body(result: &SuiteResult) {
     let c = should_color(&std::io::stderr());
@@ -930,122 +923,10 @@ fn print_report_body(result: &SuiteResult) {
         }
     }
 
-    // Standalone results
-    if !result.standalones.is_empty() {
-        eprintln!();
-        eprintln!("  {BOLD}standalone{RESET}");
-
-        let name_w = result
-            .standalones
-            .iter()
-            .map(|b| b.name.len())
-            .max()
-            .unwrap_or(9)
-            .max(9);
-
-        let has_cpu = result.standalones.iter().any(|b| b.cpu_summary.is_some());
-
-        // Pre-format
-        let rows: Vec<StandaloneRow> = result
-            .standalones
-            .iter()
-            .map(|bench| {
-                let ci_half = bench.summary.std_err() * 1.96;
-                let lo = (bench.summary.mean - ci_half).max(0.0);
-                let hi = bench.summary.mean + ci_half;
-                let cpu_str = bench
-                    .cpu_summary
-                    .as_ref()
-                    .map(|cpu| {
-                        let eff = if bench.summary.mean > 0.0 {
-                            cpu.mean / bench.summary.mean * 100.0
-                        } else {
-                            0.0
-                        };
-                        format!("{} ({eff:.0}%)", format_ns(cpu.mean))
-                    })
-                    .unwrap_or_default();
-                StandaloneRow {
-                    name: bench.name.clone(),
-                    mean_range: format_ns_range(lo, bench.summary.mean, hi),
-                    n: format!("{}", bench.summary.n),
-                    cpu: cpu_str,
-                }
-            })
-            .collect();
-
-        let mean_w = rows
-            .iter()
-            .map(|r| r.mean_range.len())
-            .max()
-            .unwrap_or(10)
-            .max(10);
-        let n_w = rows.iter().map(|r| r.n.len()).max().unwrap_or(1).max(1);
-        let cpu_w = if has_cpu {
-            rows.iter().map(|r| r.cpu.len()).max().unwrap_or(3).max(3)
-        } else {
-            0
-        };
-
-        let mut top = format!("  \u{250c}{}", "\u{2500}".repeat(name_w + 2));
-        let mut mid = format!("  \u{251c}{}", "\u{2500}".repeat(name_w + 2));
-        let mut hdr = format!("  \u{2502} {:<name_w$}", "benchmark");
-        top.push_str(&format!("\u{252c}{}", "\u{2500}".repeat(mean_w + 2)));
-        hdr.push_str(&format!(" \u{2502} {:^mean_w$}", "lo  mean  hi"));
-        mid.push_str(&format!("\u{253c}{}", "\u{2500}".repeat(mean_w + 2)));
-        top.push_str(&format!("\u{252c}{}", "\u{2500}".repeat(n_w + 2)));
-        hdr.push_str(&format!(" \u{2502} {:>n_w$}", "n"));
-        mid.push_str(&format!("\u{253c}{}", "\u{2500}".repeat(n_w + 2)));
-        if has_cpu {
-            top.push_str(&format!("\u{252c}{}", "\u{2500}".repeat(cpu_w + 2)));
-            hdr.push_str(&format!(" \u{2502} {:>cpu_w$}", "cpu"));
-            mid.push_str(&format!("\u{253c}{}", "\u{2500}".repeat(cpu_w + 2)));
-        }
-        top.push('\u{2510}');
-        hdr.push_str(" \u{2502}");
-        mid.push('\u{2524}');
-
-        eprintln!("{DIM}{top}{RESET}");
-        eprintln!("{DIM}{hdr}{RESET}");
-        eprintln!("{DIM}{mid}{RESET}");
-
-        for row in &rows {
-            let mut line = format!(
-                "  {DIM}\u{2502}{RESET} {:<name_w$} {DIM}\u{2502}{RESET} {:>mean_w$} {DIM}\u{2502}{RESET} {:>n_w$}",
-                row.name, row.mean_range, row.n,
-            );
-            if has_cpu {
-                line.push_str(&format!(
-                    " {DIM}\u{2502}{RESET} {DIM}{:>cpu_w$}{RESET}",
-                    row.cpu,
-                ));
-            }
-            line.push_str(&format!(" {DIM}\u{2502}{RESET}"));
-            eprintln!("{line}");
-        }
-
-        let mut bot = format!("  \u{2514}{}", "\u{2500}".repeat(name_w + 2));
-        bot.push_str(&format!("\u{2534}{}", "\u{2500}".repeat(mean_w + 2)));
-        bot.push_str(&format!("\u{2534}{}", "\u{2500}".repeat(n_w + 2)));
-        if has_cpu {
-            bot.push_str(&format!("\u{2534}{}", "\u{2500}".repeat(cpu_w + 2)));
-        }
-        bot.push('\u{2518}');
-        eprintln!("{DIM}{bot}{RESET}");
-    }
-
     // Footer is now printed separately via print_footer()
 }
 
-/// Print standalone benchmark results. Called from the engine's streaming path
-/// so that standalone-only suites produce visible output.
-pub fn print_standalones(result: &SuiteResult) {
-    // Delegate to print_report_body which already handles standalones.
-    // It also handles comparisons, but we only pass standalones here.
-    print_report_body(result);
-}
-
-/// Print a complete report (header + all groups + standalones + footer).
+/// Print a complete report (header + all groups + footer).
 /// Used by SuiteResult::print_report() for batch mode.
 pub fn print_report(result: &SuiteResult) {
     print_header(
@@ -1302,6 +1183,29 @@ fn print_group_tree(comp: &ComparisonResult, _timer_res: u64) {
     let has_subgroups = rows.iter().any(|r| r.subgroup.is_some());
     let prefix_w = if has_subgroups { 6 } else { 3 }; // "├─ " or "│  ╰─ "
     let left_col_w = prefix_w + name_w;
+
+    // Single-benchmark group with matching name: compact inline format
+    // "  overhead  0.20 ±0.01ns  [0.19–0.22]ns  30 rounds × 1M calls"
+    if rows.len() == 1 && comp.benchmarks.len() == 1 && comp.benchmarks[0].name == comp.group_name {
+        let row = &rows[0];
+        let tp_col = if has_throughput {
+            format!("  {CYAN}{}{RESET}", row.tp_str)
+        } else {
+            String::new()
+        };
+        eprintln!();
+        eprintln!(
+            "  {BOLD}{}{RESET}  {}{DIM}{mean_unit}{RESET}  {DIM}{}{RESET}{tp_col}{YELLOW}{}{RESET}  {DIM}{meta}{RESET}",
+            comp.group_name, row.mean_mad_str, row.ci_str, row.markers,
+        );
+        // Print footnotes
+        if !footnotes.is_empty() {
+            for (i, note) in footnotes.iter().enumerate() {
+                eprintln!("  {YELLOW}[{}]{RESET} {DIM}{note}{RESET}", i + 1);
+            }
+        }
+        return;
+    }
 
     // Print group header
     eprintln!();
