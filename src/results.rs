@@ -145,14 +145,13 @@ pub struct SuiteResult {
     pub git_hash: Option<String>,
     pub ci_environment: Option<String>,
     pub comparisons: Vec<ComparisonResult>,
-    /// Legacy field — always empty for new results. `suite.bench()` now creates
-    /// single-benchmark groups in `comparisons`. Kept for JSON deserialization
-    /// of old saved results; [`SuiteResult::load`] auto-promotes these into
-    /// `comparisons`.
+    /// Deprecated — always empty. `suite.bench()` now creates single-benchmark
+    /// groups in `comparisons`. Kept for API and serde compatibility.
     #[deprecated(
         since = "0.1.5",
         note = "standalones are now single-benchmark groups in `comparisons`"
     )]
+    #[serde(default)]
     pub standalones: Vec<BenchmarkResult>,
     #[serde(with = "duration_serde")]
     pub total_time: Duration,
@@ -202,25 +201,6 @@ impl Default for SuiteResult {
 }
 
 impl SuiteResult {
-    /// All benchmark results as comparison groups, including legacy standalones
-    /// promoted to single-benchmark groups.
-    pub fn all_comparisons(&self) -> Vec<&ComparisonResult> {
-        self.comparisons.iter().collect()
-    }
-
-    /// Promote legacy standalone results into single-benchmark ComparisonResults.
-    /// Used when loading old saved results that have the standalones field populated.
-    #[allow(deprecated)] // intentional access to legacy field
-    pub fn promote_standalones(&mut self) {
-        for bench in std::mem::take(&mut self.standalones) {
-            self.comparisons.push(ComparisonResult {
-                group_name: bench.name.clone(),
-                benchmarks: vec![bench],
-                ..Default::default()
-            });
-        }
-    }
-
     /// Save results to a JSON file.
     pub fn save(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
         let json = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
@@ -228,14 +208,9 @@ impl SuiteResult {
     }
 
     /// Load results from a JSON file.
-    ///
-    /// Automatically promotes legacy standalone benchmarks into single-benchmark
-    /// comparison groups for uniform handling.
     pub fn load(path: impl AsRef<Path>) -> std::io::Result<Self> {
         let json = std::fs::read_to_string(path)?;
-        let mut result: Self = serde_json::from_str(&json).map_err(std::io::Error::other)?;
-        result.promote_standalones();
-        Ok(result)
+        serde_json::from_str(&json).map_err(std::io::Error::other)
     }
 
     /// Print a human-readable report to stderr (with ANSI colors).
@@ -1253,149 +1228,6 @@ mod tests {
             cols[vs_base_pct_col].is_empty(),
             "vs_base_pct should be empty for baseline row, got: {base_row}"
         );
-    }
-
-    // ── Legacy standalone promotion tests ─────────────────────────
-
-    #[test]
-    #[allow(deprecated)]
-    fn promote_standalones_moves_to_comparisons() {
-        let mut result = SuiteResult {
-            standalones: vec![
-                BenchmarkResult {
-                    name: "legacy_a".to_string(),
-                    summary: make_summary(100.0),
-                    ..Default::default()
-                },
-                BenchmarkResult {
-                    name: "legacy_b".to_string(),
-                    summary: make_summary(200.0),
-                    ..Default::default()
-                },
-            ],
-            ..Default::default()
-        };
-        assert_eq!(result.standalones.len(), 2);
-        result.promote_standalones();
-        assert!(
-            result.standalones.is_empty(),
-            "standalones should be drained"
-        );
-        assert_eq!(result.comparisons.len(), 2);
-        assert_eq!(result.comparisons[0].group_name, "legacy_a");
-        assert_eq!(result.comparisons[0].benchmarks.len(), 1);
-        assert_eq!(result.comparisons[0].benchmarks[0].name, "legacy_a");
-        assert_eq!(result.comparisons[1].group_name, "legacy_b");
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn promote_standalones_appends_to_existing_comparisons() {
-        let mut result = SuiteResult {
-            comparisons: vec![ComparisonResult {
-                group_name: "existing_group".to_string(),
-                benchmarks: vec![BenchmarkResult {
-                    name: "bench_a".to_string(),
-                    summary: make_summary(50.0),
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }],
-            standalones: vec![BenchmarkResult {
-                name: "legacy_c".to_string(),
-                summary: make_summary(300.0),
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
-        result.promote_standalones();
-        assert_eq!(result.comparisons.len(), 2);
-        assert_eq!(result.comparisons[0].group_name, "existing_group");
-        assert_eq!(result.comparisons[1].group_name, "legacy_c");
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn promote_standalones_noop_when_empty() {
-        let mut result = SuiteResult::default();
-        result.promote_standalones();
-        assert!(result.comparisons.is_empty());
-        assert!(result.standalones.is_empty());
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn json_roundtrip_with_legacy_standalones() {
-        let original = SuiteResult {
-            run_id: RunId("roundtrip-test".to_string()),
-            standalones: vec![BenchmarkResult {
-                name: "old_bench".to_string(),
-                summary: make_summary(42.0),
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
-        let json = serde_json::to_string(&original).unwrap();
-        assert!(json.contains("old_bench"), "JSON should contain standalone");
-
-        // Simulating SuiteResult::load() which calls promote_standalones
-        let mut loaded: SuiteResult = serde_json::from_str(&json).unwrap();
-        loaded.promote_standalones();
-        assert!(loaded.standalones.is_empty());
-        assert_eq!(loaded.comparisons.len(), 1);
-        assert_eq!(loaded.comparisons[0].group_name, "old_bench");
-        assert_eq!(loaded.comparisons[0].benchmarks[0].summary.mean, 42.0);
-    }
-
-    #[test]
-    fn json_roundtrip_no_standalones() {
-        let original = SuiteResult {
-            run_id: RunId("clean-test".to_string()),
-            comparisons: vec![ComparisonResult {
-                group_name: "grp".to_string(),
-                benchmarks: vec![BenchmarkResult {
-                    name: "b".to_string(),
-                    summary: make_summary(10.0),
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
-        let json = serde_json::to_string(&original).unwrap();
-        let loaded: SuiteResult = serde_json::from_str(&json).unwrap();
-        assert_eq!(loaded.comparisons.len(), 1);
-        assert_eq!(loaded.comparisons[0].group_name, "grp");
-    }
-
-    // ── Field preservation tests ──────────────────────────────────
-
-    #[test]
-    #[allow(deprecated)]
-    fn promote_standalones_preserves_all_fields() {
-        let mut result = SuiteResult {
-            standalones: vec![BenchmarkResult {
-                name: "legacy".to_string(),
-                summary: make_summary(42.0),
-                cold_start_ns: 999.0,
-                tags: vec![("lib".to_string(), "zenflate".to_string())],
-                subgroup: Some("codec".to_string()),
-                slope_ns: Some(1.5),
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
-        result.promote_standalones();
-        let bench = &result.comparisons[0].benchmarks[0];
-        assert_eq!(bench.cold_start_ns, 999.0, "cold_start_ns preserved");
-        assert_eq!(bench.tags.len(), 1, "tags preserved");
-        assert_eq!(bench.tags[0].0, "lib");
-        assert_eq!(
-            bench.subgroup.as_deref(),
-            Some("codec"),
-            "subgroup preserved"
-        );
-        assert_eq!(bench.slope_ns, Some(1.5), "slope_ns preserved");
     }
 
     // ── Single-bench output format tests ──────────────────────────
