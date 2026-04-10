@@ -256,6 +256,22 @@ impl ResourceGate {
         const BENCH_NAMES: &[&str] = &["criterion", "divan", "zenbench", "cargo-bench", "bench-"];
 
         let our_pid = sysinfo::get_current_pid().ok();
+
+        // Collect PIDs to exclude: ourselves, plus any launcher PIDs.
+        // `zenbench self-compare` sets ZENBENCH_LAUNCHER_PIDS so the child
+        // benchmark doesn't wait on its own parent CLI process.
+        let mut excluded_pids: Vec<sysinfo::Pid> = Vec::new();
+        if let Some(our) = our_pid {
+            excluded_pids.push(our);
+        }
+        if let Ok(pids_str) = std::env::var("ZENBENCH_LAUNCHER_PIDS") {
+            for s in pids_str.split(',') {
+                if let Ok(pid) = s.trim().parse::<usize>() {
+                    excluded_pids.push(sysinfo::Pid::from(pid));
+                }
+            }
+        }
+
         let start = Instant::now();
         let max_wait = Duration::from_secs(30);
         let mut warned = false;
@@ -270,11 +286,9 @@ impl ResourceGate {
                 .processes()
                 .values()
                 .filter(|p| {
-                    // Skip ourselves
-                    if let Some(our) = our_pid {
-                        if p.pid() == our {
-                            return false;
-                        }
+                    // Skip ourselves and launcher ancestors
+                    if excluded_pids.contains(&p.pid()) {
+                        return false;
                     }
 
                     let name = p.name().to_string_lossy().to_lowercase();

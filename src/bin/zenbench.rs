@@ -763,6 +763,16 @@ fn run_bench_in_dir(
         .args(["bench", "--bench", bench_name])
         .env("ZENBENCH_RESULT_PATH", result_path);
 
+    // Tell the child benchmark to exclude the launcher's PID from the
+    // benchmark-process gate. Without this, the child detects the parent
+    // `zenbench self-compare` process and waits for it to exit (deadlock).
+    let our_pid = std::process::id();
+    let launcher_pids = match std::env::var("ZENBENCH_LAUNCHER_PIDS") {
+        Ok(existing) => format!("{existing},{our_pid}"),
+        Err(_) => our_pid.to_string(),
+    };
+    cmd.env("ZENBENCH_LAUNCHER_PIDS", &launcher_pids);
+
     if let Some(args) = cargo_args {
         for arg in args.split_whitespace() {
             cmd.arg(arg);
