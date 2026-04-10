@@ -77,6 +77,10 @@ harness = false
 name = "alloc_profiling"
 harness = false
 
+[[bench]]
+name = "standalone_only"
+harness = false
+
 [[example]]
 name = "wasm_simd_bench"
 required-features = ["wasm"]

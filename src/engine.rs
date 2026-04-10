@@ -208,12 +208,13 @@ impl Engine {
         }
 
         // Run standalone benchmarks
+        let standalone_config = self.suite.standalone_config.clone();
         for bench in &mut self.suite.standalones {
             let mut standalone_gate = ResourceGate::new(self.gate_config.clone());
             let result = run_standalone(
                 bench,
                 &mut standalone_gate,
-                &GroupConfig::default(),
+                &standalone_config,
                 loop_overhead_ns,
                 tsc_ticks_per_ns,
                 timer_res,
@@ -221,6 +222,15 @@ impl Engine {
             total_gate_waits += standalone_gate.total_waits();
             total_gate_wait_time += standalone_gate.total_wait_time();
             standalones.push(result);
+        }
+
+        // Print standalone results (groups were already printed as they completed)
+        if !standalones.is_empty() {
+            let standalone_suite = SuiteResult {
+                standalones: standalones.clone(),
+                ..Default::default()
+            };
+            crate::report::print_standalones(&standalone_suite);
         }
 
         let total_time = start.elapsed();

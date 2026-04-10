@@ -1037,6 +1037,14 @@ fn print_report_body(result: &SuiteResult) {
     // Footer is now printed separately via print_footer()
 }
 
+/// Print standalone benchmark results. Called from the engine's streaming path
+/// so that standalone-only suites produce visible output.
+pub fn print_standalones(result: &SuiteResult) {
+    // Delegate to print_report_body which already handles standalones.
+    // It also handles comparisons, but we only pass standalones here.
+    print_report_body(result);
+}
+
 /// Print a complete report (header + all groups + standalones + footer).
 /// Used by SuiteResult::print_report() for batch mode.
 pub fn print_report(result: &SuiteResult) {
