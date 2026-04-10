@@ -496,4 +496,75 @@ mod tests {
         assert_eq!(comparison.missing_benchmarks.len(), 0);
         assert_eq!(comparison.new_benchmarks.len(), 0);
     }
+
+    #[test]
+    fn format_bench_key_collapses_matching_names() {
+        assert_eq!(format_bench_key("overhead", "overhead"), "overhead");
+    }
+
+    #[test]
+    fn format_bench_key_shows_both_when_different() {
+        assert_eq!(
+            format_bench_key("sorting", "quicksort"),
+            "sorting::quicksort"
+        );
+    }
+
+    #[test]
+    fn format_bench_key_empty_names() {
+        assert_eq!(format_bench_key("", ""), "");
+        assert_eq!(format_bench_key("g", ""), "g::");
+        assert_eq!(format_bench_key("", "b"), "::b");
+    }
+
+    #[test]
+    fn missing_single_bench_shows_clean_name() {
+        let baseline = make_result(&[("overhead", "overhead", 100.0)]);
+        let current = make_result(&[("different", "different", 100.0)]);
+        let comparison = compare_against_baseline(&baseline, &current, 5.0);
+        // "overhead" not "overhead::overhead"
+        assert_eq!(comparison.missing_benchmarks, vec!["overhead"]);
+        assert_eq!(comparison.new_benchmarks, vec!["different"]);
+    }
+
+    #[test]
+    fn missing_multi_bench_shows_group_and_name() {
+        let baseline = make_result(&[("sorting", "quicksort", 100.0)]);
+        let current = make_result(&[("sorting", "mergesort", 100.0)]);
+        let comparison = compare_against_baseline(&baseline, &current, 5.0);
+        assert_eq!(comparison.missing_benchmarks, vec!["sorting::quicksort"]);
+        assert_eq!(comparison.new_benchmarks, vec!["sorting::mergesort"]);
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn both_sides_promoted_from_standalones() {
+        use crate::results::*;
+        use crate::stats::Summary;
+
+        let mut old_baseline = SuiteResult {
+            standalones: vec![BenchmarkResult {
+                name: "bench_a".to_string(),
+                summary: Summary::from_slice(&[100.0]),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        old_baseline.promote_standalones();
+
+        let mut old_current = SuiteResult {
+            standalones: vec![BenchmarkResult {
+                name: "bench_a".to_string(),
+                summary: Summary::from_slice(&[110.0]),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        old_current.promote_standalones();
+
+        let comparison = compare_against_baseline(&old_baseline, &old_current, 15.0);
+        assert_eq!(comparison.benchmarks.len(), 1);
+        assert_eq!(comparison.missing_benchmarks.len(), 0);
+        assert_eq!(comparison.new_benchmarks.len(), 0);
+    }
 }

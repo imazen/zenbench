@@ -1367,6 +1367,181 @@ mod tests {
         assert_eq!(loaded.comparisons.len(), 1);
         assert_eq!(loaded.comparisons[0].group_name, "grp");
     }
+
+    // ── Field preservation tests ──────────────────────────────────
+
+    #[test]
+    #[allow(deprecated)]
+    fn promote_standalones_preserves_all_fields() {
+        let mut result = SuiteResult {
+            standalones: vec![BenchmarkResult {
+                name: "legacy".to_string(),
+                summary: make_summary(42.0),
+                cold_start_ns: 999.0,
+                tags: vec![("lib".to_string(), "zenflate".to_string())],
+                subgroup: Some("codec".to_string()),
+                slope_ns: Some(1.5),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        result.promote_standalones();
+        let bench = &result.comparisons[0].benchmarks[0];
+        assert_eq!(bench.cold_start_ns, 999.0, "cold_start_ns preserved");
+        assert_eq!(bench.tags.len(), 1, "tags preserved");
+        assert_eq!(bench.tags[0].0, "lib");
+        assert_eq!(
+            bench.subgroup.as_deref(),
+            Some("codec"),
+            "subgroup preserved"
+        );
+        assert_eq!(bench.slope_ns, Some(1.5), "slope_ns preserved");
+    }
+
+    // ── Single-bench output format tests ──────────────────────────
+
+    #[test]
+    fn llm_multi_bench_group_has_group_field() {
+        let result = make_suite_result_with_analyses();
+        let llm = result.to_llm();
+        assert!(
+            llm.contains("group=compress"),
+            "multi-bench group should have group= field, got:\n{llm}"
+        );
+    }
+
+    #[test]
+    fn llm_single_bench_omits_group_field() {
+        let result = SuiteResult {
+            comparisons: vec![ComparisonResult {
+                group_name: "overhead".to_string(),
+                benchmarks: vec![BenchmarkResult {
+                    name: "overhead".to_string(),
+                    summary: make_summary(0.5),
+                    ..Default::default()
+                }],
+                completed_rounds: 30,
+                iterations_per_sample: 1_000_000,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let llm = result.to_llm();
+        assert!(
+            !llm.contains("group="),
+            "single-bench LLM should omit group=, got:\n{llm}"
+        );
+        assert!(llm.contains("benchmark=overhead"));
+    }
+
+    #[test]
+    fn markdown_single_bench_is_one_liner() {
+        let result = SuiteResult {
+            comparisons: vec![ComparisonResult {
+                group_name: "overhead".to_string(),
+                benchmarks: vec![BenchmarkResult {
+                    name: "overhead".to_string(),
+                    summary: make_summary(0.5),
+                    ..Default::default()
+                }],
+                completed_rounds: 30,
+                iterations_per_sample: 1_000_000,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let md = result.to_markdown();
+        assert!(
+            md.contains("**overhead**"),
+            "single-bench markdown should use bold name, got:\n{md}"
+        );
+        assert!(
+            !md.contains("## overhead"),
+            "single-bench markdown should not use section header, got:\n{md}"
+        );
+        assert!(
+            !md.contains("| Benchmark"),
+            "single-bench markdown should not use table, got:\n{md}"
+        );
+    }
+
+    #[test]
+    fn markdown_multi_bench_uses_table() {
+        let result = make_suite_result_with_analyses();
+        let md = result.to_markdown();
+        assert!(
+            md.contains("## compress"),
+            "multi-bench should have section header"
+        );
+        assert!(md.contains("| Benchmark"), "multi-bench should have table");
+    }
+
+    #[test]
+    fn csv_single_bench_has_group_column() {
+        let result = SuiteResult {
+            comparisons: vec![ComparisonResult {
+                group_name: "overhead".to_string(),
+                benchmarks: vec![BenchmarkResult {
+                    name: "overhead".to_string(),
+                    summary: make_summary(0.5),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let csv = result.to_csv();
+        let data_line = csv.lines().nth(1).expect("should have data row");
+        assert!(
+            data_line.starts_with("overhead,overhead,"),
+            "CSV should have group=overhead, bench=overhead, got: {data_line}"
+        );
+    }
+
+    #[test]
+    fn html_single_bench_produces_output() {
+        let result = SuiteResult {
+            comparisons: vec![ComparisonResult {
+                group_name: "overhead".to_string(),
+                benchmarks: vec![BenchmarkResult {
+                    name: "overhead".to_string(),
+                    summary: make_summary(0.5),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let html = result.to_html();
+        assert!(
+            html.contains("overhead"),
+            "HTML should contain benchmark name"
+        );
+        assert!(html.contains("<html"), "should be valid HTML");
+        assert!(html.contains("</html>"), "should have closing tag");
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn json_standalones_field_serializes_empty() {
+        let result = SuiteResult {
+            comparisons: vec![ComparisonResult {
+                group_name: "x".to_string(),
+                benchmarks: vec![BenchmarkResult {
+                    name: "x".to_string(),
+                    summary: make_summary(1.0),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(
+            json.contains(r#""standalones":[]"#),
+            "standalones should serialize as empty array, got:\n{json}"
+        );
+    }
 }
 
 /// Serde support for Duration via millis.
