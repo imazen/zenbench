@@ -424,4 +424,69 @@ mod tests {
         // Just verify it doesn't panic
         let _ = list_baselines();
     }
+
+    /// Old baselines had standalones in a separate field with key ("_standalone", name).
+    /// After unification, promote_standalones() converts them to groups with
+    /// key (name, name). New results also use (name, name) for suite.bench().
+    /// This test verifies the comparison matches across the old→new boundary.
+    #[test]
+    #[allow(deprecated)]
+    fn legacy_standalone_baseline_matches_new_single_bench_group() {
+        use crate::results::*;
+        use crate::stats::Summary;
+
+        // Simulate an old baseline that had a standalone benchmark
+        let mut old_baseline = SuiteResult {
+            standalones: vec![BenchmarkResult {
+                name: "overhead".to_string(),
+                summary: Summary::from_slice(&[100.0]),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        // load() would call this:
+        old_baseline.promote_standalones();
+
+        // New result from suite.bench("overhead", ...) — goes into comparisons
+        let new_result = make_result(&[("overhead", "overhead", 105.0)]);
+
+        let comparison = compare_against_baseline(&old_baseline, &new_result, 10.0);
+
+        // Should find the match, not report as new/missing
+        assert_eq!(
+            comparison.missing_benchmarks.len(),
+            0,
+            "promoted standalone should match new single-bench group"
+        );
+        assert_eq!(
+            comparison.new_benchmarks.len(),
+            0,
+            "new single-bench group should match promoted standalone"
+        );
+        assert_eq!(comparison.benchmarks.len(), 1);
+
+        // Verify the comparison detected the 5% change
+        let bench = &comparison.benchmarks[0];
+        assert!(
+            (bench.pct_change - 5.0).abs() < 0.1,
+            "should detect ~5% regression, got {:.1}%",
+            bench.pct_change
+        );
+    }
+
+    #[test]
+    fn new_single_bench_baselines_roundtrip() {
+        // suite.bench("x") produces group_name="x", bench_name="x"
+        let saved = make_result(&[("my_bench", "my_bench", 50.0)]);
+        let loaded = make_result(&[("my_bench", "my_bench", 55.0)]);
+
+        let comparison = compare_against_baseline(&saved, &loaded, 15.0);
+        assert_eq!(comparison.benchmarks.len(), 1);
+        assert!(
+            (comparison.benchmarks[0].pct_change - 10.0).abs() < 0.1,
+            "should detect ~10% change"
+        );
+        assert_eq!(comparison.missing_benchmarks.len(), 0);
+        assert_eq!(comparison.new_benchmarks.len(), 0);
+    }
 }
