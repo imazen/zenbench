@@ -742,8 +742,14 @@ fn standalone_benchmark_has_ci() {
             })
         });
     });
+    // suite.bench() creates a single-benchmark group
+    let comp = result
+        .comparisons
+        .iter()
+        .find(|c| c.group_name == "standalone_ci")
+        .unwrap();
     assert!(
-        result.standalones[0].mean_ci.is_some(),
+        comp.benchmarks[0].mean_ci.is_some(),
         "standalone benchmarks should also get per-benchmark CIs"
     );
 }

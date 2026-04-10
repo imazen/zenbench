@@ -194,6 +194,7 @@ impl ResourceGate {
     /// more time than the measurement group has left.
     ///
     /// Returns true if conditions became favorable, false if timed out.
+    #[allow(dead_code)] // Public API for external gate users
     pub fn wait_for_clear(&mut self) -> bool {
         self.wait_for_clear_with_deadline(None)
     }
@@ -201,6 +202,7 @@ impl ResourceGate {
     /// Like [`ResourceGate::wait_for_clear`], but with an explicit deadline.
     ///
     /// The gate will wait at most `min(max_wait, deadline)`.
+    #[allow(dead_code)] // Public API for external gate users
     pub fn wait_for_clear_with_deadline(&mut self, deadline: Option<Duration>) -> bool {
         if !self.config.enabled {
             return true;

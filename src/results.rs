@@ -193,6 +193,24 @@ impl Default for SuiteResult {
 }
 
 impl SuiteResult {
+    /// All benchmark results as comparison groups, including legacy standalones
+    /// promoted to single-benchmark groups.
+    pub fn all_comparisons(&self) -> Vec<&ComparisonResult> {
+        self.comparisons.iter().collect()
+    }
+
+    /// Promote legacy standalone results into single-benchmark ComparisonResults.
+    /// Used when loading old saved results that have the standalones field populated.
+    pub fn promote_standalones(&mut self) {
+        for bench in std::mem::take(&mut self.standalones) {
+            self.comparisons.push(ComparisonResult {
+                group_name: bench.name.clone(),
+                benchmarks: vec![bench],
+                ..Default::default()
+            });
+        }
+    }
+
     /// Save results to a JSON file.
     pub fn save(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
         let json = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
@@ -200,9 +218,14 @@ impl SuiteResult {
     }
 
     /// Load results from a JSON file.
+    ///
+    /// Automatically promotes legacy standalone benchmarks into single-benchmark
+    /// comparison groups for uniform handling.
     pub fn load(path: impl AsRef<Path>) -> std::io::Result<Self> {
         let json = std::fs::read_to_string(path)?;
-        serde_json::from_str(&json).map_err(std::io::Error::other)
+        let mut result: Self = serde_json::from_str(&json).map_err(std::io::Error::other)?;
+        result.promote_standalones();
+        Ok(result)
     }
 
     /// Print a human-readable report to stderr (with ANSI colors).
@@ -387,27 +410,6 @@ impl SuiteResult {
             }
         }
 
-        // Standalone benchmarks
-        for bench in &self.standalones {
-            let s = &bench.summary;
-            let identity = format!("benchmark={}", llm_quote(&bench.name));
-            let measurement = format!(
-                "min={} mean={} median={} mad={}",
-                crate::format::format_ns(s.min),
-                crate::format::format_ns(s.mean),
-                crate::format::format_ns(s.median),
-                crate::format::format_ns(s.mad),
-            );
-            let mut meta = format!("n={} cv={:.1}%", s.n, s.cv() * 100.0);
-            if bench.cold_start_ns > 0.0 {
-                meta.push_str(&format!(
-                    " cold={}",
-                    crate::format::format_ns(bench.cold_start_ns),
-                ));
-            }
-            out.push_str(&format!("{identity}  |  {measurement}  |  {meta}\n"));
-        }
-
         out
     }
 
@@ -590,21 +592,6 @@ impl SuiteResult {
             out.push('\n');
         }
 
-        // Standalone benchmarks
-        if !self.standalones.is_empty() {
-            out.push_str("## Standalone\n\n");
-            out.push_str("| Benchmark | Min | Mean |\n");
-            out.push_str("|-----------|-----|------|\n");
-            for bench in &self.standalones {
-                out.push_str(&format!(
-                    "| {} | {} | {} |\n",
-                    bench.name,
-                    format_ns(bench.summary.min),
-                    format_ns(bench.summary.mean),
-                ));
-            }
-        }
-
         out
     }
 
@@ -777,53 +764,6 @@ impl SuiteResult {
                 }
                 out.push('\n');
             }
-        }
-
-        // Standalone benchmarks
-        for bench in &self.standalones {
-            let (cpu_mean, cpu_eff) = bench
-                .cpu_summary
-                .as_ref()
-                .map(|c| {
-                    let eff = if bench.summary.mean > 0.0 {
-                        c.mean / bench.summary.mean
-                    } else {
-                        0.0
-                    };
-                    (format!("{:.2}", c.mean), format!("{eff:.4}"))
-                })
-                .unwrap_or_else(|| (String::new(), String::new()));
-
-            let cold = if bench.cold_start_ns > 0.0 {
-                format!("{:.2}", bench.cold_start_ns)
-            } else {
-                String::new()
-            };
-
-            let subgroup = bench
-                .subgroup
-                .as_deref()
-                .map(csv_escape)
-                .unwrap_or_default();
-
-            // group is empty for standalones; comparison columns empty
-            out.push_str(&format!(
-                ",{},{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{},{:.4},{},{},{},,,,,,,,,,,{:.0}\n",
-                csv_escape(&bench.name),
-                subgroup,
-                bench.summary.mean,
-                bench.summary.std_dev(),
-                bench.summary.median,
-                bench.summary.mad,
-                bench.summary.min,
-                bench.summary.max,
-                bench.summary.n,
-                bench.summary.cv(),
-                cold,
-                cpu_mean,
-                cpu_eff,
-                bench.timer_ticks_per_sample,
-            ));
         }
 
         out
@@ -1046,12 +986,6 @@ mod tests {
                 iterations_per_sample: 10,
                 ..Default::default()
             }],
-            standalones: vec![BenchmarkResult {
-                name: "standalone_bench".to_string(),
-                summary: Summary::from_slice(&[1_000.0, 1_100.0, 900.0, 1_050.0]),
-                cold_start_ns: 5_000.0,
-                ..Default::default()
-            }],
             total_time: Duration::from_secs(3),
             gate_waits: 2,
             gate_wait_time: Duration::from_millis(250),
@@ -1135,20 +1069,6 @@ mod tests {
         assert!(
             baseline_line.contains("cold="),
             "row with nonzero cold_start_ns should have cold= field, got: {baseline_line}"
-        );
-    }
-
-    #[test]
-    fn llm_output_standalone_cold_start_present() {
-        let result = make_suite_result_with_analyses();
-        let llm = result.to_llm();
-        let standalone_line = llm
-            .lines()
-            .find(|l| l.contains("benchmark=standalone_bench"))
-            .expect("should have standalone_bench line");
-        assert!(
-            standalone_line.contains("cold="),
-            "standalone with nonzero cold_start_ns should show cold=, got: {standalone_line}"
         );
     }
 
