@@ -320,7 +320,12 @@ impl SuiteResult {
                 let s = &bench.summary;
 
                 // Section 1: Identity
-                let mut identity = vec![format!("group={}", llm_quote(&comp.group_name))];
+                // Omit group= when it's a single-bench group with matching name
+                let is_single = comp.benchmarks.len() == 1 && bench.name == comp.group_name;
+                let mut identity = Vec::new();
+                if !is_single {
+                    identity.push(format!("group={}", llm_quote(&comp.group_name)));
+                }
                 if let Some(sg) = &bench.subgroup {
                     identity.push(format!("subgroup={}", llm_quote(sg)));
                 }
@@ -441,6 +446,38 @@ impl SuiteResult {
 
         // Comparison groups
         for comp in &self.comparisons {
+            // Single-bench group with matching name: compact one-liner
+            let is_single =
+                comp.benchmarks.len() == 1 && comp.benchmarks[0].name == comp.group_name;
+            if is_single {
+                let bench = &comp.benchmarks[0];
+                let calls_str = if comp.iterations_per_sample == 1 {
+                    "1 call".to_string()
+                } else {
+                    format!("{} calls", comp.iterations_per_sample)
+                };
+                let tp_str = comp
+                    .throughput
+                    .as_ref()
+                    .map(|t| {
+                        format!(
+                            " · {}",
+                            t.format(bench.summary.mean, comp.throughput_unit.as_deref())
+                        )
+                    })
+                    .unwrap_or_default();
+                out.push_str(&format!(
+                    "**{}** — {} (min: {}){} · {} rounds \u{d7} {}\n\n",
+                    bench.name,
+                    format_ns(bench.summary.mean),
+                    format_ns(bench.summary.min),
+                    tp_str,
+                    comp.completed_rounds,
+                    calls_str,
+                ));
+                continue;
+            }
+
             out.push_str(&format!("## {}\n\n", comp.group_name));
 
             // Methodology line

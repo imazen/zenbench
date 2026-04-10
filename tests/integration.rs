@@ -504,12 +504,13 @@ fn single_bench_group_appears_in_llm_output() {
     });
     let llm = result.to_llm();
     assert!(
-        llm.contains("group=llm_visible"),
-        "LLM output should contain group name, got:\n{llm}"
-    );
-    assert!(
         llm.contains("benchmark=llm_visible"),
         "LLM output should contain benchmark name, got:\n{llm}"
+    );
+    // Single-bench group with matching name omits redundant group= field
+    assert!(
+        !llm.contains("group="),
+        "single-bench LLM output should not have redundant group= field, got:\n{llm}"
     );
 }
 
