@@ -45,15 +45,14 @@ fn empty_group_skipped() {
 }
 
 #[test]
-fn standalone_benchmark() {
+fn single_bench_creates_group() {
     let result = run_gated(disabled_gate(), |suite| {
-        suite.bench("standalone", |b| b.iter(|| black_box(1u64)));
+        suite.bench("single", |b| b.iter(|| black_box(1u64)));
     });
-    // suite.bench() creates a single-benchmark group
     let comp = result
         .comparisons
         .iter()
-        .find(|c| c.group_name == "standalone")
+        .find(|c| c.group_name == "single")
         .unwrap();
     assert_eq!(comp.benchmarks.len(), 1);
     assert!(comp.benchmarks[0].summary.mean > 0.0);

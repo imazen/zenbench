@@ -27,7 +27,7 @@ impl std::fmt::Display for RunId {
     }
 }
 
-/// Result of a single benchmark (standalone or within a group).
+/// Result of a single benchmark within a group.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct BenchmarkResult {

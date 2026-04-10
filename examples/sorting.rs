@@ -63,7 +63,7 @@ fn main() {
             });
         });
 
-        // Standalone benchmark
+        // Single benchmark (no comparison)
         suite.bench("vec_allocation", |b| {
             b.iter(|| {
                 let v: Vec<u8> = vec![0u8; 4096];

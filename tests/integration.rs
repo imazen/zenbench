@@ -366,19 +366,16 @@ fn timer_resolution_detected() {
 }
 
 #[test]
-fn standalone_benchmark_works() {
+fn single_bench_creates_group() {
     let result = run_gated(GateConfig::disabled(), |suite| {
-        suite.bench("standalone", |b| {
-            b.iter(|| black_box(42u64.wrapping_mul(7)))
-        });
+        suite.bench("single", |b| b.iter(|| black_box(42u64.wrapping_mul(7))));
     });
-    // suite.bench() creates a single-benchmark group
     let comp = result
         .comparisons
         .iter()
-        .find(|c| c.group_name == "standalone")
+        .find(|c| c.group_name == "single")
         .unwrap();
     assert_eq!(comp.benchmarks.len(), 1);
-    assert_eq!(comp.benchmarks[0].name, "standalone");
+    assert_eq!(comp.benchmarks[0].name, "single");
     assert!(comp.benchmarks[0].summary.mean > 0.0);
 }
