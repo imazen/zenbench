@@ -471,7 +471,7 @@ fn run_comparison_group(
         //   - Equivalence established: CI width < target_precision × baseline mean
         //     (the largest plausible difference is smaller than we care about)
         //
-        // For standalone (1 benchmark): individual precision check.
+        // For single-benchmark groups: individual precision check.
         //
         // Stop when ALL pairs are resolved.
         if config.auto_rounds
@@ -502,7 +502,7 @@ fn run_comparison_group(
             // and compare across runs.
 
             let converged = if n_benchmarks < 2 {
-                // Standalone: individual precision
+                // Single-benchmark group: individual precision
                 let (mean, std_dev) = streaming_mean_stddev(&samples[0], &iters_per_round);
                 mean.abs() < f64::EPSILON
                     || (1.96 * std_dev / ((n as f64).sqrt() * mean.abs()) < config.target_precision)

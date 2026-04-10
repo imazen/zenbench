@@ -10,7 +10,7 @@ Interleaved microbenchmarking crate for Rust. `#![forbid(unsafe_code)]`, MSRV 1.
 src/
   lib.rs       — public API, main! macro, prelude
   bench.rs     — Suite, BenchGroup, GroupConfig, Bencher, BenchFn
-  engine.rs    — Engine, run_comparison_group, run_standalone, convergence logic
+  engine.rs    — Engine, run_comparison_group, convergence logic
   results.rs   — SuiteResult, ComparisonResult, BenchmarkResult, to_llm/csv/markdown
   report.rs    — print_report terminal renderer (ANSI tables, bar charts, footnotes)
   format.rs    — format_ns, ns_unit, format_ns_range helpers

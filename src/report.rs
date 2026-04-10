@@ -159,7 +159,7 @@ pub fn detect_style() -> ReportStyle {
     ReportStyle::Tree // default: tree
 }
 
-/// Print all comparison groups and standalones (no header/footer).
+/// Print all comparison groups (no header/footer).
 #[allow(non_snake_case)]
 fn print_report_body(result: &SuiteResult) {
     let c = should_color(&std::io::stderr());
@@ -1183,6 +1183,29 @@ fn print_group_tree(comp: &ComparisonResult, _timer_res: u64) {
     let has_subgroups = rows.iter().any(|r| r.subgroup.is_some());
     let prefix_w = if has_subgroups { 6 } else { 3 }; // "├─ " or "│  ╰─ "
     let left_col_w = prefix_w + name_w;
+
+    // Single-benchmark group with matching name: compact inline format
+    // "  overhead  0.20 ±0.01ns  [0.19–0.22]ns  30 rounds × 1M calls"
+    if rows.len() == 1 && comp.benchmarks.len() == 1 && comp.benchmarks[0].name == comp.group_name {
+        let row = &rows[0];
+        let tp_col = if has_throughput {
+            format!("  {CYAN}{}{RESET}", row.tp_str)
+        } else {
+            String::new()
+        };
+        eprintln!();
+        eprintln!(
+            "  {BOLD}{}{RESET}  {}{DIM}{mean_unit}{RESET}  {DIM}{}{RESET}{tp_col}{YELLOW}{}{RESET}  {DIM}{meta}{RESET}",
+            comp.group_name, row.mean_mad_str, row.ci_str, row.markers,
+        );
+        // Print footnotes
+        if !footnotes.is_empty() {
+            for (i, note) in footnotes.iter().enumerate() {
+                eprintln!("  {YELLOW}[{}]{RESET} {DIM}{note}{RESET}", i + 1);
+            }
+        }
+        return;
+    }
 
     // Print group header
     eprintln!();
