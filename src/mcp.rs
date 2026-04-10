@@ -541,30 +541,6 @@ fn tool_compare_results(args: &Value) -> Result<String, String> {
         }
     }
 
-    // Compare standalones
-    for cand_bench in &candidate.standalones {
-        if let Some(base_bench) = baseline
-            .standalones
-            .iter()
-            .find(|b| b.name == cand_bench.name)
-        {
-            let pct = if base_bench.summary.mean.abs() > f64::EPSILON {
-                (cand_bench.summary.mean - base_bench.summary.mean) / base_bench.summary.mean
-                    * 100.0
-            } else {
-                0.0
-            };
-            comparisons.push(serde_json::json!({
-                "benchmark": cand_bench.name,
-                "baseline_mean_ns": base_bench.summary.mean,
-                "candidate_mean_ns": cand_bench.summary.mean,
-                "pct_change": pct,
-                "baseline_formatted": crate::format::format_ns(base_bench.summary.mean),
-                "candidate_formatted": crate::format::format_ns(cand_bench.summary.mean),
-            }));
-        }
-    }
-
     serde_json::to_string_pretty(&comparisons).map_err(|e| format!("Serialization error: {e}"))
 }
 

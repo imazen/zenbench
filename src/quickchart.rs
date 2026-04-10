@@ -902,7 +902,6 @@ mod tests {
                 ],
                 None,
             )],
-            standalones: Vec::new(),
             total_time: std::time::Duration::from_secs(5),
             gate_waits: 0,
             gate_wait_time: std::time::Duration::ZERO,
@@ -911,6 +910,7 @@ mod tests {
             loop_overhead_ns: 0.5,
             testbed: None,
             calibration: None,
+            ..Default::default()
         };
         let md = suite.to_quickchart_markdown(&QuickChartConfig::default());
         assert!(md.starts_with("![Sort](https://quickchart.io/chart?"));

@@ -18,7 +18,6 @@ fn empty_suite() {
         // no benchmarks at all
     });
     assert!(result.comparisons.is_empty());
-    assert!(result.standalones.is_empty());
 }
 
 #[test]
@@ -45,12 +44,93 @@ fn empty_group_skipped() {
 }
 
 #[test]
-fn standalone_benchmark() {
+fn single_bench_creates_group() {
     let result = run_gated(disabled_gate(), |suite| {
-        suite.bench("standalone", |b| b.iter(|| black_box(1u64)));
+        suite.bench("single", |b| b.iter(|| black_box(1u64)));
     });
-    assert_eq!(result.standalones.len(), 1);
-    assert!(result.standalones[0].summary.mean > 0.0);
+    let comp = result
+        .comparisons
+        .iter()
+        .find(|c| c.group_name == "single")
+        .unwrap();
+    assert_eq!(comp.benchmarks.len(), 1);
+    assert!(comp.benchmarks[0].summary.mean > 0.0);
+}
+
+// ── suite.bench() unification edge cases ──────────────────────────
+
+#[test]
+fn bench_group_name_equals_bench_name() {
+    let result = run_gated(disabled_gate(), |suite| {
+        suite.bench("same_name", |b| b.iter(|| black_box(1u64)));
+    });
+    let comp = &result.comparisons[0];
+    assert_eq!(comp.group_name, "same_name");
+    assert_eq!(comp.benchmarks[0].name, "same_name");
+}
+
+#[test]
+fn bench_with_empty_name() {
+    let result = run_gated(disabled_gate(), |suite| {
+        suite.bench("", |b| b.iter(|| black_box(1u64)));
+    });
+    assert_eq!(result.comparisons.len(), 1);
+    assert_eq!(result.comparisons[0].group_name, "");
+    assert_eq!(result.comparisons[0].benchmarks[0].name, "");
+}
+
+#[test]
+fn bench_with_special_chars_in_name() {
+    let result = run_gated(disabled_gate(), |suite| {
+        suite.bench("decode/jpeg (4K×2K)", |b| b.iter(|| black_box(1u64)));
+    });
+    let comp = &result.comparisons[0];
+    assert_eq!(comp.group_name, "decode/jpeg (4K×2K)");
+}
+
+#[test]
+fn bench_produces_no_analyses() {
+    // Single-bench group has no pairs to analyze
+    let result = run_gated(disabled_gate(), |suite| {
+        suite.bench("solo", |b| b.iter(|| black_box(1u64)));
+    });
+    let comp = &result.comparisons[0];
+    assert!(
+        comp.analyses.is_empty(),
+        "single-bench group should have no paired analyses"
+    );
+}
+
+#[test]
+#[allow(deprecated)]
+fn standalones_field_always_empty_for_new_results() {
+    let result = run_gated(disabled_gate(), |suite| {
+        suite.bench("x", |b| b.iter(|| black_box(1u64)));
+        suite.compare("y", |g| {
+            g.config().max_rounds(5).auto_rounds(false);
+            g.bench("a", |b| b.iter(|| black_box(2u64)));
+        });
+    });
+    assert!(
+        result.standalones.is_empty(),
+        "standalones should always be empty for new results"
+    );
+    assert_eq!(result.comparisons.len(), 2);
+}
+
+#[test]
+fn many_bench_calls_all_produce_groups() {
+    let result = run_gated(disabled_gate(), |suite| {
+        for i in 0..10 {
+            let name = format!("bench_{i}");
+            suite.bench(name, move |b| b.iter(|| black_box(i as u64)));
+        }
+    });
+    assert_eq!(result.comparisons.len(), 10);
+    for (i, comp) in result.comparisons.iter().enumerate() {
+        assert_eq!(comp.group_name, format!("bench_{i}"));
+        assert_eq!(comp.benchmarks.len(), 1);
+    }
 }
 
 // ── Config edge cases ──────────────────────────────────────────────

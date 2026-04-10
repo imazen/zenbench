@@ -27,7 +27,7 @@ impl std::fmt::Display for RunId {
     }
 }
 
-/// Result of a single benchmark (standalone or within a group).
+/// Result of a single benchmark within a group.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct BenchmarkResult {
@@ -145,6 +145,14 @@ pub struct SuiteResult {
     pub git_hash: Option<String>,
     pub ci_environment: Option<String>,
     pub comparisons: Vec<ComparisonResult>,
+    /// Legacy field — always empty for new results. `suite.bench()` now creates
+    /// single-benchmark groups in `comparisons`. Kept for JSON deserialization
+    /// of old saved results; [`SuiteResult::load`] auto-promotes these into
+    /// `comparisons`.
+    #[deprecated(
+        since = "0.1.5",
+        note = "standalones are now single-benchmark groups in `comparisons`"
+    )]
     pub standalones: Vec<BenchmarkResult>,
     #[serde(with = "duration_serde")]
     pub total_time: Duration,
@@ -172,6 +180,7 @@ pub struct SuiteResult {
 }
 
 impl Default for SuiteResult {
+    #[allow(deprecated)] // standalones field kept for serde compat
     fn default() -> Self {
         Self {
             run_id: RunId(String::new()),
@@ -193,6 +202,25 @@ impl Default for SuiteResult {
 }
 
 impl SuiteResult {
+    /// All benchmark results as comparison groups, including legacy standalones
+    /// promoted to single-benchmark groups.
+    pub fn all_comparisons(&self) -> Vec<&ComparisonResult> {
+        self.comparisons.iter().collect()
+    }
+
+    /// Promote legacy standalone results into single-benchmark ComparisonResults.
+    /// Used when loading old saved results that have the standalones field populated.
+    #[allow(deprecated)] // intentional access to legacy field
+    pub fn promote_standalones(&mut self) {
+        for bench in std::mem::take(&mut self.standalones) {
+            self.comparisons.push(ComparisonResult {
+                group_name: bench.name.clone(),
+                benchmarks: vec![bench],
+                ..Default::default()
+            });
+        }
+    }
+
     /// Save results to a JSON file.
     pub fn save(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
         let json = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
@@ -200,9 +228,14 @@ impl SuiteResult {
     }
 
     /// Load results from a JSON file.
+    ///
+    /// Automatically promotes legacy standalone benchmarks into single-benchmark
+    /// comparison groups for uniform handling.
     pub fn load(path: impl AsRef<Path>) -> std::io::Result<Self> {
         let json = std::fs::read_to_string(path)?;
-        serde_json::from_str(&json).map_err(std::io::Error::other)
+        let mut result: Self = serde_json::from_str(&json).map_err(std::io::Error::other)?;
+        result.promote_standalones();
+        Ok(result)
     }
 
     /// Print a human-readable report to stderr (with ANSI colors).
@@ -287,7 +320,12 @@ impl SuiteResult {
                 let s = &bench.summary;
 
                 // Section 1: Identity
-                let mut identity = vec![format!("group={}", llm_quote(&comp.group_name))];
+                // Omit group= when it's a single-bench group with matching name
+                let is_single = comp.benchmarks.len() == 1 && bench.name == comp.group_name;
+                let mut identity = Vec::new();
+                if !is_single {
+                    identity.push(format!("group={}", llm_quote(&comp.group_name)));
+                }
                 if let Some(sg) = &bench.subgroup {
                     identity.push(format!("subgroup={}", llm_quote(sg)));
                 }
@@ -387,27 +425,6 @@ impl SuiteResult {
             }
         }
 
-        // Standalone benchmarks
-        for bench in &self.standalones {
-            let s = &bench.summary;
-            let identity = format!("benchmark={}", llm_quote(&bench.name));
-            let measurement = format!(
-                "min={} mean={} median={} mad={}",
-                crate::format::format_ns(s.min),
-                crate::format::format_ns(s.mean),
-                crate::format::format_ns(s.median),
-                crate::format::format_ns(s.mad),
-            );
-            let mut meta = format!("n={} cv={:.1}%", s.n, s.cv() * 100.0);
-            if bench.cold_start_ns > 0.0 {
-                meta.push_str(&format!(
-                    " cold={}",
-                    crate::format::format_ns(bench.cold_start_ns),
-                ));
-            }
-            out.push_str(&format!("{identity}  |  {measurement}  |  {meta}\n"));
-        }
-
         out
     }
 
@@ -429,6 +446,38 @@ impl SuiteResult {
 
         // Comparison groups
         for comp in &self.comparisons {
+            // Single-bench group with matching name: compact one-liner
+            let is_single =
+                comp.benchmarks.len() == 1 && comp.benchmarks[0].name == comp.group_name;
+            if is_single {
+                let bench = &comp.benchmarks[0];
+                let calls_str = if comp.iterations_per_sample == 1 {
+                    "1 call".to_string()
+                } else {
+                    format!("{} calls", comp.iterations_per_sample)
+                };
+                let tp_str = comp
+                    .throughput
+                    .as_ref()
+                    .map(|t| {
+                        format!(
+                            " · {}",
+                            t.format(bench.summary.mean, comp.throughput_unit.as_deref())
+                        )
+                    })
+                    .unwrap_or_default();
+                out.push_str(&format!(
+                    "**{}** — {} (min: {}){} · {} rounds \u{d7} {}\n\n",
+                    bench.name,
+                    format_ns(bench.summary.mean),
+                    format_ns(bench.summary.min),
+                    tp_str,
+                    comp.completed_rounds,
+                    calls_str,
+                ));
+                continue;
+            }
+
             out.push_str(&format!("## {}\n\n", comp.group_name));
 
             // Methodology line
@@ -588,21 +637,6 @@ impl SuiteResult {
             }
 
             out.push('\n');
-        }
-
-        // Standalone benchmarks
-        if !self.standalones.is_empty() {
-            out.push_str("## Standalone\n\n");
-            out.push_str("| Benchmark | Min | Mean |\n");
-            out.push_str("|-----------|-----|------|\n");
-            for bench in &self.standalones {
-                out.push_str(&format!(
-                    "| {} | {} | {} |\n",
-                    bench.name,
-                    format_ns(bench.summary.min),
-                    format_ns(bench.summary.mean),
-                ));
-            }
         }
 
         out
@@ -777,53 +811,6 @@ impl SuiteResult {
                 }
                 out.push('\n');
             }
-        }
-
-        // Standalone benchmarks
-        for bench in &self.standalones {
-            let (cpu_mean, cpu_eff) = bench
-                .cpu_summary
-                .as_ref()
-                .map(|c| {
-                    let eff = if bench.summary.mean > 0.0 {
-                        c.mean / bench.summary.mean
-                    } else {
-                        0.0
-                    };
-                    (format!("{:.2}", c.mean), format!("{eff:.4}"))
-                })
-                .unwrap_or_else(|| (String::new(), String::new()));
-
-            let cold = if bench.cold_start_ns > 0.0 {
-                format!("{:.2}", bench.cold_start_ns)
-            } else {
-                String::new()
-            };
-
-            let subgroup = bench
-                .subgroup
-                .as_deref()
-                .map(csv_escape)
-                .unwrap_or_default();
-
-            // group is empty for standalones; comparison columns empty
-            out.push_str(&format!(
-                ",{},{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{},{:.4},{},{},{},,,,,,,,,,,{:.0}\n",
-                csv_escape(&bench.name),
-                subgroup,
-                bench.summary.mean,
-                bench.summary.std_dev(),
-                bench.summary.median,
-                bench.summary.mad,
-                bench.summary.min,
-                bench.summary.max,
-                bench.summary.n,
-                bench.summary.cv(),
-                cold,
-                cpu_mean,
-                cpu_eff,
-                bench.timer_ticks_per_sample,
-            ));
         }
 
         out
@@ -1015,7 +1002,7 @@ mod tests {
 
     /// A suite with a real PairedAnalysis so vs_base fields are populated.
     fn make_suite_result_with_analyses() -> SuiteResult {
-        use crate::stats::{PairedAnalysis, Summary};
+        use crate::stats::PairedAnalysis;
 
         // Build a PairedAnalysis from real samples so ci_median is populated.
         let base_samples: Vec<f64> = (0..100).map(|_| 5_000_000.0_f64).collect();
@@ -1044,12 +1031,6 @@ mod tests {
                 analyses: vec![("zenflate".to_string(), "libdeflate".to_string(), analysis)],
                 completed_rounds: 50,
                 iterations_per_sample: 10,
-                ..Default::default()
-            }],
-            standalones: vec![BenchmarkResult {
-                name: "standalone_bench".to_string(),
-                summary: Summary::from_slice(&[1_000.0, 1_100.0, 900.0, 1_050.0]),
-                cold_start_ns: 5_000.0,
                 ..Default::default()
             }],
             total_time: Duration::from_secs(3),
@@ -1135,20 +1116,6 @@ mod tests {
         assert!(
             baseline_line.contains("cold="),
             "row with nonzero cold_start_ns should have cold= field, got: {baseline_line}"
-        );
-    }
-
-    #[test]
-    fn llm_output_standalone_cold_start_present() {
-        let result = make_suite_result_with_analyses();
-        let llm = result.to_llm();
-        let standalone_line = llm
-            .lines()
-            .find(|l| l.contains("benchmark=standalone_bench"))
-            .expect("should have standalone_bench line");
-        assert!(
-            standalone_line.contains("cold="),
-            "standalone with nonzero cold_start_ns should show cold=, got: {standalone_line}"
         );
     }
 
@@ -1286,6 +1253,119 @@ mod tests {
             cols[vs_base_pct_col].is_empty(),
             "vs_base_pct should be empty for baseline row, got: {base_row}"
         );
+    }
+
+    // ── Legacy standalone promotion tests ─────────────────────────
+
+    #[test]
+    #[allow(deprecated)]
+    fn promote_standalones_moves_to_comparisons() {
+        let mut result = SuiteResult {
+            standalones: vec![
+                BenchmarkResult {
+                    name: "legacy_a".to_string(),
+                    summary: make_summary(100.0),
+                    ..Default::default()
+                },
+                BenchmarkResult {
+                    name: "legacy_b".to_string(),
+                    summary: make_summary(200.0),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        assert_eq!(result.standalones.len(), 2);
+        result.promote_standalones();
+        assert!(
+            result.standalones.is_empty(),
+            "standalones should be drained"
+        );
+        assert_eq!(result.comparisons.len(), 2);
+        assert_eq!(result.comparisons[0].group_name, "legacy_a");
+        assert_eq!(result.comparisons[0].benchmarks.len(), 1);
+        assert_eq!(result.comparisons[0].benchmarks[0].name, "legacy_a");
+        assert_eq!(result.comparisons[1].group_name, "legacy_b");
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn promote_standalones_appends_to_existing_comparisons() {
+        let mut result = SuiteResult {
+            comparisons: vec![ComparisonResult {
+                group_name: "existing_group".to_string(),
+                benchmarks: vec![BenchmarkResult {
+                    name: "bench_a".to_string(),
+                    summary: make_summary(50.0),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            standalones: vec![BenchmarkResult {
+                name: "legacy_c".to_string(),
+                summary: make_summary(300.0),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        result.promote_standalones();
+        assert_eq!(result.comparisons.len(), 2);
+        assert_eq!(result.comparisons[0].group_name, "existing_group");
+        assert_eq!(result.comparisons[1].group_name, "legacy_c");
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn promote_standalones_noop_when_empty() {
+        let mut result = SuiteResult::default();
+        result.promote_standalones();
+        assert!(result.comparisons.is_empty());
+        assert!(result.standalones.is_empty());
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn json_roundtrip_with_legacy_standalones() {
+        let original = SuiteResult {
+            run_id: RunId("roundtrip-test".to_string()),
+            standalones: vec![BenchmarkResult {
+                name: "old_bench".to_string(),
+                summary: make_summary(42.0),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        assert!(json.contains("old_bench"), "JSON should contain standalone");
+
+        // Simulating SuiteResult::load() which calls promote_standalones
+        let mut loaded: SuiteResult = serde_json::from_str(&json).unwrap();
+        loaded.promote_standalones();
+        assert!(loaded.standalones.is_empty());
+        assert_eq!(loaded.comparisons.len(), 1);
+        assert_eq!(loaded.comparisons[0].group_name, "old_bench");
+        assert_eq!(loaded.comparisons[0].benchmarks[0].summary.mean, 42.0);
+    }
+
+    #[test]
+    fn json_roundtrip_no_standalones() {
+        let original = SuiteResult {
+            run_id: RunId("clean-test".to_string()),
+            comparisons: vec![ComparisonResult {
+                group_name: "grp".to_string(),
+                benchmarks: vec![BenchmarkResult {
+                    name: "b".to_string(),
+                    summary: make_summary(10.0),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let loaded: SuiteResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.comparisons.len(), 1);
+        assert_eq!(loaded.comparisons[0].group_name, "grp");
     }
 }
 

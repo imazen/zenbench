@@ -34,6 +34,7 @@ pub(crate) fn ns_unit(mean_abs: f64) -> (f64, &'static str, usize) {
 }
 
 /// Format a [lo mean hi] range with shared unit and aligned columns.
+#[allow(dead_code)] // Used in tests, available for future use
 pub(crate) fn format_ns_range(lo: f64, mean: f64, hi: f64) -> String {
     let (divisor, unit, dp) = ns_unit(mean.abs());
     let vals: Vec<String> = [lo, mean, hi]

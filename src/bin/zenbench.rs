@@ -844,28 +844,6 @@ fn print_comparison(baseline: &zenbench::SuiteResult, candidate: &zenbench::Suit
         }
     }
 
-    // Compare standalone benchmarks by name
-    let mut has_standalone = false;
-    for cand_bench in &candidate.standalones {
-        if let Some(base_bench) = baseline
-            .standalones
-            .iter()
-            .find(|b| b.name == cand_bench.name)
-        {
-            if !has_standalone {
-                eprintln!();
-                eprintln!("  standalone:");
-                eprintln!("  ───────────────────────────────────────────────────────────");
-                has_standalone = true;
-            }
-            print_bench_diff(
-                &cand_bench.name,
-                base_bench.summary.mean,
-                cand_bench.summary.mean,
-            );
-        }
-    }
-
     eprintln!();
     eprintln!("═══════════════════════════════════════════════════════════════");
     eprintln!();

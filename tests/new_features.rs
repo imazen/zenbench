@@ -730,9 +730,9 @@ fn per_benchmark_ci_in_llm_output() {
 }
 
 #[test]
-fn standalone_benchmark_has_ci() {
+fn single_bench_has_ci() {
     let result = run_gated(disabled_gate(), |suite| {
-        suite.bench("standalone_ci", |b| {
+        suite.bench("ci_test", |b| {
             b.iter(|| {
                 let mut v = 0u64;
                 for i in 0..100 {
@@ -742,9 +742,14 @@ fn standalone_benchmark_has_ci() {
             })
         });
     });
+    let comp = result
+        .comparisons
+        .iter()
+        .find(|c| c.group_name == "ci_test")
+        .unwrap();
     assert!(
-        result.standalones[0].mean_ci.is_some(),
-        "standalone benchmarks should also get per-benchmark CIs"
+        comp.benchmarks[0].mean_ci.is_some(),
+        "single-bench groups should get per-benchmark CIs"
     );
 }
 
