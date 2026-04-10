@@ -828,9 +828,14 @@ fn print_comparison(baseline: &zenbench::SuiteResult, candidate: &zenbench::Suit
             .iter()
             .find(|g| g.group_name == cand_group.group_name)
         {
-            eprintln!();
-            eprintln!("  group: {}", cand_group.group_name);
-            eprintln!("  ───────────────────────────────────────────────────────────");
+            let is_single = cand_group.benchmarks.len() == 1
+                && cand_group.benchmarks[0].name == cand_group.group_name;
+
+            if !is_single {
+                eprintln!();
+                eprintln!("  group: {}", cand_group.group_name);
+                eprintln!("  ───────────────────────────────────────────────────────────");
+            }
 
             for cand_bench in &cand_group.benchmarks {
                 if let Some(base_bench) = base_group

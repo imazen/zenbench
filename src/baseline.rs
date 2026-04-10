@@ -128,6 +128,16 @@ pub fn delete_baseline(name: &str) -> std::io::Result<()> {
     std::fs::remove_file(path)
 }
 
+/// Format a (group, bench) key for display.
+/// When group == bench (single-bench group from suite.bench()), show just the name.
+fn format_bench_key(group: &str, name: &str) -> String {
+    if group == name {
+        name.to_string()
+    } else {
+        format!("{group}::{name}")
+    }
+}
+
 /// Compare a new run against a saved baseline.
 ///
 /// `max_regression_pct`: maximum allowed regression as a percentage (e.g., 5.0 = 5%).
@@ -254,13 +264,13 @@ pub fn compare_against_baseline(
                 improved,
             });
         } else {
-            missing_benchmarks.push(format!("{}::{}", key.0, key.1));
+            missing_benchmarks.push(format_bench_key(&key.0, &key.1));
         }
     }
 
     for key in current_map.keys() {
         if !baseline_map.contains_key(key) {
-            new_benchmarks.push(format!("{}::{}", key.0, key.1));
+            new_benchmarks.push(format_bench_key(&key.0, &key.1));
         }
     }
 
@@ -305,13 +315,10 @@ pub fn print_comparison_report(comparison: &BaselineComparison) {
             "  unchanged"
         };
 
+        let display_name = format_bench_key(&delta.group, &delta.name);
         eprintln!(
             "  {:<30} {:>9.1}ns → {:>9.1}ns  {:>+7.2}%  {}",
-            format!("{}::{}", delta.group, delta.name),
-            delta.baseline_mean,
-            delta.new_mean,
-            delta.pct_change,
-            marker,
+            display_name, delta.baseline_mean, delta.new_mean, delta.pct_change, marker,
         );
     }
 
