@@ -955,7 +955,7 @@ mod tests {
 
     /// A suite with a real PairedAnalysis so vs_base fields are populated.
     fn make_suite_result_with_analyses() -> SuiteResult {
-        use crate::stats::{PairedAnalysis, Summary};
+        use crate::stats::PairedAnalysis;
 
         // Build a PairedAnalysis from real samples so ci_median is populated.
         let base_samples: Vec<f64> = (0..100).map(|_| 5_000_000.0_f64).collect();
