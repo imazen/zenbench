@@ -76,8 +76,6 @@ impl Throughput {
 pub struct Suite {
     pub(crate) groups: Vec<BenchGroup>,
     pub(crate) group_filter: Option<String>,
-    /// Configuration for standalone benchmarks (not in a comparison group).
-    pub(crate) standalone_config: GroupConfig,
     /// Pre-computed results from criterion-compat immediate mode.
     #[cfg(feature = "criterion-compat")]
     pub(crate) precomputed_comparisons: Vec<crate::results::ComparisonResult>,
@@ -88,7 +86,6 @@ impl Suite {
         Self {
             groups: Vec::new(),
             group_filter: None,
-            standalone_config: GroupConfig::default(),
             #[cfg(feature = "criterion-compat")]
             precomputed_comparisons: Vec::new(),
         }
@@ -117,7 +114,7 @@ impl Suite {
         self.group(name, f);
     }
 
-    /// Shorthand: benchmark a single function (no group, no comparison).
+    /// Shorthand: benchmark a single function. Creates a single-benchmark group.
     ///
     /// ```
     /// # use zenbench::prelude::*;
@@ -161,23 +158,6 @@ impl Suite {
         self.group(name, move |g| {
             g.bench(bench_name, f);
         });
-    }
-
-    /// Configure the execution parameters for standalone benchmarks.
-    ///
-    /// Standalone benchmarks (`suite.bench(...)`) normally run with
-    /// `GroupConfig::default()`. Use this to override settings like
-    /// `max_rounds`, `max_time`, or `warmup_time`.
-    ///
-    /// ```
-    /// # use zenbench::prelude::*;
-    /// # fn example(suite: &mut Suite) {
-    /// suite.standalone_config().max_time(std::time::Duration::from_secs(3));
-    /// suite.bench("quick", |b| b.iter(|| std::hint::black_box(42)));
-    /// # }
-    /// ```
-    pub fn standalone_config(&mut self) -> &mut GroupConfig {
-        &mut self.standalone_config
     }
 
     /// Set a group filter — only groups whose name matches or contains
@@ -1127,35 +1107,5 @@ impl<I, S: FnMut() -> I> InputBencher<'_, I, S> {
         {
             self.bencher.cpu_ns = total_cpu_ns;
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn standalone_config_defaults_match_group_config() {
-        let suite = Suite::new();
-        let default_config = GroupConfig::default();
-        assert_eq!(
-            suite.standalone_config.max_rounds,
-            default_config.max_rounds
-        );
-        assert_eq!(suite.standalone_config.max_time, default_config.max_time);
-    }
-
-    #[test]
-    fn standalone_config_is_mutable() {
-        let mut suite = Suite::new();
-        suite.standalone_config().max_rounds(50);
-        suite
-            .standalone_config()
-            .max_time(std::time::Duration::from_secs(2));
-        assert_eq!(suite.standalone_config.max_rounds, 50);
-        assert_eq!(
-            suite.standalone_config.max_time,
-            std::time::Duration::from_secs(2)
-        );
     }
 }
