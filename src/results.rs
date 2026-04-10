@@ -145,6 +145,14 @@ pub struct SuiteResult {
     pub git_hash: Option<String>,
     pub ci_environment: Option<String>,
     pub comparisons: Vec<ComparisonResult>,
+    /// Legacy field — always empty for new results. `suite.bench()` now creates
+    /// single-benchmark groups in `comparisons`. Kept for JSON deserialization
+    /// of old saved results; [`SuiteResult::load`] auto-promotes these into
+    /// `comparisons`.
+    #[deprecated(
+        since = "0.1.5",
+        note = "standalones are now single-benchmark groups in `comparisons`"
+    )]
     pub standalones: Vec<BenchmarkResult>,
     #[serde(with = "duration_serde")]
     pub total_time: Duration,
@@ -172,6 +180,7 @@ pub struct SuiteResult {
 }
 
 impl Default for SuiteResult {
+    #[allow(deprecated)] // standalones field kept for serde compat
     fn default() -> Self {
         Self {
             run_id: RunId(String::new()),
@@ -201,6 +210,7 @@ impl SuiteResult {
 
     /// Promote legacy standalone results into single-benchmark ComparisonResults.
     /// Used when loading old saved results that have the standalones field populated.
+    #[allow(deprecated)] // intentional access to legacy field
     pub fn promote_standalones(&mut self) {
         for bench in std::mem::take(&mut self.standalones) {
             self.comparisons.push(ComparisonResult {

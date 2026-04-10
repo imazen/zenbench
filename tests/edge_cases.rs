@@ -18,7 +18,6 @@ fn empty_suite() {
         // no benchmarks at all
     });
     assert!(result.comparisons.is_empty());
-    assert!(result.standalones.is_empty());
 }
 
 #[test]
