@@ -188,16 +188,6 @@ pub fn compare_against_baseline(
             );
         }
     }
-    for bench in &baseline.standalones {
-        baseline_map.insert(
-            ("_standalone".to_string(), bench.name.clone()),
-            BenchData {
-                mean: bench.summary.mean,
-                variance: bench.summary.variance,
-                n: bench.summary.n,
-            },
-        );
-    }
 
     let mut current_map: HashMap<(String, String), BenchData> = HashMap::new();
     for comp in &current.comparisons {
@@ -211,16 +201,6 @@ pub fn compare_against_baseline(
                 },
             );
         }
-    }
-    for bench in &current.standalones {
-        current_map.insert(
-            ("_standalone".to_string(), bench.name.clone()),
-            BenchData {
-                mean: bench.summary.mean,
-                variance: bench.summary.variance,
-                n: bench.summary.n,
-            },
-        );
     }
 
     let mut benchmarks = Vec::new();

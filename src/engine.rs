@@ -133,7 +133,6 @@ impl Engine {
         // Include pre-computed results from criterion-compat immediate mode
         #[cfg(feature = "criterion-compat")]
         comparisons.extend(std::mem::take(&mut self.suite.precomputed_comparisons));
-        let mut standalones = Vec::new();
         let mut total_gate_waits = 0usize;
         let mut total_gate_wait_time = std::time::Duration::ZERO;
 
@@ -207,22 +206,6 @@ impl Engine {
             }
         }
 
-        // Run standalone benchmarks
-        for bench in &mut self.suite.standalones {
-            let mut standalone_gate = ResourceGate::new(self.gate_config.clone());
-            let result = run_standalone(
-                bench,
-                &mut standalone_gate,
-                &GroupConfig::default(),
-                loop_overhead_ns,
-                tsc_ticks_per_ns,
-                timer_res,
-            );
-            total_gate_waits += standalone_gate.total_waits();
-            total_gate_wait_time += standalone_gate.total_wait_time();
-            standalones.push(result);
-        }
-
         let total_time = start.elapsed();
 
         let result = SuiteResult {
@@ -231,7 +214,6 @@ impl Engine {
             git_hash,
             ci_environment: ci,
             comparisons,
-            standalones,
             total_time,
             gate_waits: total_gate_waits,
             gate_wait_time: total_gate_wait_time,
@@ -749,83 +731,6 @@ fn run_comparison_group(
         expect_sub_ns: config.expect_sub_ns,
         cold_start: config.cold_start,
         iterations_per_sample,
-    }
-}
-
-/// Run a standalone benchmark (not compared).
-fn run_standalone(
-    bench: &mut crate::bench::Benchmark,
-    gate: &mut ResourceGate,
-    config: &GroupConfig,
-    loop_overhead_ns: f64,
-    tsc_ticks_per_ns: Option<f64>,
-    timer_resolution_ns: u64,
-) -> BenchmarkResult {
-    gate.wait_for_clear();
-
-    let (iterations, _cold_start_ns) =
-        estimate_iterations(&mut bench.func, config, timer_resolution_ns);
-    let mut samples = Vec::with_capacity(config.max_rounds);
-    let mut cpu_samples_vec = Vec::with_capacity(config.max_rounds);
-
-    let start = Instant::now();
-    let mut measurement_time = std::time::Duration::ZERO;
-    for round in 0..config.max_rounds {
-        if start.elapsed() >= config.max_wall_time {
-            break;
-        }
-        if round >= config.min_rounds && measurement_time >= config.max_time {
-            break;
-        }
-        let wall_multiplier = if round < config.min_rounds { 5 } else { 3 };
-        let wall_remaining = config
-            .max_time
-            .saturating_mul(wall_multiplier)
-            .saturating_sub(start.elapsed());
-        if round >= config.min_rounds && wall_remaining.is_zero() {
-            break;
-        }
-        gate.wait_for_clear_with_deadline(Some(
-            wall_remaining.max(std::time::Duration::from_secs(1)),
-        ));
-
-        let sample_start = Instant::now();
-        let mut bencher = Bencher::new_with_tsc(iterations, tsc_ticks_per_ns);
-        bench.func.call(&mut bencher);
-        measurement_time += sample_start.elapsed();
-        let overhead_total = (loop_overhead_ns * iterations as f64) as u64;
-        let compensated = bencher.elapsed_ns.saturating_sub(overhead_total).max(1);
-        samples.push(compensated as f64 / iterations as f64);
-        cpu_samples_vec.push(bencher.cpu_ns as f64 / iterations as f64);
-    }
-
-    let summary = Summary::from_slice(&samples);
-    let cpu_summary = if cpu_samples_vec.iter().any(|&v| v > 0.0) {
-        Some(Summary::from_slice(&cpu_samples_vec))
-    } else {
-        None
-    };
-
-    let mean_ci = crate::stats::MeanCi::from_samples(&samples, config.bootstrap_resamples);
-
-    let timer_ticks = if timer_resolution_ns > 0 {
-        (summary.mean * iterations as f64) / timer_resolution_ns as f64
-    } else {
-        f64::INFINITY
-    };
-
-    BenchmarkResult {
-        name: bench.name.clone(),
-        summary,
-        cpu_summary,
-        tags: bench.tags.clone(),
-        subgroup: bench.subgroup.clone(),
-        cold_start_ns: _cold_start_ns as f64,
-        slope_ns: None,
-        mean_ci,
-        timer_ticks_per_sample: timer_ticks,
-        #[cfg(feature = "alloc-profiling")]
-        alloc_stats: None,
     }
 }
 

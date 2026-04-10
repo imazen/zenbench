@@ -72,10 +72,9 @@ impl Throughput {
     }
 }
 
-/// A complete benchmark suite containing comparison groups and standalone benchmarks.
+/// A complete benchmark suite containing comparison groups.
 pub struct Suite {
     pub(crate) groups: Vec<BenchGroup>,
-    pub(crate) standalones: Vec<Benchmark>,
     pub(crate) group_filter: Option<String>,
     /// Pre-computed results from criterion-compat immediate mode.
     #[cfg(feature = "criterion-compat")]
@@ -86,7 +85,6 @@ impl Suite {
     pub fn new() -> Self {
         Self {
             groups: Vec::new(),
-            standalones: Vec::new(),
             group_filter: None,
             #[cfg(feature = "criterion-compat")]
             precomputed_comparisons: Vec::new(),
@@ -136,16 +134,29 @@ impl Suite {
         });
     }
 
-    /// Add a standalone benchmark (not compared against anything).
+    /// Add a single benchmark (not compared against anything).
+    ///
+    /// This creates a single-benchmark group. Use [`group`](Self::group)
+    /// if you need to configure throughput, timing, or other settings:
+    ///
+    /// ```
+    /// # use zenbench::prelude::*;
+    /// # fn example(suite: &mut Suite) {
+    /// suite.group("decode", |g| {
+    ///     g.throughput(Throughput::Bytes(1024));
+    ///     g.config().max_time(std::time::Duration::from_secs(3));
+    ///     g.bench("my_decoder", |b| b.iter(|| std::hint::black_box(42)));
+    /// });
+    /// # }
+    /// ```
     pub fn bench<F>(&mut self, name: impl Into<String>, f: F)
     where
         F: FnMut(&mut Bencher) + Send + 'static,
     {
-        self.standalones.push(Benchmark {
-            name: name.into(),
-            tags: Vec::new(),
-            subgroup: None,
-            func: BenchFn::new(f),
+        let name = name.into();
+        let bench_name = name.clone();
+        self.group(name, move |g| {
+            g.bench(bench_name, f);
         });
     }
 
@@ -155,10 +166,9 @@ impl Suite {
         self.group_filter = Some(filter);
     }
 
-    /// Merge another suite's groups and standalones into this one.
+    /// Merge another suite's groups into this one.
     pub fn merge(&mut self, other: Suite) {
         self.groups.extend(other.groups);
-        self.standalones.extend(other.standalones);
         #[cfg(feature = "criterion-compat")]
         self.precomputed_comparisons
             .extend(other.precomputed_comparisons);

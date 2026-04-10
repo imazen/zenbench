@@ -49,8 +49,14 @@ fn standalone_benchmark() {
     let result = run_gated(disabled_gate(), |suite| {
         suite.bench("standalone", |b| b.iter(|| black_box(1u64)));
     });
-    assert_eq!(result.standalones.len(), 1);
-    assert!(result.standalones[0].summary.mean > 0.0);
+    // suite.bench() creates a single-benchmark group
+    let comp = result
+        .comparisons
+        .iter()
+        .find(|c| c.group_name == "standalone")
+        .unwrap();
+    assert_eq!(comp.benchmarks.len(), 1);
+    assert!(comp.benchmarks[0].summary.mean > 0.0);
 }
 
 // ── Config edge cases ──────────────────────────────────────────────

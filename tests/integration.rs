@@ -372,7 +372,13 @@ fn standalone_benchmark_works() {
             b.iter(|| black_box(42u64.wrapping_mul(7)))
         });
     });
-    assert_eq!(result.standalones.len(), 1);
-    assert_eq!(result.standalones[0].name, "standalone");
-    assert!(result.standalones[0].summary.mean > 0.0);
+    // suite.bench() creates a single-benchmark group
+    let comp = result
+        .comparisons
+        .iter()
+        .find(|c| c.group_name == "standalone")
+        .unwrap();
+    assert_eq!(comp.benchmarks.len(), 1);
+    assert_eq!(comp.benchmarks[0].name, "standalone");
+    assert!(comp.benchmarks[0].summary.mean > 0.0);
 }
