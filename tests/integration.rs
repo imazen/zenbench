@@ -379,3 +379,171 @@ fn single_bench_creates_group() {
     assert_eq!(comp.benchmarks[0].name, "single");
     assert!(comp.benchmarks[0].summary.mean > 0.0);
 }
+
+// ── suite.bench() unification tests ───────────────────────────────
+
+#[test]
+fn multiple_bench_calls_create_separate_groups() {
+    let result = run_gated(GateConfig::disabled(), |suite| {
+        suite.bench("alpha", |b| b.iter(|| black_box(1u64)));
+        suite.bench("beta", |b| b.iter(|| black_box(2u64)));
+        suite.bench("gamma", |b| b.iter(|| black_box(3u64)));
+    });
+    assert_eq!(result.comparisons.len(), 3);
+    let names: Vec<&str> = result
+        .comparisons
+        .iter()
+        .map(|c| c.group_name.as_str())
+        .collect();
+    assert!(names.contains(&"alpha"));
+    assert!(names.contains(&"beta"));
+    assert!(names.contains(&"gamma"));
+}
+
+#[test]
+fn bench_and_group_coexist() {
+    let result = run_gated(GateConfig::disabled(), |suite| {
+        suite.bench("standalone_ish", |b| b.iter(|| black_box(1u64)));
+        suite.compare("comparison", |g| {
+            g.config().max_rounds(5).auto_rounds(false);
+            g.bench("fast", |b| b.iter(|| black_box(1u64)));
+            g.bench("slow", |b| {
+                b.iter(|| {
+                    let mut v = 0u64;
+                    for i in 0..100 {
+                        v = v.wrapping_add(black_box(i));
+                    }
+                    black_box(v)
+                })
+            });
+        });
+    });
+    assert_eq!(result.comparisons.len(), 2);
+    let single = result
+        .comparisons
+        .iter()
+        .find(|c| c.group_name == "standalone_ish")
+        .unwrap();
+    assert_eq!(single.benchmarks.len(), 1);
+    let multi = result
+        .comparisons
+        .iter()
+        .find(|c| c.group_name == "comparison")
+        .unwrap();
+    assert_eq!(multi.benchmarks.len(), 2);
+}
+
+#[test]
+fn bench_fn_creates_group() {
+    let result = run_gated(GateConfig::disabled(), |suite| {
+        suite.bench_fn("fib", || {
+            let mut a = 0u64;
+            let mut b = 1u64;
+            for _ in 0..20 {
+                let c = a.wrapping_add(b);
+                a = b;
+                b = c;
+            }
+            black_box(b)
+        });
+    });
+    assert_eq!(result.comparisons.len(), 1);
+    assert_eq!(result.comparisons[0].group_name, "fib");
+    assert_eq!(result.comparisons[0].benchmarks.len(), 1);
+    assert_eq!(result.comparisons[0].benchmarks[0].name, "fib");
+}
+
+#[test]
+fn single_bench_group_has_completed_rounds() {
+    let result = run_gated(GateConfig::disabled(), |suite| {
+        suite.bench("rounds_test", |b| b.iter(|| black_box(42u64)));
+    });
+    let comp = result
+        .comparisons
+        .iter()
+        .find(|c| c.group_name == "rounds_test")
+        .unwrap();
+    assert!(
+        comp.completed_rounds >= 5,
+        "should have at least min_rounds, got {}",
+        comp.completed_rounds
+    );
+    assert!(
+        comp.iterations_per_sample > 0,
+        "should have estimated iterations"
+    );
+}
+
+#[test]
+fn single_bench_group_has_mean_ci() {
+    let result = run_gated(GateConfig::disabled(), |suite| {
+        suite.bench("ci_test", |b| {
+            b.iter(|| {
+                let mut v = 0u64;
+                for i in 0..100 {
+                    v = v.wrapping_add(black_box(i));
+                }
+                black_box(v)
+            })
+        });
+    });
+    let comp = result
+        .comparisons
+        .iter()
+        .find(|c| c.group_name == "ci_test")
+        .unwrap();
+    let ci = comp.benchmarks[0].mean_ci.as_ref().expect("should have CI");
+    assert!(ci.lower > 0.0, "CI lower bound should be positive");
+    assert!(ci.upper >= ci.lower, "CI upper >= lower");
+}
+
+#[test]
+fn single_bench_group_appears_in_llm_output() {
+    let result = run_gated(GateConfig::disabled(), |suite| {
+        suite.bench("llm_visible", |b| b.iter(|| black_box(99u64)));
+    });
+    let llm = result.to_llm();
+    assert!(
+        llm.contains("group=llm_visible"),
+        "LLM output should contain group name, got:\n{llm}"
+    );
+    assert!(
+        llm.contains("benchmark=llm_visible"),
+        "LLM output should contain benchmark name, got:\n{llm}"
+    );
+}
+
+#[test]
+fn single_bench_group_appears_in_csv_output() {
+    let result = run_gated(GateConfig::disabled(), |suite| {
+        suite.bench("csv_visible", |b| b.iter(|| black_box(77u64)));
+    });
+    let csv = result.to_csv();
+    assert!(
+        csv.contains("csv_visible"),
+        "CSV output should contain benchmark name, got:\n{csv}"
+    );
+}
+
+#[test]
+fn single_bench_group_appears_in_markdown_output() {
+    let result = run_gated(GateConfig::disabled(), |suite| {
+        suite.bench("md_visible", |b| b.iter(|| black_box(55u64)));
+    });
+    let md = result.to_markdown();
+    assert!(
+        md.contains("md_visible"),
+        "Markdown output should contain benchmark name, got:\n{md}"
+    );
+}
+
+#[test]
+fn group_filter_applies_to_bench_calls() {
+    let result = run_gated(GateConfig::disabled(), |suite| {
+        suite.set_group_filter("keep".to_string());
+        suite.bench("keep", |b| b.iter(|| black_box(1u64)));
+        suite.bench("skip", |b| b.iter(|| black_box(2u64)));
+    });
+    assert_eq!(result.comparisons.len(), 1);
+    assert_eq!(result.comparisons[0].group_name, "keep");
+}

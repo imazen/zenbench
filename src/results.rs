@@ -1217,6 +1217,119 @@ mod tests {
             "vs_base_pct should be empty for baseline row, got: {base_row}"
         );
     }
+
+    // ── Legacy standalone promotion tests ─────────────────────────
+
+    #[test]
+    #[allow(deprecated)]
+    fn promote_standalones_moves_to_comparisons() {
+        let mut result = SuiteResult {
+            standalones: vec![
+                BenchmarkResult {
+                    name: "legacy_a".to_string(),
+                    summary: make_summary(100.0),
+                    ..Default::default()
+                },
+                BenchmarkResult {
+                    name: "legacy_b".to_string(),
+                    summary: make_summary(200.0),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        assert_eq!(result.standalones.len(), 2);
+        result.promote_standalones();
+        assert!(
+            result.standalones.is_empty(),
+            "standalones should be drained"
+        );
+        assert_eq!(result.comparisons.len(), 2);
+        assert_eq!(result.comparisons[0].group_name, "legacy_a");
+        assert_eq!(result.comparisons[0].benchmarks.len(), 1);
+        assert_eq!(result.comparisons[0].benchmarks[0].name, "legacy_a");
+        assert_eq!(result.comparisons[1].group_name, "legacy_b");
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn promote_standalones_appends_to_existing_comparisons() {
+        let mut result = SuiteResult {
+            comparisons: vec![ComparisonResult {
+                group_name: "existing_group".to_string(),
+                benchmarks: vec![BenchmarkResult {
+                    name: "bench_a".to_string(),
+                    summary: make_summary(50.0),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            standalones: vec![BenchmarkResult {
+                name: "legacy_c".to_string(),
+                summary: make_summary(300.0),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        result.promote_standalones();
+        assert_eq!(result.comparisons.len(), 2);
+        assert_eq!(result.comparisons[0].group_name, "existing_group");
+        assert_eq!(result.comparisons[1].group_name, "legacy_c");
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn promote_standalones_noop_when_empty() {
+        let mut result = SuiteResult::default();
+        result.promote_standalones();
+        assert!(result.comparisons.is_empty());
+        assert!(result.standalones.is_empty());
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn json_roundtrip_with_legacy_standalones() {
+        let original = SuiteResult {
+            run_id: RunId("roundtrip-test".to_string()),
+            standalones: vec![BenchmarkResult {
+                name: "old_bench".to_string(),
+                summary: make_summary(42.0),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        assert!(json.contains("old_bench"), "JSON should contain standalone");
+
+        // Simulating SuiteResult::load() which calls promote_standalones
+        let mut loaded: SuiteResult = serde_json::from_str(&json).unwrap();
+        loaded.promote_standalones();
+        assert!(loaded.standalones.is_empty());
+        assert_eq!(loaded.comparisons.len(), 1);
+        assert_eq!(loaded.comparisons[0].group_name, "old_bench");
+        assert_eq!(loaded.comparisons[0].benchmarks[0].summary.mean, 42.0);
+    }
+
+    #[test]
+    fn json_roundtrip_no_standalones() {
+        let original = SuiteResult {
+            run_id: RunId("clean-test".to_string()),
+            comparisons: vec![ComparisonResult {
+                group_name: "grp".to_string(),
+                benchmarks: vec![BenchmarkResult {
+                    name: "b".to_string(),
+                    summary: make_summary(10.0),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let loaded: SuiteResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.comparisons.len(), 1);
+        assert_eq!(loaded.comparisons[0].group_name, "grp");
+    }
 }
 
 /// Serde support for Duration via millis.
