@@ -200,12 +200,46 @@ pub fn run<F: FnOnce(&mut Suite)>(f: F) -> SuiteResult {
 /// Each "trial" is a complete suite execution: warmup, sample collection,
 /// statistics. After all trials complete, every benchmark's `summary` is
 /// replaced with a new `Summary` built from the trial-level means
-/// (`mean = median of trial means, mad = inter-trial spread, n = trials`).
+/// (`mean = mean of trial means, median = median, mad = inter-trial spread,
+/// n = trial count`). `mean_ci` is cleared because the single-trial
+/// bootstrap no longer describes the distribution the aggregated `mean`
+/// was computed over.
 ///
-/// Use this when single-run inter-process variance dominates the within-run
-/// CV — e.g. mid-latency benchmarks on noisy hosts where one OS interrupt
-/// during a 1ms sample window swings the result 5–10%. Three to five trials
-/// usually pin the median to within 1–2%.
+/// # Why trials matter beyond rounds
+///
+/// Rounds and iterations-per-sample reduce **within-process** variance:
+/// timer noise, per-sample jitter from the occasional OS interrupt, branch
+/// prediction warmup. More rounds drive that noise arbitrarily low inside
+/// one `cargo bench` invocation — but they can only attack sources of
+/// noise that *vary between samples in the same process*.
+///
+/// Trials reduce **between-process** variance: sources that are
+/// constant across all samples in one invocation but differ between
+/// invocations. Concretely:
+///
+///   * **CPU frequency state** at process startup. If the benchmark
+///     happens to start with the CPU at 4.5 GHz, every sample measures
+///     4.5 GHz performance. A later run that starts at 4.3 GHz measures
+///     a different (but self-consistent) baseline.
+///   * **Cache and TLB state** from whatever ran before.
+///   * **ASLR** → different physical memory layouts → different L1/L2
+///     conflict sets across runs.
+///   * **Branch-predictor history** keyed by the specific addresses the
+///     loader picked for the hot code this time.
+///   * **Kernel scheduling** decisions (which core, which NUMA node, when
+///     it yields, whether another process is sharing the core).
+///   * **Background processes** that happened to be active during the run.
+///
+/// Every sample in a single run sees the same "this process, this
+/// startup" state, so round count can't beat these sources down. Running
+/// the suite as N separate engine invocations and averaging is the only
+/// attack that works — and because the sources are independent across
+/// invocations, the aggregate's precision scales with `sqrt(N)` just
+/// like any other independent-sample statistical experiment.
+///
+/// In practice, a benchmark showing `mad ±0.1%` inside one run but
+/// bouncing `±10%` between runs is not measuring what it claims; it's
+/// measuring the within-run precision of a moving target.
 ///
 /// Falls back to a single `run()` when `trials <= 1`.
 ///
