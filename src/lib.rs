@@ -150,6 +150,9 @@ pub use platform::Testbed;
 pub use results::{BenchmarkResult, ComparisonResult, RunId, SuiteResult};
 pub use stats::{MeanCi, PairedAnalysis, Summary};
 
+// `ProcessAggregation`, `run_processes`, and `aggregate_processes` are
+// defined below in this file and re-exported via the module root.
+
 /// Re-export `black_box` from std for convenience.
 ///
 /// Prevents the compiler from optimizing away benchmark code.
@@ -194,89 +197,144 @@ pub fn run<F: FnOnce(&mut Suite)>(f: F) -> SuiteResult {
     engine.run()
 }
 
-/// Run a benchmark suite N times and report the **best** (lowest-mean)
-/// trial per benchmark.
+/// How to combine results when running a benchmark suite across
+/// multiple separate processes.
 ///
-/// Each "trial" is a complete suite execution: warmup, sample collection,
-/// statistics. After all trials complete, every benchmark's reported
-/// `summary` is the winning trial's `summary` (preserving its within-run
-/// n, min, max, and median), with `mad` overridden to the inter-trial
-/// spread so the reader can tell whether trials agreed or not.
+/// There is intentionally no default — callers must pick one. The
+/// correct choice depends on what you're trying to measure, and every
+/// policy answers a different question (see each variant's doc).
+#[derive(Clone, Copy, Debug)]
+pub enum ProcessAggregation {
+    /// Keep the process with the lowest mean per benchmark. The
+    /// reported `summary` is that process's full within-run summary —
+    /// `mean`, `median`, `mad`, `min`, `max`, `n`, all preserved.
+    ///
+    /// Use on shared/busy hosts, dev machines, and CI runners: noise
+    /// from co-tenants, OS interrupts, and thermal throttling only
+    /// makes a process slower, so the fastest process is the closest
+    /// honest estimate of the hardware's quiet capability.
+    ///
+    /// Caveat: best-of-N is a **biased** estimator and does not
+    /// converge as N grows — the expected min drifts downward. Don't
+    /// interpret "best of 3" as the same underlying quantity that
+    /// "best of 100" would give you. It's useful for comparing
+    /// versions of the same code on the same host with the same N,
+    /// not as a statistical measurement of true mean.
+    ///
+    /// Inter-process spread is reported as a separate footer line so
+    /// you can still tell when processes disagreed badly.
+    Best,
+    /// Replace each bench `summary` with a fresh `Summary` built from
+    /// the distribution of per-process means. The resulting `mean` is
+    /// the mean of process means, `mad` is the inter-process spread.
+    ///
+    /// Use on quiet hosts when you want expected-case performance.
+    /// Converges via CLT and is unbiased. Pays for every contaminated
+    /// process by dragging the average up — that's the point.
+    Mean,
+    /// Median of process means. Robust to one or two contaminated
+    /// processes without the downward bias of Best. A reasonable
+    /// middle ground when you can't characterize the host's noise
+    /// and don't want to argue about which policy is correct.
+    Median,
+}
+
+/// Run a benchmark suite in N separate engine invocations ("processes")
+/// and combine the per-process results under the chosen [`ProcessAggregation`]
+/// policy.
 ///
-/// See [`aggregate_trials`] for the rationale behind the min-of-trials
-/// policy. Short version: on busy hosts, noise only makes measurements
-/// slower, so the fastest trial is closest to the machine's real capability.
+/// Each "process" is a complete suite execution: warmup, calibration,
+/// sample collection, within-process statistics. The processes run
+/// sequentially inside the same OS process (no fork/exec), but each
+/// gets a fresh `Engine` / `Suite` pair, so between-process noise
+/// sources that vary run-to-run are partially reset:
 ///
-/// # Why trials matter beyond rounds
+///   * Cache/TLB state from the previous process's workload — mostly
+///     flushed because the previous process's working set gets
+///     displaced by the new warmup.
+///   * Branch predictor state — partly reset by the warmup phase,
+///     though not as thoroughly as a fresh OS process.
+///   * Round/iteration count that zenbench picks via calibration —
+///     re-estimated per process from scratch.
 ///
-/// Rounds and iterations-per-sample reduce **within-process** variance:
-/// timer noise, per-sample jitter from the occasional OS interrupt, branch
-/// prediction warmup. More rounds drive that noise arbitrarily low inside
-/// one `cargo bench` invocation — but they can only attack sources of
-/// noise that *vary between samples in the same process*.
+/// Run-to-run sources that we *can't* reset this way — CPU frequency
+/// state at OS-process startup, ASLR layout, kernel scheduling
+/// affinity — require actually launching separate OS processes.
+/// `run_processes` does NOT do that. For those, use a shell loop or
+/// external `just bench-all` wrapper that invokes `cargo bench` N
+/// times and feeds the results into `aggregate_processes`.
 ///
-/// Trials reduce **between-process** variance: sources that are
-/// constant across all samples in one invocation but differ between
-/// invocations. Concretely:
+/// # Why a policy is required
 ///
-///   * **CPU frequency state** at process startup. If the benchmark
-///     happens to start with the CPU at 4.5 GHz, every sample measures
-///     4.5 GHz performance. A later run that starts at 4.3 GHz measures
-///     a different (but self-consistent) baseline.
-///   * **Cache and TLB state** from whatever ran before.
-///   * **ASLR** → different physical memory layouts → different L1/L2
-///     conflict sets across runs.
-///   * **Branch-predictor history** keyed by the specific addresses the
-///     loader picked for the hot code this time.
-///   * **Kernel scheduling** decisions (which core, which NUMA node, when
-///     it yields, whether another process is sharing the core).
-///   * **Background processes** that happened to be active during the run.
+/// Rounds reduce **within-process** variance. Processes reduce
+/// **between-process** variance. The two attack different noise
+/// sources, and how you should combine them depends on what question
+/// you're trying to answer:
 ///
-/// Every sample in a single run sees the same "this process, this
-/// startup" state, so round count can't beat these sources down. Running
-/// the suite as N separate engine invocations and averaging is the only
-/// attack that works — and because the sources are independent across
-/// invocations, the aggregate's precision scales with `sqrt(N)` just
-/// like any other independent-sample statistical experiment.
+///   * "What's the lowest this code can achieve?" → [`Best`]
+///   * "What will my users see on average?" → [`Mean`]
+///   * "I don't know and don't want to bias the estimate" → [`Median`]
 ///
-/// In practice, a benchmark showing `mad ±0.1%` inside one run but
-/// bouncing `±10%` between runs is not measuring what it claims; it's
-/// measuring the within-run precision of a moving target.
+/// Every option answers a different question, and zenbench refuses
+/// to pick for you. No default.
 ///
-/// Falls back to a single `run()` when `trials <= 1`.
+/// # CLI flags
 ///
-/// The closure must be `FnMut` because it is invoked once per trial. In
-/// practice the bench-defining closures used with `main!` capture nothing
-/// or only `Copy` data, so they satisfy this bound automatically.
-pub fn run_trials<F: FnMut(&mut Suite)>(trials: usize, mut f: F) -> SuiteResult {
-    if trials <= 1 {
+/// The `main!` macro parses these from `cargo bench`:
+///
+/// ```text
+/// --best-of-processes=N       -> run_processes(N, Best, ...)
+/// --mean-of-processes=N       -> run_processes(N, Mean, ...)
+/// --median-of-processes=N     -> run_processes(N, Median, ...)
+/// ```
+///
+/// No flag → single `run()` call, exactly like before.
+///
+/// [`Best`]: ProcessAggregation::Best
+/// [`Mean`]: ProcessAggregation::Mean
+/// [`Median`]: ProcessAggregation::Median
+pub fn run_processes<F: FnMut(&mut Suite)>(
+    processes: usize,
+    policy: ProcessAggregation,
+    mut f: F,
+) -> SuiteResult {
+    if processes <= 1 {
         let mut suite = Suite::new();
         f(&mut suite);
         let engine = engine::Engine::new(suite);
         return engine.run();
     }
 
-    // Run each trial silently, then print one aggregated report at the end.
-    let mut all_results: Vec<SuiteResult> = Vec::with_capacity(trials);
-    for trial in 0..trials {
-        eprintln!("[zenbench] trial {}/{}", trial + 1, trials);
+    // Run each process silently, then print one aggregated report at the end.
+    let mut all_results: Vec<SuiteResult> = Vec::with_capacity(processes);
+    for i in 0..processes {
+        eprintln!("[zenbench] process {}/{}", i + 1, processes);
         let mut suite = Suite::new();
         f(&mut suite);
         let engine = engine::Engine::new(suite).quiet(true);
         all_results.push(engine.run());
     }
 
-    let aggregated = aggregate_trials(all_results);
+    let aggregated = aggregate_processes(all_results, policy);
 
-    // Print the final aggregated report just like a single run would.
+    // Final aggregated report (header + groups + footer).
     report::print_header(
         &aggregated.run_id,
         aggregated.git_hash.as_deref(),
         aggregated.ci_environment.as_deref(),
     );
-    eprintln!(
-        "[zenbench] best of {trials} trials (min trial mean; mad = inter-trial spread)"
-    );
+    let banner = match policy {
+        ProcessAggregation::Best => format!(
+            "[zenbench] best of {processes} processes (min process mean; within-run mad preserved)"
+        ),
+        ProcessAggregation::Mean => {
+            format!("[zenbench] mean of {processes} processes (mad = inter-process spread)")
+        }
+        ProcessAggregation::Median => format!(
+            "[zenbench] median of {processes} processes (mad = inter-process spread)"
+        ),
+    };
+    eprintln!("{banner}");
     for cmp in &aggregated.comparisons {
         report::print_group(cmp, aggregated.timer_resolution_ns);
     }
@@ -290,70 +348,34 @@ pub fn run_trials<F: FnMut(&mut Suite)>(trials: usize, mut f: F) -> SuiteResult 
     aggregated
 }
 
-/// Aggregate N trial-level `SuiteResult`s into a single result.
+/// Combine N `SuiteResult`s produced by separate engine invocations
+/// into a single result under the caller-chosen policy.
 ///
-/// Default policy is **best-of-N**: for each `(group, bench)` we keep
-/// the summary from the trial whose mean was lowest. Rationale — on a
-/// shared / busy host, noise is **one-sided**. OS interrupts, context
-/// switches, contention for shared caches, and thermal throttling only
-/// ever make a measurement slower; nothing in the system makes it
-/// faster. The fastest trial is therefore closest to the machine's
-/// underlying "quiet" capability, and the slower trials represent
-/// contamination, not genuine distribution spread.
+/// Public so external drivers (e.g. a shell wrapper that runs `cargo
+/// bench` N times in separate OS processes and deserializes each
+/// JSON) can reuse the same aggregation logic zenbench's in-process
+/// [`run_processes`] uses.
 ///
-/// This is the same reasoning `measure_loop_overhead` already uses at
-/// the per-sample level (its docstring: "noise is additive"), just
-/// lifted to the per-trial level.
-///
-/// We preserve the **winning trial's** full `Summary` (including min,
-/// max, n samples, and within-run mad) so the reader can still see
-/// that trial's internal precision. We override `mad` with the
-/// inter-trial spread (MAD across all trial means) so the bench report
-/// answers a different, useful question: "how much did the trials
-/// disagree with each other?" A tiny inter-trial MAD says the best
-/// result is stable; a large one says some trials were badly
-/// contaminated and you should look at the raw per-trial output.
-///
-/// `mean_ci` is invalidated because the single-trial bootstrap no
-/// longer describes the distribution the reported `mean` came from.
-///
-/// If you want the traditional "mean of trial means" behaviour, call
-/// [`aggregate_trials_mean`] explicitly. Use it when the bench host is
-/// quiet and you care about expected performance rather than best-case.
-fn aggregate_trials(trials: Vec<SuiteResult>) -> SuiteResult {
-    aggregate_trials_inner(trials, TrialAggregation::Min)
-}
-
-/// Mean-of-trial-means aggregation (the non-default policy). See
-/// [`aggregate_trials`] for why "min" is the default.
-#[allow(dead_code)]
-fn aggregate_trials_mean(trials: Vec<SuiteResult>) -> SuiteResult {
-    aggregate_trials_inner(trials, TrialAggregation::Mean)
-}
-
-enum TrialAggregation {
-    /// Keep the winning trial's summary. Default.
-    Min,
-    /// Replace the summary with a fresh one built from the distribution
-    /// of trial means (mean = mean of trial means, etc).
-    Mean,
-}
-
-fn aggregate_trials_inner(trials: Vec<SuiteResult>, policy: TrialAggregation) -> SuiteResult {
+/// See [`ProcessAggregation`] for the policy definitions.
+pub fn aggregate_processes(
+    processes: Vec<SuiteResult>,
+    policy: ProcessAggregation,
+) -> SuiteResult {
     use std::collections::HashMap;
 
-    if trials.is_empty() {
+    if processes.is_empty() {
         return SuiteResult::default();
     }
-    if trials.len() == 1 {
-        return trials.into_iter().next().unwrap();
+    if processes.len() == 1 {
+        return processes.into_iter().next().unwrap();
     }
 
-    // Collect per-(group, bench) the full list of trial means. Used by
-    // both policies: Min needs to pick the winner and compute inter-trial
-    // spread; Mean rebuilds the summary from the full distribution.
+    // Collect per-(group, bench) the full list of per-process means.
+    // Used by all policies: Best needs to find the winner; Mean and
+    // Median rebuild the summary from this distribution; Best reports
+    // inter-process spread as a footer line.
     let mut means: HashMap<(String, String), Vec<f64>> = HashMap::new();
-    for result in &trials {
+    for result in &processes {
         for cmp in &result.comparisons {
             for bench in &cmp.benchmarks {
                 let key = (cmp.group_name.clone(), bench.name.clone());
@@ -362,33 +384,33 @@ fn aggregate_trials_inner(trials: Vec<SuiteResult>, policy: TrialAggregation) ->
         }
     }
 
-    // For Min policy: for each (group, bench), find which trial had the
-    // lowest mean. We'll copy that trial's full summary into the output.
-    // Using `&trials` by reference so we can still consume later.
-    let best_trial_by_key: HashMap<(String, String), usize> = trials
+    // For Best policy: find the process index with the lowest mean
+    // per (group, bench).
+    let winners: HashMap<(String, String), usize> = processes
         .iter()
         .enumerate()
-        .fold(HashMap::new(), |mut acc, (ti, result)| {
+        .fold(HashMap::new(), |mut acc, (pi, result)| {
             for cmp in &result.comparisons {
                 for bench in &cmp.benchmarks {
                     let key = (cmp.group_name.clone(), bench.name.clone());
                     let this_mean = bench.summary.mean;
                     acc.entry(key)
-                        .and_modify(|best_ti: &mut usize| {
-                            let prev_mean = trial_mean(&trials, *best_ti, &cmp.group_name, &bench.name);
+                        .and_modify(|best: &mut usize| {
+                            let prev_mean =
+                                process_mean(&processes, *best, &cmp.group_name, &bench.name);
                             if this_mean < prev_mean {
-                                *best_ti = ti;
+                                *best = pi;
                             }
                         })
-                        .or_insert(ti);
+                        .or_insert(pi);
                 }
             }
             acc
         });
 
-    // Template = first trial. Overwrite each bench's summary according
-    // to the chosen policy.
-    let mut out = trials[0].clone();
+    // Template = first process. Overwrite each bench's summary
+    // according to the chosen policy.
+    let mut out = processes[0].clone();
     for cmp in out.comparisons.iter_mut() {
         for bench in cmp.benchmarks.iter_mut() {
             let key = (cmp.group_name.clone(), bench.name.clone());
@@ -397,22 +419,37 @@ fn aggregate_trials_inner(trials: Vec<SuiteResult>, policy: TrialAggregation) ->
                 None => continue,
             };
             match policy {
-                TrialAggregation::Min => {
-                    if let Some(&best_ti) = best_trial_by_key.get(&key) {
-                        if let Some(best_bench) = find_bench(&trials[best_ti], &key.0, &key.1) {
+                ProcessAggregation::Best => {
+                    // Copy the winning process's full summary verbatim,
+                    // including its within-run mad. Inter-process spread
+                    // is reported separately in the banner/footer so
+                    // this field continues to answer "how jittery was
+                    // this specific run?".
+                    if let Some(&best_pi) = winners.get(&key) {
+                        if let Some(best_bench) =
+                            find_bench(&processes[best_pi], &key.0, &key.1)
+                        {
                             bench.summary = best_bench.summary.clone();
                         }
                     }
-                    // Override mad with inter-trial spread — the within-run
-                    // mad isn't what the reader of a multi-trial report is
-                    // looking for; they want "how much did the trials vary?"
-                    let spread = crate::stats::Summary::from_slice(samples);
-                    bench.summary.mad = spread.mad;
                 }
-                TrialAggregation::Mean => {
+                ProcessAggregation::Mean => {
+                    // Rebuild summary from the distribution of per-process
+                    // means. The new `mad` is inter-process spread by
+                    // construction (Summary::from_slice computes it from
+                    // the input slice).
                     bench.summary = crate::stats::Summary::from_slice(samples);
                 }
+                ProcessAggregation::Median => {
+                    // Same rebuild, but replace the Welford-mean with the
+                    // median so it matches the advertised policy name.
+                    let fresh = crate::stats::Summary::from_slice(samples);
+                    bench.summary = fresh.clone();
+                    bench.summary.mean = fresh.median;
+                }
             }
+            // The single-process bootstrap CI no longer describes the
+            // distribution the reported mean came from in any policy.
             bench.mean_ci = None;
         }
     }
@@ -433,8 +470,8 @@ fn find_bench<'a>(
         .find(|b| b.name == bench_name)
 }
 
-fn trial_mean(trials: &[SuiteResult], trial_idx: usize, group: &str, bench_name: &str) -> f64 {
-    find_bench(&trials[trial_idx], group, bench_name)
+fn process_mean(results: &[SuiteResult], idx: usize, group: &str, bench_name: &str) -> f64 {
+    find_bench(&results[idx], group, bench_name)
         .map(|b| b.summary.mean)
         .unwrap_or(f64::INFINITY)
 }
@@ -542,6 +579,46 @@ pub fn run_and_save<F: FnOnce(&mut Suite)>(f: F) -> SuiteResult {
 ///     suite.compare("sort", |group| { /* ... */ });
 /// });
 /// ```
+/// Parse the `--{best,mean,median}-of-processes=N` flags. Returns the
+/// requested process count + aggregation policy, or `None` for a
+/// single-run invocation. Errors and exits on conflicting flags or
+/// invalid values.
+///
+/// Exposed so both `main!` arms can share one implementation.
+#[doc(hidden)]
+pub fn parse_process_args() -> Option<(usize, ProcessAggregation)> {
+    let mut found: Option<(usize, ProcessAggregation, &'static str)> = None;
+    for arg in std::env::args() {
+        let parsed: Option<(usize, ProcessAggregation, &'static str)> = [
+            ("--best-of-processes=", ProcessAggregation::Best, "--best-of-processes"),
+            ("--mean-of-processes=", ProcessAggregation::Mean, "--mean-of-processes"),
+            (
+                "--median-of-processes=",
+                ProcessAggregation::Median,
+                "--median-of-processes",
+            ),
+        ]
+        .iter()
+        .find_map(|(prefix, policy, name)| {
+            arg.strip_prefix(prefix).and_then(|v| v.parse().ok()).map(|n: usize| (n, *policy, *name))
+        });
+        if let Some((n, p, name)) = parsed {
+            if let Some((_, _, prev_name)) = found {
+                eprintln!(
+                    "[zenbench] error: {prev_name} and {name} are mutually exclusive"
+                );
+                std::process::exit(2);
+            }
+            if n == 0 {
+                eprintln!("[zenbench] error: {name}=0 is not meaningful");
+                std::process::exit(2);
+            }
+            found = Some((n, p, name));
+        }
+    }
+    found.map(|(n, p, _)| (n, p))
+}
+
 #[macro_export]
 macro_rules! main {
     // Form 1: function list — composable, like criterion
@@ -549,16 +626,19 @@ macro_rules! main {
         fn main() {
             let group_filter: Option<String> = std::env::args()
                 .find_map(|a| a.strip_prefix("--group=").map(String::from));
-            let trials: usize = std::env::args()
-                .find_map(|a| a.strip_prefix("--trials=").and_then(|v| v.parse().ok()))
-                .unwrap_or(1);
+            let processes = $crate::parse_process_args();
 
-            let result = $crate::run_trials(trials, |suite: &mut $crate::Suite| {
+            let closure = |suite: &mut $crate::Suite| {
                 if let Some(ref filter) = group_filter {
                     suite.set_group_filter(filter.clone());
                 }
                 $( $func(suite); )+
-            });
+            };
+
+            let result = match processes {
+                Some((n, policy)) => $crate::run_processes(n, policy, closure),
+                None => $crate::run(closure),
+            };
 
             $crate::postprocess_result(&result);
         }
@@ -568,16 +648,19 @@ macro_rules! main {
         fn main() {
             let group_filter: Option<String> = std::env::args()
                 .find_map(|a| a.strip_prefix("--group=").map(String::from));
-            let trials: usize = std::env::args()
-                .find_map(|a| a.strip_prefix("--trials=").and_then(|v| v.parse().ok()))
-                .unwrap_or(1);
+            let processes = $crate::parse_process_args();
 
-            let result = $crate::run_trials(trials, |$suite: &mut $crate::Suite| {
+            let closure = |$suite: &mut $crate::Suite| {
                 if let Some(ref filter) = group_filter {
                     $suite.set_group_filter(filter.clone());
                 }
                 $body
-            });
+            };
+
+            let result = match processes {
+                Some((n, policy)) => $crate::run_processes(n, policy, closure),
+                None => $crate::run(closure),
+            };
 
             $crate::postprocess_result(&result);
         }
