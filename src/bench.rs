@@ -615,6 +615,22 @@ pub struct GroupConfig {
     /// enough that context switches typically fall between samples, not
     /// within them.
     pub sample_target_ns: u64,
+    /// Minimum time per sample in nanoseconds (default: 5,000,000 = 5ms).
+    ///
+    /// Hard floor on sample duration. Forces additional iterations when a
+    /// single iteration is large enough that `sample_target_ns` would only
+    /// fit one or two of them — short samples can't absorb a single OS
+    /// interrupt without skewing the result by 5–10%.
+    ///
+    /// Concrete failure mode this guards against: a benchmark with a 500µs
+    /// per-iteration cost paired with the default 1ms sample_target would
+    /// run two iterations per sample. A 100µs context switch during that
+    /// 1ms window swings the sample mean ~10%. Lifting the floor to 5ms
+    /// pushes the sample to 10 iterations and dilutes the same context
+    /// switch to ~2%.
+    ///
+    /// Set to 0 to opt out (matches the pre-floor behavior).
+    pub min_sample_ns: u64,
     /// Linear sampling mode for slope regression (default: false).
     ///
     /// When enabled, iteration counts vary across rounds (0.2×–2.0× base,
@@ -660,6 +676,7 @@ impl Default for GroupConfig {
             bootstrap_resamples: 10_000,
             cold_start: false,
             sample_target_ns: 1_000_000, // 1ms — short enough to dodge context switches
+            min_sample_ns: 5_000_000, // 5ms — long enough to absorb a context switch
             linear_sampling: false,
             stack_jitter: cfg!(feature = "precise-timing"), // on by default with precise-timing
         }
@@ -761,6 +778,14 @@ impl GroupConfig {
     /// Higher = better timer overhead amortization (good for sub-ns benchmarks).
     pub fn sample_target_ns(&mut self, ns: u64) -> &mut Self {
         self.sample_target_ns = ns.max(1_000); // minimum 1µs
+        self
+    }
+
+    /// Set the minimum sample duration in nanoseconds (default: 5,000,000 = 5ms).
+    ///
+    /// Independent floor on sample duration. Set to 0 to disable.
+    pub fn min_sample_ns(&mut self, ns: u64) -> &mut Self {
+        self.min_sample_ns = ns;
         self
     }
 

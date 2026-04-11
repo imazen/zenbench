@@ -15,6 +15,10 @@ pub struct Engine {
     gate_config: GateConfig,
     /// Directory for the cross-process lock file.
     lock_dir: Option<PathBuf>,
+    /// Suppress the terminal report (header, per-group, footer) when set.
+    /// Used by `run_trials` to avoid printing every trial's individual
+    /// report; only the final aggregated report is shown.
+    quiet: bool,
 }
 
 impl Engine {
@@ -29,6 +33,7 @@ impl Engine {
             suite,
             gate_config,
             lock_dir: default_lock_dir(),
+            quiet: false,
         }
     }
 
@@ -38,6 +43,7 @@ impl Engine {
             suite,
             gate_config,
             lock_dir: default_lock_dir(),
+            quiet: false,
         }
     }
 
@@ -46,6 +52,14 @@ impl Engine {
     #[allow(dead_code)] // Used by bin targets
     pub fn lock_dir(mut self, dir: PathBuf) -> Self {
         self.lock_dir = Some(dir);
+        self
+    }
+
+    /// Suppress the terminal report (header, per-group, footer) when running.
+    /// Useful when an outer driver (e.g. `run_trials`) prints its own report
+    /// over the aggregated results.
+    pub fn quiet(mut self, quiet: bool) -> Self {
+        self.quiet = quiet;
         self
     }
 
@@ -136,8 +150,10 @@ impl Engine {
         let mut total_gate_waits = 0usize;
         let mut total_gate_wait_time = std::time::Duration::ZERO;
 
-        // Print report header immediately
-        crate::report::print_header(&run_id, git_hash.as_deref(), ci.as_deref());
+        // Print report header immediately (unless suppressed by trial driver)
+        if !self.quiet {
+            crate::report::print_header(&run_id, git_hash.as_deref(), ci.as_deref());
+        }
 
         let group_filter = self.suite.group_filter.as_deref();
 
@@ -177,7 +193,9 @@ impl Engine {
 
             // Clear any status line and print this group's report immediately
             crate::report::clear_status();
-            crate::report::print_group(&result, timer_res);
+            if !self.quiet {
+                crate::report::print_group(&result, timer_res);
+            }
 
             comparisons.push(result);
 
@@ -246,12 +264,14 @@ impl Engine {
         }
 
         // Print footer (groups were already printed as they completed)
-        crate::report::print_footer(
-            result.total_time,
-            result.gate_waits,
-            result.gate_wait_time,
-            result.unreliable,
-        );
+        if !self.quiet {
+            crate::report::print_footer(
+                result.total_time,
+                result.gate_waits,
+                result.gate_wait_time,
+                result.unreliable,
+            );
+        }
 
         // Lock is released when _lock drops
         result
@@ -805,12 +825,21 @@ fn estimate_iterations(
         // Target 2: user's sample_target_ns (default 1ms) — caps noise exposure
         let iters_for_target = (config.sample_target_ns / per_iter_ns) as usize;
 
-        // Use the LARGER of the two: precision floor OR time target.
-        // But never exceed the time target by more than 2× (don't let the precision
-        // floor make samples excessively long for slow benchmarks).
+        // Target 3: minimum sample duration floor — guards against the case
+        // where one iteration is large enough that sample_target_ns barely
+        // fits one of them. Without this, a single OS interrupt during a
+        // ~1ms sample window swings the result 5–10%.
+        let iters_for_min_sample = (config.min_sample_ns / per_iter_ns) as usize;
+
+        // Use the LARGER of the three. The 2x cap on sample_target keeps
+        // fast benchmarks from running 10× the user's chosen sample length
+        // just to satisfy a precision floor that's already over-satisfied.
+        // The min_sample floor is independent and applied unconditionally:
+        // if the user asked for 5ms minimum, we honor it.
         let new_iters = iters_for_precision
             .max(iters_for_target)
-            .min(iters_for_target.saturating_mul(2).max(iters_for_precision));
+            .min(iters_for_target.saturating_mul(2).max(iters_for_precision))
+            .max(iters_for_min_sample);
 
         if new_iters <= 2 * iters {
             // Converged

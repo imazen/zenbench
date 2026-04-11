@@ -194,6 +194,117 @@ pub fn run<F: FnOnce(&mut Suite)>(f: F) -> SuiteResult {
     engine.run()
 }
 
+/// Run a benchmark suite N times and aggregate the per-bench means
+/// across trials.
+///
+/// Each "trial" is a complete suite execution: warmup, sample collection,
+/// statistics. After all trials complete, every benchmark's `summary` is
+/// replaced with a new `Summary` built from the trial-level means
+/// (`mean = median of trial means, mad = inter-trial spread, n = trials`).
+///
+/// Use this when single-run inter-process variance dominates the within-run
+/// CV — e.g. mid-latency benchmarks on noisy hosts where one OS interrupt
+/// during a 1ms sample window swings the result 5–10%. Three to five trials
+/// usually pin the median to within 1–2%.
+///
+/// Falls back to a single `run()` when `trials <= 1`.
+///
+/// The closure must be `FnMut` because it is invoked once per trial. In
+/// practice the bench-defining closures used with `main!` capture nothing
+/// or only `Copy` data, so they satisfy this bound automatically.
+pub fn run_trials<F: FnMut(&mut Suite)>(trials: usize, mut f: F) -> SuiteResult {
+    if trials <= 1 {
+        let mut suite = Suite::new();
+        f(&mut suite);
+        let engine = engine::Engine::new(suite);
+        return engine.run();
+    }
+
+    // Run each trial silently, then print one aggregated report at the end.
+    let mut all_results: Vec<SuiteResult> = Vec::with_capacity(trials);
+    for trial in 0..trials {
+        eprintln!("[zenbench] trial {}/{}", trial + 1, trials);
+        let mut suite = Suite::new();
+        f(&mut suite);
+        let engine = engine::Engine::new(suite).quiet(true);
+        all_results.push(engine.run());
+    }
+
+    let aggregated = aggregate_trials(all_results);
+
+    // Print the final aggregated report just like a single run would.
+    report::print_header(
+        &aggregated.run_id,
+        aggregated.git_hash.as_deref(),
+        aggregated.ci_environment.as_deref(),
+    );
+    eprintln!("[zenbench] aggregated across {trials} trials");
+    for cmp in &aggregated.comparisons {
+        report::print_group(cmp, aggregated.timer_resolution_ns);
+    }
+    report::print_footer(
+        aggregated.total_time,
+        aggregated.gate_waits,
+        aggregated.gate_wait_time,
+        aggregated.unreliable,
+    );
+
+    aggregated
+}
+
+/// Aggregate N trial-level `SuiteResult`s into a single result whose
+/// per-bench `summary` reflects the distribution of trial-level means.
+///
+/// The first trial is taken as the structural template (for run_id,
+/// timestamp, group order, paired analyses, etc). Each benchmark inside
+/// it gets its `summary` rebuilt: the inputs are the per-trial mean times
+/// for that exact `(group_name, bench_name)`. `Summary::from_slice`
+/// computes mean, median, MAD, variance, and min/max from those inputs,
+/// so the resulting `mean` reflects all trials and the resulting `mad`
+/// captures inter-trial spread.
+///
+/// `mean_ci` is invalidated (set to `None`) because the underlying
+/// per-sample CI no longer corresponds to a single trial's distribution.
+fn aggregate_trials(trials: Vec<SuiteResult>) -> SuiteResult {
+    use std::collections::HashMap;
+
+    if trials.is_empty() {
+        // Caller invariant violation; return a default-constructed result.
+        return SuiteResult::default();
+    }
+    if trials.len() == 1 {
+        return trials.into_iter().next().unwrap();
+    }
+
+    // Collect per-(group, bench) mean times across all trials.
+    let mut means: HashMap<(String, String), Vec<f64>> = HashMap::new();
+    for result in &trials {
+        for cmp in &result.comparisons {
+            for bench in &cmp.benchmarks {
+                let key = (cmp.group_name.clone(), bench.name.clone());
+                means.entry(key).or_default().push(bench.summary.mean);
+            }
+        }
+    }
+
+    // Use the first trial as the structural template and rewrite its
+    // benchmark summaries with the cross-trial aggregates.
+    let mut out = trials.into_iter().next().unwrap();
+    for cmp in out.comparisons.iter_mut() {
+        for bench in cmp.benchmarks.iter_mut() {
+            let key = (cmp.group_name.clone(), bench.name.clone());
+            if let Some(samples) = means.get(&key) {
+                bench.summary = crate::stats::Summary::from_slice(samples);
+                // CI was computed from per-sample data inside one trial.
+                // It no longer reflects the inter-trial distribution we
+                // just substituted.
+                bench.mean_ci = None;
+            }
+        }
+    }
+    out
+}
+
 /// Run a benchmark suite with custom gate configuration.
 pub fn run_gated<F: FnOnce(&mut Suite)>(gate: GateConfig, f: F) -> SuiteResult {
     let mut suite = Suite::new();
@@ -304,8 +415,11 @@ macro_rules! main {
         fn main() {
             let group_filter: Option<String> = std::env::args()
                 .find_map(|a| a.strip_prefix("--group=").map(String::from));
+            let trials: usize = std::env::args()
+                .find_map(|a| a.strip_prefix("--trials=").and_then(|v| v.parse().ok()))
+                .unwrap_or(1);
 
-            let result = $crate::run(|suite: &mut $crate::Suite| {
+            let result = $crate::run_trials(trials, |suite: &mut $crate::Suite| {
                 if let Some(ref filter) = group_filter {
                     suite.set_group_filter(filter.clone());
                 }
@@ -320,8 +434,11 @@ macro_rules! main {
         fn main() {
             let group_filter: Option<String> = std::env::args()
                 .find_map(|a| a.strip_prefix("--group=").map(String::from));
+            let trials: usize = std::env::args()
+                .find_map(|a| a.strip_prefix("--trials=").and_then(|v| v.parse().ok()))
+                .unwrap_or(1);
 
-            let result = $crate::run(|$suite: &mut $crate::Suite| {
+            let result = $crate::run_trials(trials, |$suite: &mut $crate::Suite| {
                 if let Some(ref filter) = group_filter {
                     $suite.set_group_filter(filter.clone());
                 }
