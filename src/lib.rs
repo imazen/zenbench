@@ -194,16 +194,18 @@ pub fn run<F: FnOnce(&mut Suite)>(f: F) -> SuiteResult {
     engine.run()
 }
 
-/// Run a benchmark suite N times and aggregate the per-bench means
-/// across trials.
+/// Run a benchmark suite N times and report the **best** (lowest-mean)
+/// trial per benchmark.
 ///
 /// Each "trial" is a complete suite execution: warmup, sample collection,
-/// statistics. After all trials complete, every benchmark's `summary` is
-/// replaced with a new `Summary` built from the trial-level means
-/// (`mean = mean of trial means, median = median, mad = inter-trial spread,
-/// n = trial count`). `mean_ci` is cleared because the single-trial
-/// bootstrap no longer describes the distribution the aggregated `mean`
-/// was computed over.
+/// statistics. After all trials complete, every benchmark's reported
+/// `summary` is the winning trial's `summary` (preserving its within-run
+/// n, min, max, and median), with `mad` overridden to the inter-trial
+/// spread so the reader can tell whether trials agreed or not.
+///
+/// See [`aggregate_trials`] for the rationale behind the min-of-trials
+/// policy. Short version: on busy hosts, noise only makes measurements
+/// slower, so the fastest trial is closest to the machine's real capability.
 ///
 /// # Why trials matter beyond rounds
 ///
@@ -272,7 +274,9 @@ pub fn run_trials<F: FnMut(&mut Suite)>(trials: usize, mut f: F) -> SuiteResult 
         aggregated.git_hash.as_deref(),
         aggregated.ci_environment.as_deref(),
     );
-    eprintln!("[zenbench] aggregated across {trials} trials");
+    eprintln!(
+        "[zenbench] best of {trials} trials (min trial mean; mad = inter-trial spread)"
+    );
     for cmp in &aggregated.comparisons {
         report::print_group(cmp, aggregated.timer_resolution_ns);
     }
@@ -286,31 +290,68 @@ pub fn run_trials<F: FnMut(&mut Suite)>(trials: usize, mut f: F) -> SuiteResult 
     aggregated
 }
 
-/// Aggregate N trial-level `SuiteResult`s into a single result whose
-/// per-bench `summary` reflects the distribution of trial-level means.
+/// Aggregate N trial-level `SuiteResult`s into a single result.
 ///
-/// The first trial is taken as the structural template (for run_id,
-/// timestamp, group order, paired analyses, etc). Each benchmark inside
-/// it gets its `summary` rebuilt: the inputs are the per-trial mean times
-/// for that exact `(group_name, bench_name)`. `Summary::from_slice`
-/// computes mean, median, MAD, variance, and min/max from those inputs,
-/// so the resulting `mean` reflects all trials and the resulting `mad`
-/// captures inter-trial spread.
+/// Default policy is **best-of-N**: for each `(group, bench)` we keep
+/// the summary from the trial whose mean was lowest. Rationale — on a
+/// shared / busy host, noise is **one-sided**. OS interrupts, context
+/// switches, contention for shared caches, and thermal throttling only
+/// ever make a measurement slower; nothing in the system makes it
+/// faster. The fastest trial is therefore closest to the machine's
+/// underlying "quiet" capability, and the slower trials represent
+/// contamination, not genuine distribution spread.
 ///
-/// `mean_ci` is invalidated (set to `None`) because the underlying
-/// per-sample CI no longer corresponds to a single trial's distribution.
+/// This is the same reasoning `measure_loop_overhead` already uses at
+/// the per-sample level (its docstring: "noise is additive"), just
+/// lifted to the per-trial level.
+///
+/// We preserve the **winning trial's** full `Summary` (including min,
+/// max, n samples, and within-run mad) so the reader can still see
+/// that trial's internal precision. We override `mad` with the
+/// inter-trial spread (MAD across all trial means) so the bench report
+/// answers a different, useful question: "how much did the trials
+/// disagree with each other?" A tiny inter-trial MAD says the best
+/// result is stable; a large one says some trials were badly
+/// contaminated and you should look at the raw per-trial output.
+///
+/// `mean_ci` is invalidated because the single-trial bootstrap no
+/// longer describes the distribution the reported `mean` came from.
+///
+/// If you want the traditional "mean of trial means" behaviour, call
+/// [`aggregate_trials_mean`] explicitly. Use it when the bench host is
+/// quiet and you care about expected performance rather than best-case.
 fn aggregate_trials(trials: Vec<SuiteResult>) -> SuiteResult {
+    aggregate_trials_inner(trials, TrialAggregation::Min)
+}
+
+/// Mean-of-trial-means aggregation (the non-default policy). See
+/// [`aggregate_trials`] for why "min" is the default.
+#[allow(dead_code)]
+fn aggregate_trials_mean(trials: Vec<SuiteResult>) -> SuiteResult {
+    aggregate_trials_inner(trials, TrialAggregation::Mean)
+}
+
+enum TrialAggregation {
+    /// Keep the winning trial's summary. Default.
+    Min,
+    /// Replace the summary with a fresh one built from the distribution
+    /// of trial means (mean = mean of trial means, etc).
+    Mean,
+}
+
+fn aggregate_trials_inner(trials: Vec<SuiteResult>, policy: TrialAggregation) -> SuiteResult {
     use std::collections::HashMap;
 
     if trials.is_empty() {
-        // Caller invariant violation; return a default-constructed result.
         return SuiteResult::default();
     }
     if trials.len() == 1 {
         return trials.into_iter().next().unwrap();
     }
 
-    // Collect per-(group, bench) mean times across all trials.
+    // Collect per-(group, bench) the full list of trial means. Used by
+    // both policies: Min needs to pick the winner and compute inter-trial
+    // spread; Mean rebuilds the summary from the full distribution.
     let mut means: HashMap<(String, String), Vec<f64>> = HashMap::new();
     for result in &trials {
         for cmp in &result.comparisons {
@@ -321,22 +362,81 @@ fn aggregate_trials(trials: Vec<SuiteResult>) -> SuiteResult {
         }
     }
 
-    // Use the first trial as the structural template and rewrite its
-    // benchmark summaries with the cross-trial aggregates.
-    let mut out = trials.into_iter().next().unwrap();
+    // For Min policy: for each (group, bench), find which trial had the
+    // lowest mean. We'll copy that trial's full summary into the output.
+    // Using `&trials` by reference so we can still consume later.
+    let best_trial_by_key: HashMap<(String, String), usize> = trials
+        .iter()
+        .enumerate()
+        .fold(HashMap::new(), |mut acc, (ti, result)| {
+            for cmp in &result.comparisons {
+                for bench in &cmp.benchmarks {
+                    let key = (cmp.group_name.clone(), bench.name.clone());
+                    let this_mean = bench.summary.mean;
+                    acc.entry(key)
+                        .and_modify(|best_ti: &mut usize| {
+                            let prev_mean = trial_mean(&trials, *best_ti, &cmp.group_name, &bench.name);
+                            if this_mean < prev_mean {
+                                *best_ti = ti;
+                            }
+                        })
+                        .or_insert(ti);
+                }
+            }
+            acc
+        });
+
+    // Template = first trial. Overwrite each bench's summary according
+    // to the chosen policy.
+    let mut out = trials[0].clone();
     for cmp in out.comparisons.iter_mut() {
         for bench in cmp.benchmarks.iter_mut() {
             let key = (cmp.group_name.clone(), bench.name.clone());
-            if let Some(samples) = means.get(&key) {
-                bench.summary = crate::stats::Summary::from_slice(samples);
-                // CI was computed from per-sample data inside one trial.
-                // It no longer reflects the inter-trial distribution we
-                // just substituted.
-                bench.mean_ci = None;
+            let samples = match means.get(&key) {
+                Some(s) => s,
+                None => continue,
+            };
+            match policy {
+                TrialAggregation::Min => {
+                    if let Some(&best_ti) = best_trial_by_key.get(&key) {
+                        if let Some(best_bench) = find_bench(&trials[best_ti], &key.0, &key.1) {
+                            bench.summary = best_bench.summary.clone();
+                        }
+                    }
+                    // Override mad with inter-trial spread — the within-run
+                    // mad isn't what the reader of a multi-trial report is
+                    // looking for; they want "how much did the trials vary?"
+                    let spread = crate::stats::Summary::from_slice(samples);
+                    bench.summary.mad = spread.mad;
+                }
+                TrialAggregation::Mean => {
+                    bench.summary = crate::stats::Summary::from_slice(samples);
+                }
             }
+            bench.mean_ci = None;
         }
     }
     out
+}
+
+fn find_bench<'a>(
+    result: &'a SuiteResult,
+    group: &str,
+    bench_name: &str,
+) -> Option<&'a results::BenchmarkResult> {
+    result
+        .comparisons
+        .iter()
+        .find(|c| c.group_name == group)?
+        .benchmarks
+        .iter()
+        .find(|b| b.name == bench_name)
+}
+
+fn trial_mean(trials: &[SuiteResult], trial_idx: usize, group: &str, bench_name: &str) -> f64 {
+    find_bench(&trials[trial_idx], group, bench_name)
+        .map(|b| b.summary.mean)
+        .unwrap_or(f64::INFINITY)
 }
 
 /// Run a benchmark suite with custom gate configuration.
