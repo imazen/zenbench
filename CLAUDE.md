@@ -8,7 +8,7 @@ Interleaved microbenchmarking crate for Rust. `#![forbid(unsafe_code)]`, MSRV 1.
 
 ```
 src/
-  lib.rs       — public API, main! macro, prelude, run_passes, aggregate_results, Aggregation
+  lib.rs       — public API, main! macro, prelude, run_passes, run_processes, aggregate_results, Aggregation
   bench.rs     — Suite, BenchGroup, GroupConfig, Bencher, BenchFn
   engine.rs    — Engine, run_comparison_group, convergence logic
   results.rs   — SuiteResult, ComparisonResult, BenchmarkResult, to_llm/csv/markdown

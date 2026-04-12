@@ -52,6 +52,8 @@ Zenbench **interleaves**: each round, all benchmarks run in shuffled order. Roun
 | Save/load baselines | ❌ | ❌ | ✅ `--baseline=` |
 | Regression exit codes (0/1/2) | ❌ | ❌ | ✅ |
 | Auto-update baseline on pass | ❌ | ❌ | ✅ `--update-on-pass` |
+| Multi-pass aggregation (in-process) | ❌ | ❌ | ✅ `--best-of-passes=N` |
+| Multi-process aggregation (cross-ASLR) | ❌ | ❌ | ✅ `--best-of-processes=N` |
 | Hardware fingerprint / testbed ID | ❌ | ❌ | ✅ |
 | Cross-run variance inflation | ❌ | ❌ | ✅ pooled t-test |
 | **Output** | | | |
@@ -234,6 +236,23 @@ cargo bench -- --format=csv           # spreadsheet-friendly (stdout)
 cargo bench -- --format=llm           # key=value for AI tools (stdout)
 cargo bench -- --format=md            # markdown tables (stdout)
 ```
+
+## Multi-pass and multi-process
+
+```bash
+# In-process passes: resets calibration, warmup, heap addresses
+cargo bench -- --best-of-passes=3
+cargo bench -- --mean-of-passes=5
+
+# Cross-OS-process: also resets ASLR, CPU freq, scheduler, page cache
+cargo bench -- --best-of-processes=3
+cargo bench -- --median-of-processes=5
+
+# Composable: 3 processes × 2 passes = 6 total runs
+cargo bench -- --best-of-processes=3 --best-of-passes=2
+```
+
+Policies: `best` (min mean — use on noisy hosts), `mean` (unbiased average), `median` (robust to outliers). See `docs/multi_process.md` for which noise sources each level attacks.
 
 ## API reference
 
