@@ -829,13 +829,27 @@ fn estimate_iterations(
         // where one iteration is large enough that sample_target_ns barely
         // fits one of them. Without this, a single OS interrupt during a
         // ~1ms sample window swings the result 5–10%.
-        let iters_for_min_sample = (config.min_sample_ns / per_iter_ns) as usize;
+        //
+        // Per-iter-aware: the floor only kicks in when sample_target_ns
+        // would otherwise yield fewer than 20 iterations. Faster benches
+        // that already accumulate ≥ 20 iters per sample_target are left
+        // alone, so a 100ns-per-iter bench isn't dragged from 10,000 iters
+        // (1 ms at default sample_target) up to 50,000 iters (5 ms at the
+        // old unconditional 5 ms floor). The floor exists to protect slow
+        // benchmarks from single-interrupt contamination, not to multiply
+        // fast benchmarks' sample lengths 5× for no statistical gain.
+        const MIN_SAMPLE_ITERS_THRESHOLD: usize = 20;
+        let iters_for_min_sample = if iters_for_target >= MIN_SAMPLE_ITERS_THRESHOLD {
+            0
+        } else {
+            (config.min_sample_ns / per_iter_ns) as usize
+        };
 
         // Use the LARGER of the three. The 2x cap on sample_target keeps
         // fast benchmarks from running 10× the user's chosen sample length
         // just to satisfy a precision floor that's already over-satisfied.
-        // The min_sample floor is independent and applied unconditionally:
-        // if the user asked for 5ms minimum, we honor it.
+        // The min_sample floor only applies to slow benchmarks (< 20 iters
+        // per sample_target); see the per-iter-aware guard above.
         let new_iters = iters_for_precision
             .max(iters_for_target)
             .min(iters_for_target.saturating_mul(2).max(iters_for_precision))
