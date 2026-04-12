@@ -239,11 +239,6 @@ pub enum Aggregation {
     Median,
 }
 
-/// Deprecated alias kept for one release while the `process` → `pass`
-/// rename settles. Use [`Aggregation`] instead.
-#[deprecated(since = "0.1.7", note = "renamed to `Aggregation`")]
-pub type ProcessAggregation = Aggregation;
-
 /// Run a benchmark suite in N sequential "passes" inside the current
 /// OS process and combine the per-pass results under the chosen
 /// [`Aggregation`] policy.
@@ -365,15 +360,15 @@ pub fn run_passes<F: FnMut(&mut Suite)>(
         aggregated.ci_environment.as_deref(),
     );
     let banner = match policy {
-        Aggregation::Best => format!(
-            "[zenbench] best of {passes} passes (min pass mean; within-run mad preserved)"
-        ),
+        Aggregation::Best => {
+            format!("[zenbench] best of {passes} passes (min pass mean; within-run mad preserved)")
+        }
         Aggregation::Mean => {
             format!("[zenbench] mean of {passes} passes (mad = inter-pass spread)")
         }
-        Aggregation::Median => format!(
-            "[zenbench] median of {passes} passes (mad = inter-pass spread)"
-        ),
+        Aggregation::Median => {
+            format!("[zenbench] median of {passes} passes (mad = inter-pass spread)")
+        }
     };
     eprintln!("{banner}");
     for cmp in &aggregated.comparisons {
@@ -389,19 +384,6 @@ pub fn run_passes<F: FnMut(&mut Suite)>(
     aggregated
 }
 
-/// Deprecated alias: renamed to `run_passes` for honesty about scope.
-#[deprecated(since = "0.1.7", note = "renamed to `run_passes` — the function runs \
-    sequential passes inside one OS process, not separate processes. \
-    See `zenbench-driver` for actual cross-OS-process aggregation.")]
-#[allow(deprecated)]
-pub fn run_processes<F: FnMut(&mut Suite)>(
-    processes: usize,
-    policy: ProcessAggregation,
-    f: F,
-) -> SuiteResult {
-    run_passes(processes, policy, f)
-}
-
 /// Combine N `SuiteResult`s into one under the caller-chosen policy.
 ///
 /// Source-agnostic: the inputs can be sequential passes produced by
@@ -410,10 +392,7 @@ pub fn run_processes<F: FnMut(&mut Suite)>(
 /// as one observation regardless of how it was produced.
 ///
 /// See [`Aggregation`] for the policy definitions.
-pub fn aggregate_results(
-    runs: Vec<SuiteResult>,
-    policy: Aggregation,
-) -> SuiteResult {
+pub fn aggregate_results(runs: Vec<SuiteResult>, policy: Aggregation) -> SuiteResult {
     use std::collections::HashMap;
 
     if runs.is_empty() {
@@ -439,27 +418,27 @@ pub fn aggregate_results(
 
     // For Best policy: find the run index with the lowest mean
     // per (group, bench).
-    let winners: HashMap<(String, String), usize> = runs
-        .iter()
-        .enumerate()
-        .fold(HashMap::new(), |mut acc, (ri, result)| {
-            for cmp in &result.comparisons {
-                for bench in &cmp.benchmarks {
-                    let key = (cmp.group_name.clone(), bench.name.clone());
-                    let this_mean = bench.summary.mean;
-                    acc.entry(key)
-                        .and_modify(|best: &mut usize| {
-                            let prev_mean =
-                                run_mean(&runs, *best, &cmp.group_name, &bench.name);
-                            if this_mean < prev_mean {
-                                *best = ri;
-                            }
-                        })
-                        .or_insert(ri);
+    let winners: HashMap<(String, String), usize> =
+        runs.iter()
+            .enumerate()
+            .fold(HashMap::new(), |mut acc, (ri, result)| {
+                for cmp in &result.comparisons {
+                    for bench in &cmp.benchmarks {
+                        let key = (cmp.group_name.clone(), bench.name.clone());
+                        let this_mean = bench.summary.mean;
+                        acc.entry(key)
+                            .and_modify(|best: &mut usize| {
+                                let prev_mean =
+                                    run_mean(&runs, *best, &cmp.group_name, &bench.name);
+                                if this_mean < prev_mean {
+                                    *best = ri;
+                                }
+                            })
+                            .or_insert(ri);
+                    }
                 }
-            }
-            acc
-        });
+                acc
+            });
 
     // Template = first run. Overwrite each bench's summary according
     // to the chosen policy.
@@ -479,9 +458,7 @@ pub fn aggregate_results(
                     // this field continues to answer "how jittery was
                     // this specific run?".
                     if let Some(&best_ri) = winners.get(&key) {
-                        if let Some(best_bench) =
-                            find_bench(&runs[best_ri], &key.0, &key.1)
-                        {
+                        if let Some(best_bench) = find_bench(&runs[best_ri], &key.0, &key.1) {
                             bench.summary = best_bench.summary.clone();
                         }
                     }
@@ -507,19 +484,6 @@ pub fn aggregate_results(
         }
     }
     out
-}
-
-/// Deprecated alias: renamed to [`aggregate_results`] because the
-/// function is source-agnostic — it combines any N `SuiteResult`s
-/// regardless of whether they came from sequential passes inside one
-/// OS process or from separate OS processes.
-#[deprecated(since = "0.1.7", note = "renamed to `aggregate_results`")]
-#[allow(deprecated)]
-pub fn aggregate_processes(
-    processes: Vec<SuiteResult>,
-    policy: ProcessAggregation,
-) -> SuiteResult {
-    aggregate_results(processes, policy)
 }
 
 fn find_bench<'a>(
@@ -619,110 +583,47 @@ pub fn run_and_save<F: FnOnce(&mut Suite)>(f: F) -> SuiteResult {
 /// name = "my_bench"
 /// harness = false
 /// ```
-/// Macro for defining benchmark binaries.
 ///
-/// Two forms:
-///
-/// **Function list** (composable, like criterion_group + criterion_main):
-/// ```rust,ignore
-/// fn bench_sort(suite: &mut zenbench::Suite) {
-///     suite.compare("sort", |group| {
-///         group.bench("std", |b| b.iter(|| data.sort()));
-///         group.bench("unstable", |b| b.iter(|| data.sort_unstable()));
-///     });
-/// }
-///
-/// fn bench_hash(suite: &mut zenbench::Suite) {
-///     suite.compare("hash", |group| { /* ... */ });
-/// }
-///
-/// zenbench::main!(bench_sort, bench_hash);
-/// ```
-///
-/// **Closure** (quick and simple):
-/// ```rust,ignore
-/// zenbench::main!(|suite| {
-///     suite.compare("sort", |group| { /* ... */ });
-/// });
-/// ```
 /// Parse the `--{best,mean,median}-of-passes=N` flags. Returns the
 /// requested pass count + aggregation policy, or `None` for a
 /// single-run invocation. Errors and exits on conflicting flags or
 /// invalid values.
 ///
-/// Also accepts the deprecated `--{best,mean,median}-of-processes=N`
-/// spellings for one release, emitting a warning. The short names
-/// `--passes=N`/`--policy=X` are not accepted here — those are reserved
-/// for the `zenbench-driver` bin which really does launch separate
-/// OS processes.
-///
 /// Exposed so both `main!` arms can share one implementation.
 #[doc(hidden)]
 pub fn parse_pass_args() -> Option<(usize, Aggregation)> {
     let mut found: Option<(usize, Aggregation, &'static str)> = None;
-    // Prefix → policy → canonical flag name → whether the spelling is deprecated.
-    let flags: &[(&str, Aggregation, &str, bool)] = &[
-        ("--best-of-passes=", Aggregation::Best, "--best-of-passes", false),
-        ("--mean-of-passes=", Aggregation::Mean, "--mean-of-passes", false),
-        ("--median-of-passes=", Aggregation::Median, "--median-of-passes", false),
-        // Deprecated spellings — keep accepting them for one release.
+    // Prefix → policy → canonical flag name.
+    let flags: &[(&str, Aggregation, &str)] = &[
+        ("--best-of-passes=", Aggregation::Best, "--best-of-passes"),
+        ("--mean-of-passes=", Aggregation::Mean, "--mean-of-passes"),
         (
-            "--best-of-processes=",
-            Aggregation::Best,
-            "--best-of-processes",
-            true,
-        ),
-        (
-            "--mean-of-processes=",
-            Aggregation::Mean,
-            "--mean-of-processes",
-            true,
-        ),
-        (
-            "--median-of-processes=",
+            "--median-of-passes=",
             Aggregation::Median,
-            "--median-of-processes",
-            true,
+            "--median-of-passes",
         ),
     ];
 
     for arg in std::env::args() {
-        let parsed: Option<(usize, Aggregation, &'static str, bool)> =
-            flags.iter().find_map(|(prefix, policy, name, deprecated)| {
+        let parsed: Option<(usize, Aggregation, &'static str)> =
+            flags.iter().find_map(|(prefix, policy, name)| {
                 arg.strip_prefix(prefix)
                     .and_then(|v| v.parse().ok())
-                    .map(|n: usize| (n, *policy, *name, *deprecated))
+                    .map(|n: usize| (n, *policy, *name))
             });
-        if let Some((n, p, name, deprecated)) = parsed {
+        if let Some((n, p, name)) = parsed {
             if let Some((_, _, prev_name)) = found {
-                eprintln!(
-                    "[zenbench] error: {prev_name} and {name} are mutually exclusive"
-                );
+                eprintln!("[zenbench] error: {prev_name} and {name} are mutually exclusive");
                 std::process::exit(2);
             }
             if n == 0 {
                 eprintln!("[zenbench] error: {name}=0 is not meaningful");
                 std::process::exit(2);
             }
-            if deprecated {
-                let new_name = name.replace("processes", "passes");
-                eprintln!(
-                    "[zenbench] warning: {name} is deprecated; use {new_name} instead. \
-                     run_passes runs sequential passes inside one OS process; if you wanted \
-                     actual separate processes see the zenbench-driver bin."
-                );
-            }
             found = Some((n, p, name));
         }
     }
     found.map(|(n, p, _)| (n, p))
-}
-
-/// Deprecated alias — `parse_pass_args` is the new spelling.
-#[deprecated(since = "0.1.7", note = "renamed to `parse_pass_args`")]
-#[doc(hidden)]
-pub fn parse_process_args() -> Option<(usize, Aggregation)> {
-    parse_pass_args()
 }
 
 #[macro_export]

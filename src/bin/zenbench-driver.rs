@@ -45,7 +45,7 @@
 use std::path::PathBuf;
 use std::process::{Command, ExitCode, Stdio};
 
-use zenbench::{aggregate_results, Aggregation, SuiteResult};
+use zenbench::{Aggregation, SuiteResult, aggregate_results};
 
 const USAGE: &str = "\
 zenbench-driver — run `cargo bench` N times in separate OS processes and
@@ -81,8 +81,8 @@ NOTES:
       driver, not the children).
     * If any child fails (non-zero exit, missing results, unreadable
       JSON), the driver cleans up temp files and exits 1.
-    * This differs from `cargo bench -- --best-of-processes=N`, which
-      runs all N trials in a single OS process. Use the in-process
+    * This differs from `cargo bench -- --best-of-passes=N`, which
+      runs all N passes in a single OS process. Use the in-process
       variant for quick iteration; use this driver when between-process
       noise (ASLR, CPU frequency state, page cache, scheduler) matters.
 ";
@@ -409,13 +409,15 @@ mod tests {
 
     #[test]
     fn rejects_missing_separator() {
-        assert!(parse_args(args_from(&[
-            "--processes=2",
-            "--policy=best",
-            "cargo",
-            "bench",
-        ]))
-        .is_err());
+        assert!(
+            parse_args(args_from(&[
+                "--processes=2",
+                "--policy=best",
+                "cargo",
+                "bench",
+            ]))
+            .is_err()
+        );
     }
 
     #[test]
@@ -425,48 +427,56 @@ mod tests {
 
     #[test]
     fn rejects_zero_processes() {
-        assert!(parse_args(args_from(&[
-            "--processes=0",
-            "--policy=best",
-            "--",
-            "cargo"
-        ]))
-        .is_err());
+        assert!(
+            parse_args(args_from(&[
+                "--processes=0",
+                "--policy=best",
+                "--",
+                "cargo"
+            ]))
+            .is_err()
+        );
     }
 
     #[test]
     fn rejects_unknown_policy() {
-        assert!(parse_args(args_from(&[
-            "--processes=2",
-            "--policy=fastest",
-            "--",
-            "cargo"
-        ]))
-        .is_err());
+        assert!(
+            parse_args(args_from(&[
+                "--processes=2",
+                "--policy=fastest",
+                "--",
+                "cargo"
+            ]))
+            .is_err()
+        );
     }
 
     #[test]
     fn rejects_unknown_format() {
-        assert!(parse_args(args_from(&[
-            "--processes=2",
-            "--policy=best",
-            "--format=yaml",
-            "--",
-            "cargo"
-        ]))
-        .is_err());
+        assert!(
+            parse_args(args_from(&[
+                "--processes=2",
+                "--policy=best",
+                "--format=yaml",
+                "--",
+                "cargo"
+            ]))
+            .is_err()
+        );
     }
 
     #[test]
     fn rejects_stray_arg_before_separator() {
-        assert!(parse_args(args_from(&[
-            "--processes=2",
-            "stray",
-            "--policy=best",
-            "--",
-            "cargo",
-        ]))
-        .is_err());
+        assert!(
+            parse_args(args_from(&[
+                "--processes=2",
+                "stray",
+                "--policy=best",
+                "--",
+                "cargo",
+            ]))
+            .is_err()
+        );
     }
 
     #[test]

@@ -16,7 +16,7 @@ pub struct Engine {
     /// Directory for the cross-process lock file.
     lock_dir: Option<PathBuf>,
     /// Suppress the terminal report (header, per-group, footer) when set.
-    /// Used by `run_trials` to avoid printing every trial's individual
+    /// Used by `run_passes` to avoid printing every pass's individual
     /// report; only the final aggregated report is shown.
     quiet: bool,
 }
@@ -56,7 +56,7 @@ impl Engine {
     }
 
     /// Suppress the terminal report (header, per-group, footer) when running.
-    /// Useful when an outer driver (e.g. `run_trials`) prints its own report
+    /// Useful when an outer driver (e.g. `run_passes`) prints its own report
     /// over the aggregated results.
     pub fn quiet(mut self, quiet: bool) -> Self {
         self.quiet = quiet;

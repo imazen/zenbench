@@ -8,21 +8,21 @@ Interleaved microbenchmarking crate for Rust. `#![forbid(unsafe_code)]`, MSRV 1.
 
 ```
 src/
-  lib.rs       — public API, main! macro, prelude
+  lib.rs       — public API, main! macro, prelude, run_passes, aggregate_results, Aggregation
   bench.rs     — Suite, BenchGroup, GroupConfig, Bencher, BenchFn
   engine.rs    — Engine, run_comparison_group, convergence logic
   results.rs   — SuiteResult, ComparisonResult, BenchmarkResult, to_llm/csv/markdown
   report.rs    — print_report terminal renderer (ANSI tables, bar charts, footnotes)
-  format.rs    — format_ns, ns_unit, format_ns_range helpers
+  format.rs    — format_ns, ns_unit helpers
   stats.rs     — Summary, PairedAnalysis, bootstrap_ci, Wilcoxon, Spearman
-  gate.rs      — ResourceGate, GateConfig, system health checks
+  gate.rs      — ResourceGate, GateConfig, system health checks, ZENBENCH_LAUNCHER_PIDS
   platform.rs  — SystemMonitor, CI detection, git hash
   timing.rs    — TSC reads, asm fences, frequency calibration (precise-timing feature, only unsafe)
   checks.rs    — BenchWarning, WarningKind (mostly superseded by footnotes in report.rs)
   daemon.rs    — fire-and-forget subprocess mode
   mcp.rs       — MCP JSON-RPC server
   ci.rs        — CI environment detection
-  bin/         — zenbench CLI, zenbench-mcp
+  bin/         — zenbench CLI, zenbench-mcp, zenbench-driver
 benches/
   sorting.rs   — comprehensive demo: sort, sub-ns, contention, parallel, throughput
 ```

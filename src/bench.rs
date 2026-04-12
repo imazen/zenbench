@@ -676,7 +676,7 @@ impl Default for GroupConfig {
             bootstrap_resamples: 10_000,
             cold_start: false,
             sample_target_ns: 1_000_000, // 1ms — short enough to dodge context switches
-            min_sample_ns: 5_000_000, // 5ms — long enough to absorb a context switch
+            min_sample_ns: 5_000_000,    // 5ms — long enough to absorb a context switch
             linear_sampling: false,
             stack_jitter: cfg!(feature = "precise-timing"), // on by default with precise-timing
         }

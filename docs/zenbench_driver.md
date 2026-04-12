@@ -45,7 +45,7 @@ not fix it; `zenbench-driver` does.
 
 If you don't care about those (say, you're sanity-checking a micro-
 optimization on a dev machine and want fast iteration), use
-`cargo bench -- --best-of-processes=3` instead. It's faster because it
+`cargo bench -- --best-of-passes=3` instead. It's faster because it
 skips the per-child cold-start cost.
 
 ## How it flows, end to end
