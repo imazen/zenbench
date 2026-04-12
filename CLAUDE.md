@@ -22,7 +22,7 @@ src/
   daemon.rs    — fire-and-forget subprocess mode
   mcp.rs       — MCP JSON-RPC server
   ci.rs        — CI environment detection
-  bin/         — zenbench CLI, zenbench-mcp, zenbench-driver
+  bin/         — zenbench CLI, zenbench-mcp
 benches/
   sorting.rs   — comprehensive demo: sort, sub-ns, contention, parallel, throughput
 ```

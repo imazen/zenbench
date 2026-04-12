@@ -199,8 +199,8 @@ pub fn run<F: FnOnce(&mut Suite)>(f: F) -> SuiteResult {
 
 /// How to combine N `SuiteResult`s into one.
 ///
-/// Used by both [`run_passes`] (in-process) and the `zenbench-driver`
-/// bin (cross-OS-process). There is intentionally no default — callers
+/// Used by both [`run_passes`] (in-process) and [`run_processes`]
+/// (cross-OS-process). There is intentionally no default — callers
 /// must pick one. The correct choice depends on what you're trying to
 /// measure, and every policy answers a different question.
 #[derive(Clone, Copy, Debug)]
@@ -278,26 +278,24 @@ pub enum Aggregation {
 ///     same code pages, same training history.
 ///   * **Background contention** on co-tenant cores.
 ///
-/// For these, you need actually separate OS processes. Use the
-/// `zenbench-driver` bin target, which `spawn`s `N` children and
-/// feeds their `SuiteResult`s through [`aggregate_results`]:
+/// For these, you need actually separate OS processes. Use
+/// [`run_processes`] / `--best-of-processes=N`:
 ///
 /// ```text
-/// zenbench-driver --processes=3 --policy=best -- cargo bench --bench mybench
+/// cargo bench -- --best-of-processes=3
 /// ```
 ///
-/// # When to use `run_passes` vs `zenbench-driver`
+/// # When to use passes vs processes
 ///
 /// * Your benchmark allocates large per-iteration test data, and you
-///   suspect lucky heap alignment is skewing results → **`run_passes`**.
+///   suspect lucky heap alignment is skewing results → **passes**.
 /// * Your benchmark's outer loop calibrates differently each run
-///   (e.g. data-dependent iteration count estimation) → **`run_passes`**.
+///   (e.g. data-dependent iteration count estimation) → **passes**.
 /// * Your measurements bounce between cargo bench invocations but
-///   individual runs report `mad ±0.1%` → **`zenbench-driver`**
+///   individual runs report `mad ±0.1%` → **processes**
 ///   (this is the between-OS-process variance signature).
-/// * You want both → run `zenbench-driver` with `N` processes, and
-///   pass `--best-of-passes=M` to the inner `cargo bench` so each
-///   process itself uses M passes. Total runs = N × M.
+/// * You want both → `--best-of-processes=3 --best-of-passes=2`.
+///   Each of 3 OS processes does 2 in-process passes. Total = 6 runs.
 ///
 /// # Why a policy is required
 ///
@@ -388,7 +386,7 @@ pub fn run_passes<F: FnMut(&mut Suite)>(
 ///
 /// Source-agnostic: the inputs can be sequential passes produced by
 /// [`run_passes`] (inside one OS process) or separate OS processes
-/// collected by `zenbench-driver`. The policy treats each `SuiteResult`
+/// collected by `run_processes`. The policy treats each `SuiteResult`
 /// as one observation regardless of how it was produced.
 ///
 /// See [`Aggregation`] for the policy definitions.
@@ -626,11 +624,202 @@ pub fn parse_pass_args() -> Option<(usize, Aggregation)> {
     found.map(|(n, p, _)| (n, p))
 }
 
+/// Parse `--{best,mean,median}-of-processes=N` flags for cross-OS-process
+/// aggregation. Returns `None` if `ZENBENCH_SUBPROCESS=1` is set (recursion
+/// guard) or if no process flag is present.
+#[doc(hidden)]
+pub fn parse_process_args() -> Option<(usize, Aggregation)> {
+    // Recursion guard: children spawned by run_processes set this.
+    if std::env::var("ZENBENCH_SUBPROCESS").as_deref() == Ok("1") {
+        return None;
+    }
+    let mut found: Option<(usize, Aggregation, &'static str)> = None;
+    let flags: &[(&str, Aggregation, &str)] = &[
+        (
+            "--best-of-processes=",
+            Aggregation::Best,
+            "--best-of-processes",
+        ),
+        (
+            "--mean-of-processes=",
+            Aggregation::Mean,
+            "--mean-of-processes",
+        ),
+        (
+            "--median-of-processes=",
+            Aggregation::Median,
+            "--median-of-processes",
+        ),
+    ];
+
+    for arg in std::env::args() {
+        let parsed: Option<(usize, Aggregation, &'static str)> =
+            flags.iter().find_map(|(prefix, policy, name)| {
+                arg.strip_prefix(prefix)
+                    .and_then(|v| v.parse().ok())
+                    .map(|n: usize| (n, *policy, *name))
+            });
+        if let Some((n, p, name)) = parsed {
+            if let Some((_, _, prev_name)) = found {
+                eprintln!("[zenbench] error: {prev_name} and {name} are mutually exclusive");
+                std::process::exit(2);
+            }
+            if n == 0 {
+                eprintln!("[zenbench] error: {name}=0 is not meaningful");
+                std::process::exit(2);
+            }
+            found = Some((n, p, name));
+        }
+    }
+    found.map(|(n, p, _)| (n, p))
+}
+
+/// Re-exec the current benchmark binary N times in separate OS processes
+/// and aggregate the results.
+///
+/// Each child gets a fresh ASLR layout, CPU frequency state, scheduler
+/// affinity, and page cache — noise sources that in-process `run_passes`
+/// cannot reset. The child writes its `SuiteResult` to a temp JSON file
+/// via `ZENBENCH_RESULT_PATH`; the parent reads it back and aggregates.
+///
+/// # CLI flags
+///
+/// The `main!` macro parses these from `cargo bench`:
+///
+/// ```text
+/// --best-of-processes=N          -> run_processes(N, Best)
+/// --mean-of-processes=N          -> run_processes(N, Mean)
+/// --median-of-processes=N        -> run_processes(N, Median)
+/// ```
+///
+/// Composable with passes: `--best-of-processes=3 --best-of-passes=2`
+/// runs 3 OS processes, each doing 2 in-process passes. Total = 6 runs.
+pub fn run_processes(processes: usize, policy: Aggregation) -> SuiteResult {
+    let exe = std::env::current_exe().unwrap_or_else(|e| {
+        eprintln!("[zenbench] error: cannot determine current executable: {e}");
+        std::process::exit(2);
+    });
+
+    // Build child argv: strip process flags and post-processing flags
+    // (parent handles --format, --save-baseline, --baseline, --update-on-pass
+    // on the aggregated result; children just measure and save JSON).
+    let child_args: Vec<String> = std::env::args()
+        .skip(1) // skip argv[0]
+        .filter(|a| {
+            !a.starts_with("--best-of-processes=")
+                && !a.starts_with("--mean-of-processes=")
+                && !a.starts_with("--median-of-processes=")
+                && !a.starts_with("--format=")
+                && !a.starts_with("--save-baseline=")
+                && !a.starts_with("--baseline=")
+                && !a.starts_with("--max-regression=")
+                && a != "--update-on-pass"
+        })
+        .collect();
+
+    // Unique run ID for temp files.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let pid = std::process::id();
+    let run_id = format!("{now:x}-{pid:x}");
+
+    // Launcher PID chain for the benchmark-process gate (issue #5).
+    let launcher_pids = match std::env::var("ZENBENCH_LAUNCHER_PIDS") {
+        Ok(existing) => format!("{existing},{pid}"),
+        Err(_) => pid.to_string(),
+    };
+
+    let temp_dir = std::env::temp_dir();
+    let temp_paths: Vec<std::path::PathBuf> = (0..processes)
+        .map(|i| temp_dir.join(format!("zenbench-proc-{run_id}-{i}.json")))
+        .collect();
+
+    let mut results: Vec<SuiteResult> = Vec::with_capacity(processes);
+    for (i, path) in temp_paths.iter().enumerate() {
+        eprintln!("[zenbench] process {}/{processes}", i + 1);
+        let status = std::process::Command::new(&exe)
+            .args(&child_args)
+            .env("ZENBENCH_SUBPROCESS", "1")
+            .env("ZENBENCH_RESULT_PATH", path)
+            .env("ZENBENCH_LAUNCHER_PIDS", &launcher_pids)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::inherit())
+            .status();
+
+        match status {
+            Ok(s) if s.success() => {}
+            Ok(s) => {
+                eprintln!("[zenbench] process {} exited with {s}", i + 1);
+                cleanup_temp(&temp_paths);
+                std::process::exit(1);
+            }
+            Err(e) => {
+                eprintln!("[zenbench] failed to spawn process {}: {e}", i + 1);
+                cleanup_temp(&temp_paths);
+                std::process::exit(1);
+            }
+        }
+
+        match SuiteResult::load(path) {
+            Ok(r) => results.push(r),
+            Err(e) => {
+                eprintln!("[zenbench] process {} produced no results: {e}", i + 1);
+                cleanup_temp(&temp_paths);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    cleanup_temp(&temp_paths);
+
+    let aggregated = aggregate_results(results, policy);
+
+    // Print the aggregated report.
+    report::print_header(
+        &aggregated.run_id,
+        aggregated.git_hash.as_deref(),
+        aggregated.ci_environment.as_deref(),
+    );
+    let policy_name = match policy {
+        Aggregation::Best => "best",
+        Aggregation::Mean => "mean",
+        Aggregation::Median => "median",
+    };
+    eprintln!("[zenbench] {policy_name} of {processes} processes (cross-OS-process isolation)");
+    for cmp in &aggregated.comparisons {
+        report::print_group(cmp, aggregated.timer_resolution_ns);
+    }
+    report::print_footer(
+        aggregated.total_time,
+        aggregated.gate_waits,
+        aggregated.gate_wait_time,
+        aggregated.unreliable,
+    );
+
+    aggregated
+}
+
+fn cleanup_temp(paths: &[std::path::PathBuf]) {
+    for p in paths {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
 #[macro_export]
 macro_rules! main {
     // Form 1: function list — composable, like criterion
     ($($func:path),+ $(,)?) => {
         fn main() {
+            // Self-trampoline: re-exec in separate OS processes if requested.
+            if let Some((n, policy)) = $crate::parse_process_args() {
+                let result = $crate::run_processes(n, policy);
+                $crate::postprocess_result(&result);
+                return;
+            }
+
             let group_filter: Option<String> = std::env::args()
                 .find_map(|a| a.strip_prefix("--group=").map(String::from));
             let passes = $crate::parse_pass_args();
@@ -653,6 +842,13 @@ macro_rules! main {
     // Form 2: closure — quick single-file benchmarks
     (|$suite:ident| $body:block) => {
         fn main() {
+            // Self-trampoline: re-exec in separate OS processes if requested.
+            if let Some((n, policy)) = $crate::parse_process_args() {
+                let result = $crate::run_processes(n, policy);
+                $crate::postprocess_result(&result);
+                return;
+            }
+
             let group_filter: Option<String> = std::env::args()
                 .find_map(|a| a.strip_prefix("--group=").map(String::from));
             let passes = $crate::parse_pass_args();
