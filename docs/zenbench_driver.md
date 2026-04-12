@@ -3,29 +3,45 @@
 `zenbench-driver` is a small binary that launches a `cargo bench`
 command **N separate times, each in its own OS process**, collects the
 JSON `SuiteResult` from each child, and aggregates them via
-`zenbench::aggregate_processes`. It complements — it does not replace —
-the in-process `run_processes` / `--{best,mean,median}-of-processes=N`
+`zenbench::aggregate_results`. It complements — it does not replace —
+the in-process `run_passes` / `--{best,mean,median}-of-passes=N`
 entry point.
 
-## Why another driver?
+## What attacks what kind of noise
 
-Rounds, warmups, and re-instantiated `Engine`s inside **one** OS process
-can only reset so much noise:
+Rounds, passes, and processes attack *different* sources of variance.
+A benchmark tool that doesn't pay attention to which is which will
+report numbers with whichever kind of noise it couldn't reset — and
+since the numbers look just as tight on either side, you won't notice
+until you re-run and they bounce.
 
-| Noise source | In-process `run_processes` | `zenbench-driver` |
-|---|---|---|
-| Round/iteration count (calibration) | reset per process | reset per child |
-| Engine internal state | reset per process | reset per child |
-| Cache working set | mostly displaced by warmup | fully cold on each `exec` |
-| Branch predictor / BTB | partly reset by warmup | fully reset on each `exec` |
-| ASLR layout | **fixed for the whole run** | **new per child** |
-| CPU frequency / C-state at startup | **already warm** | **cold per child** |
-| Kernel scheduler affinity decisions | **sticky for the lifetime of the process** | **re-decided per child** |
-| Page cache from prior workloads | **same for every trial** | **may differ per child** |
+| Source of variance | `max_rounds` (within pass) | `run_passes` / `--*-of-passes=N` (within process) | `zenbench-driver --processes=N` (cross process) |
+|---|:--:|:--:|:--:|
+| **Timer quantization** | ✅ | ✅ | ✅ |
+| **Per-sample OS interrupt** during measurement window | ✅ | ✅ | ✅ |
+| **Single-sample cache misses** on hot data | ✅ | ✅ | ✅ |
+| **Calibration / iteration-count estimate** | ❌ (one per run) | ✅ rerun per pass | ✅ rerun per child |
+| **Warmup state** in the hot loop | ❌ (warmup runs once) | ✅ re-warmed per pass | ✅ re-warmed per child |
+| **Heap addresses** of benchmark test data | ❌ (one malloc) | ✅ re-allocated each pass | ✅ new heap per child |
+| **Data-dependent branch history** | ❌ | ✅ data moved → re-trained | ✅ |
+| **CPU frequency / turbo / thermal state** | ❌ | ❌ (same process) | ✅ fresh per `execve` |
+| **ASLR layout for code pages** | ❌ | ❌ (set at startup) | ✅ new per `execve` |
+| **Kernel scheduler affinity / NUMA** | ❌ | ❌ (same PID) | ✅ re-decided per child |
+| **Page cache residency** for binary mappings | ❌ | ❌ (same mappings) | ✅ |
+| **Branch predictor tables** at hot code addresses | ❌ | ❌ (same code pages, same history) | ✅ |
+| **Background contention** on co-tenant cores | depends on external timing | depends on external timing | partial — captures variation between child launches |
 
-The first block of rows is what `run_processes` already handles. The
-second block — ASLR, CPU frequency, scheduler — is what this driver adds.
-If you care about those, run your benchmark in separate processes.
+The key observation: the green ticks for `run_passes` and
+`zenbench-driver` are a *strict superset* of the ticks for
+`max_rounds`, and `zenbench-driver`'s ticks are a strict superset of
+`run_passes`. More rounds inside one pass cannot attack anything
+passes can't already attack, and more passes inside one process
+cannot attack anything a cross-process driver doesn't already attack.
+
+This also means the diagnostic "benchmark reports `mad ±0.1%` within
+a run but bounces `±10%` between cargo bench invocations" is
+exactly the **process-level variance** signature. `run_passes` does
+not fix it; `zenbench-driver` does.
 
 If you don't care about those (say, you're sanity-checking a micro-
 optimization on a dev machine and want fast iteration), use
@@ -53,7 +69,7 @@ skips the per-child cold-start cost.
          │ repeat N times (sequentially — not in parallel)
          │
          ▼
-  aggregate_processes(vec![r1, r2, ..., rN], policy)
+  aggregate_results(vec![r1, r2, ..., rN], policy)
          │
          ▼
   Print aggregated report (stderr terminal form + stdout formatted form)
@@ -79,8 +95,8 @@ Concretely:
 3. After all N children succeed, delete the temp files (before the
    report step — so a panic in aggregation doesn't leak files).
 
-4. Call `zenbench::aggregate_processes(results, policy)`. This is the
-   **same** function `run_processes` calls internally, so the in-process
+4. Call `zenbench::aggregate_results(results, policy)`. This is the
+   **same** function `run_passes` calls internally, so the in-process
    and cross-process drivers produce directly comparable summaries.
 
 5. Print the aggregated report:
@@ -130,25 +146,25 @@ extra args to the harness. The driver stops parsing at the **first**
 The driver deliberately does **not** reimplement aggregation. It calls:
 
 ```rust
-pub fn aggregate_processes(
-    processes: Vec<SuiteResult>,
-    policy: ProcessAggregation,
+pub fn aggregate_results(
+    runs: Vec<SuiteResult>,
+    policy: Aggregation,
 ) -> SuiteResult
 ```
 
-This is the same function `run_processes` calls after collecting its N
+This is the same function `run_passes` calls after collecting its N
 in-process results. If you want to build your own driver (e.g., a shell
 loop over hosts on a cluster), you can:
 
 1. Run `cargo bench` N times with `ZENBENCH_RESULT_PATH=<path>` set
    differently each time.
 2. `SuiteResult::load` each JSON.
-3. Call `zenbench::aggregate_processes(results, policy)`.
+3. Call `zenbench::aggregate_results(results, policy)`.
 4. `result.print_report()` or `result.to_llm()`, etc.
 
 That's all `zenbench-driver` is under the hood.
 
-## When `run_processes` is enough
+## When `run_passes` is enough
 
 * You're iterating on a micro-optimization and want sub-second feedback.
 * The benchmarks are fast (< 1s each) and noise is dominated by OS

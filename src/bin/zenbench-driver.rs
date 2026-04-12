@@ -2,15 +2,15 @@
 //!
 //! Runs a `cargo bench` command N times in **separate OS processes** and
 //! combines the per-process [`SuiteResult`]s via
-//! [`zenbench::aggregate_processes`] under a caller-chosen policy.
+//! [`zenbench::aggregate_results`] under a caller-chosen policy.
 //!
-//! # Why this exists instead of `--best-of-processes=N`
+//! # Why this exists instead of `--best-of-passes=N`
 //!
-//! The in-process [`zenbench::run_processes`] entry point runs N suite
-//! invocations sequentially inside ONE OS process. That resets round
-//! counts, cache working sets, and per-engine state, but it does NOT
-//! reset between-process noise sources that only vary at OS-process
-//! startup:
+//! The in-process [`zenbench::run_passes`] entry point runs N suite
+//! invocations (passes) sequentially inside ONE OS process. That resets
+//! round counts, cache working sets, calibration, warmup, and the heap
+//! addresses of benchmark test data — but it does NOT reset
+//! between-process noise sources that only vary at OS-process startup:
 //!
 //!   * ASLR layout (chosen by the kernel at `exec`)
 //!   * CPU frequency / C-state at first scheduling
@@ -24,7 +24,7 @@
 //! [`SuiteResult`] to a unique temp JSON path supplied via the
 //! `ZENBENCH_RESULT_PATH` env var; the driver reads each JSON back and
 //! feeds the collected results into the same
-//! [`aggregate_processes`](zenbench::aggregate_processes) function the
+//! [`aggregate_results`](zenbench::aggregate_results) function the
 //! in-process variant uses, so both paths share one aggregation
 //! implementation.
 //!
@@ -45,7 +45,7 @@
 use std::path::PathBuf;
 use std::process::{Command, ExitCode, Stdio};
 
-use zenbench::{aggregate_processes, ProcessAggregation, SuiteResult};
+use zenbench::{aggregate_results, Aggregation, SuiteResult};
 
 const USAGE: &str = "\
 zenbench-driver — run `cargo bench` N times in separate OS processes and
@@ -57,7 +57,7 @@ USAGE:
 REQUIRED:
     --processes=N       Number of separate OS processes to run (N >= 1).
     --policy=POLICY     Aggregation policy: best | mean | median.
-                        See zenbench::ProcessAggregation docs for semantics.
+                        See zenbench::Aggregation docs for semantics.
 
 OPTIONAL:
     --format=FMT        Output format for the aggregated report:
@@ -90,7 +90,7 @@ NOTES:
 #[derive(Debug)]
 struct Args {
     processes: usize,
-    policy: ProcessAggregation,
+    policy: Aggregation,
     format: OutputFormat,
     cmd: Vec<String>,
 }
@@ -117,11 +117,11 @@ impl OutputFormat {
     }
 }
 
-fn parse_policy(s: &str) -> Result<ProcessAggregation, String> {
+fn parse_policy(s: &str) -> Result<Aggregation, String> {
     match s {
-        "best" => Ok(ProcessAggregation::Best),
-        "mean" => Ok(ProcessAggregation::Mean),
-        "median" => Ok(ProcessAggregation::Median),
+        "best" => Ok(Aggregation::Best),
+        "mean" => Ok(Aggregation::Mean),
+        "median" => Ok(Aggregation::Median),
         other => Err(format!(
             "unknown --policy={other}: expected best | mean | median"
         )),
@@ -130,7 +130,7 @@ fn parse_policy(s: &str) -> Result<ProcessAggregation, String> {
 
 fn parse_args(raw: Vec<String>) -> Result<Args, String> {
     let mut processes: Option<usize> = None;
-    let mut policy: Option<ProcessAggregation> = None;
+    let mut policy: Option<Aggregation> = None;
     let mut format = OutputFormat::Llm;
     let mut cmd: Vec<String> = Vec::new();
     let mut saw_separator = false;
@@ -312,17 +312,17 @@ fn main() -> ExitCode {
     // Avoid dangling references — paths already cleaned.
     paths.clear();
 
-    let aggregated = aggregate_processes(results, args.policy);
+    let aggregated = aggregate_results(results, args.policy);
 
     // Driver-level banner on stderr (so stdout formats stay clean for
-    // pipes). We can't reuse `run_processes`'s internal report helpers
+    // pipes). We can't reuse `run_passes`'s internal report helpers
     // — they're private to the crate — so fall back to the public
     // SuiteResult::print_report() for terminal output, and only print
     // the aggregated stats in the requested format on stdout.
     let policy_name = match args.policy {
-        ProcessAggregation::Best => "best",
-        ProcessAggregation::Mean => "mean",
-        ProcessAggregation::Median => "median",
+        Aggregation::Best => "best",
+        Aggregation::Mean => "mean",
+        Aggregation::Median => "median",
     };
     eprintln!(
         "[zenbench-driver] aggregated {} of {} processes (cross-OS-process isolation)",
@@ -356,7 +356,7 @@ mod tests {
         ]))
         .unwrap();
         assert_eq!(a.processes, 3);
-        assert!(matches!(a.policy, ProcessAggregation::Best));
+        assert!(matches!(a.policy, Aggregation::Best));
         assert!(matches!(a.format, OutputFormat::Llm));
         assert_eq!(a.cmd, vec!["cargo".to_string(), "bench".to_string()]);
     }
@@ -364,9 +364,9 @@ mod tests {
     #[test]
     fn parses_all_policies() {
         for (name, expected) in [
-            ("best", ProcessAggregation::Best),
-            ("mean", ProcessAggregation::Mean),
-            ("median", ProcessAggregation::Median),
+            ("best", Aggregation::Best),
+            ("mean", Aggregation::Mean),
+            ("median", Aggregation::Median),
         ] {
             let a = parse_args(args_from(&[
                 "--processes=2",

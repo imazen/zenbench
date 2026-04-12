@@ -150,8 +150,8 @@ pub use platform::Testbed;
 pub use results::{BenchmarkResult, ComparisonResult, RunId, SuiteResult};
 pub use stats::{MeanCi, PairedAnalysis, Summary};
 
-// `ProcessAggregation`, `run_processes`, and `aggregate_processes` are
-// defined below in this file and re-exported via the module root.
+// `Aggregation`, `run_passes`, and `aggregate_results` are defined below
+// and re-exported via the module root.
 
 /// Re-export `black_box` from std for convenience.
 ///
@@ -197,22 +197,22 @@ pub fn run<F: FnOnce(&mut Suite)>(f: F) -> SuiteResult {
     engine.run()
 }
 
-/// How to combine results when running a benchmark suite across
-/// multiple separate processes.
+/// How to combine N `SuiteResult`s into one.
 ///
-/// There is intentionally no default — callers must pick one. The
-/// correct choice depends on what you're trying to measure, and every
-/// policy answers a different question (see each variant's doc).
+/// Used by both [`run_passes`] (in-process) and the `zenbench-driver`
+/// bin (cross-OS-process). There is intentionally no default — callers
+/// must pick one. The correct choice depends on what you're trying to
+/// measure, and every policy answers a different question.
 #[derive(Clone, Copy, Debug)]
-pub enum ProcessAggregation {
-    /// Keep the process with the lowest mean per benchmark. The
-    /// reported `summary` is that process's full within-run summary —
-    /// `mean`, `median`, `mad`, `min`, `max`, `n`, all preserved.
+pub enum Aggregation {
+    /// Keep the run with the lowest mean per benchmark. The reported
+    /// `summary` is that run's full within-run summary — `mean`,
+    /// `median`, `mad`, `min`, `max`, `n`, all preserved.
     ///
     /// Use on shared/busy hosts, dev machines, and CI runners: noise
     /// from co-tenants, OS interrupts, and thermal throttling only
-    /// makes a process slower, so the fastest process is the closest
-    /// honest estimate of the hardware's quiet capability.
+    /// makes a run slower, so the fastest run is the closest honest
+    /// estimate of the hardware's quiet capability.
     ///
     /// Caveat: best-of-N is a **biased** estimator and does not
     /// converge as N grows — the expected min drifts downward. Don't
@@ -221,101 +221,142 @@ pub enum ProcessAggregation {
     /// versions of the same code on the same host with the same N,
     /// not as a statistical measurement of true mean.
     ///
-    /// Inter-process spread is reported as a separate footer line so
-    /// you can still tell when processes disagreed badly.
+    /// Inter-run spread is reported as a separate footer line so you
+    /// can still tell when runs disagreed badly.
     Best,
     /// Replace each bench `summary` with a fresh `Summary` built from
-    /// the distribution of per-process means. The resulting `mean` is
-    /// the mean of process means, `mad` is the inter-process spread.
+    /// the distribution of per-run means. The resulting `mean` is the
+    /// mean of run means, `mad` is the inter-run spread.
     ///
     /// Use on quiet hosts when you want expected-case performance.
     /// Converges via CLT and is unbiased. Pays for every contaminated
-    /// process by dragging the average up — that's the point.
+    /// run by dragging the average up — that's the point.
     Mean,
-    /// Median of process means. Robust to one or two contaminated
-    /// processes without the downward bias of Best. A reasonable
-    /// middle ground when you can't characterize the host's noise
-    /// and don't want to argue about which policy is correct.
+    /// Median of run means. Robust to one or two contaminated runs
+    /// without the downward bias of Best. A reasonable middle ground
+    /// when you can't characterize the host's noise and don't want to
+    /// argue about which policy is correct.
     Median,
 }
 
-/// Run a benchmark suite in N separate engine invocations ("processes")
-/// and combine the per-process results under the chosen [`ProcessAggregation`]
-/// policy.
+/// Deprecated alias kept for one release while the `process` → `pass`
+/// rename settles. Use [`Aggregation`] instead.
+#[deprecated(since = "0.1.7", note = "renamed to `Aggregation`")]
+pub type ProcessAggregation = Aggregation;
+
+/// Run a benchmark suite in N sequential "passes" inside the current
+/// OS process and combine the per-pass results under the chosen
+/// [`Aggregation`] policy.
 ///
-/// Each "process" is a complete suite execution: warmup, calibration,
-/// sample collection, within-process statistics. The processes run
-/// sequentially inside the same OS process (no fork/exec), but each
-/// gets a fresh `Engine` / `Suite` pair, so between-process noise
-/// sources that vary run-to-run are partially reset:
+/// A "pass" is one complete suite execution (warmup, calibration,
+/// sample collection, within-pass statistics) with a fresh `Suite`
+/// and `Engine`. All N passes share the **same OS process** — no
+/// `fork` / `exec` — which limits what they can reset.
 ///
-///   * Cache/TLB state from the previous process's workload — mostly
-///     flushed because the previous process's working set gets
-///     displaced by the new warmup.
-///   * Branch predictor state — partly reset by the warmup phase,
-///     though not as thoroughly as a fresh OS process.
-///   * Round/iteration count that zenbench picks via calibration —
-///     re-estimated per process from scratch.
+/// # What `run_passes` resets between passes
 ///
-/// Run-to-run sources that we *can't* reset this way — CPU frequency
-/// state at OS-process startup, ASLR layout, kernel scheduling
-/// affinity — require actually launching separate OS processes.
-/// `run_processes` does NOT do that. For those, use a shell loop or
-/// external `just bench-all` wrapper that invokes `cargo bench` N
-/// times and feeds the results into `aggregate_processes`.
+/// These are genuinely re-done for each pass, so passes are useful
+/// against noise sources that depend on them:
+///
+///   * **Calibration** (iterations-per-sample estimation) — redone
+///     from scratch.
+///   * **Warmup** — re-run for the hot loop.
+///   * **Heap addresses of benchmark test data** — the bench-defining
+///     closure re-allocates its inputs each pass, so the data lands
+///     at a different heap address, shuffling TLB entries and L1/L2
+///     set assignments for the data.
+///   * **Data-dependent branch-predictor history** — because the
+///     data moved, branches keyed by data address re-train.
+///
+/// # What `run_passes` does **not** reset
+///
+/// These are constant across all samples in one OS process and
+/// therefore **constant across passes**. `run_passes` cannot attack
+/// them — they are exactly why you might run `cargo bench` twice from
+/// the shell and get different numbers:
+///
+///   * **CPU frequency / turbo / thermal state.**
+///   * **ASLR layout for the binary's code pages** (set at `execve`).
+///   * **Kernel page cache** for the binary mappings.
+///   * **Kernel scheduler state** (affinity, NUMA node, cpuset).
+///   * **Branch predictor tables for the hot code addresses** —
+///     same code pages, same training history.
+///   * **Background contention** on co-tenant cores.
+///
+/// For these, you need actually separate OS processes. Use the
+/// `zenbench-driver` bin target, which `spawn`s `N` children and
+/// feeds their `SuiteResult`s through [`aggregate_results`]:
+///
+/// ```text
+/// zenbench-driver --processes=3 --policy=best -- cargo bench --bench mybench
+/// ```
+///
+/// # When to use `run_passes` vs `zenbench-driver`
+///
+/// * Your benchmark allocates large per-iteration test data, and you
+///   suspect lucky heap alignment is skewing results → **`run_passes`**.
+/// * Your benchmark's outer loop calibrates differently each run
+///   (e.g. data-dependent iteration count estimation) → **`run_passes`**.
+/// * Your measurements bounce between cargo bench invocations but
+///   individual runs report `mad ±0.1%` → **`zenbench-driver`**
+///   (this is the between-OS-process variance signature).
+/// * You want both → run `zenbench-driver` with `N` processes, and
+///   pass `--best-of-passes=M` to the inner `cargo bench` so each
+///   process itself uses M passes. Total runs = N × M.
 ///
 /// # Why a policy is required
 ///
-/// Rounds reduce **within-process** variance. Processes reduce
-/// **between-process** variance. The two attack different noise
-/// sources, and how you should combine them depends on what question
-/// you're trying to answer:
+/// Rounds reduce **within-pass** variance (timer noise, single-sample
+/// interrupts). Passes reduce a **subset of between-OS-process**
+/// variance (the parts listed above). Different noise sources want
+/// different aggregation rules, and the answer depends on what you're
+/// trying to measure:
 ///
 ///   * "What's the lowest this code can achieve?" → [`Best`]
 ///   * "What will my users see on average?" → [`Mean`]
 ///   * "I don't know and don't want to bias the estimate" → [`Median`]
 ///
-/// Every option answers a different question, and zenbench refuses
-/// to pick for you. No default.
+/// Every option answers a different question, and zenbench refuses to
+/// pick for you. No default.
 ///
 /// # CLI flags
 ///
 /// The `main!` macro parses these from `cargo bench`:
 ///
 /// ```text
-/// --best-of-processes=N       -> run_processes(N, Best, ...)
-/// --mean-of-processes=N       -> run_processes(N, Mean, ...)
-/// --median-of-processes=N     -> run_processes(N, Median, ...)
+/// --best-of-passes=N          -> run_passes(N, Best,   ...)
+/// --mean-of-passes=N          -> run_passes(N, Mean,   ...)
+/// --median-of-passes=N        -> run_passes(N, Median, ...)
 /// ```
 ///
 /// No flag → single `run()` call, exactly like before.
 ///
-/// [`Best`]: ProcessAggregation::Best
-/// [`Mean`]: ProcessAggregation::Mean
-/// [`Median`]: ProcessAggregation::Median
-pub fn run_processes<F: FnMut(&mut Suite)>(
-    processes: usize,
-    policy: ProcessAggregation,
+/// [`Best`]: Aggregation::Best
+/// [`Mean`]: Aggregation::Mean
+/// [`Median`]: Aggregation::Median
+pub fn run_passes<F: FnMut(&mut Suite)>(
+    passes: usize,
+    policy: Aggregation,
     mut f: F,
 ) -> SuiteResult {
-    if processes <= 1 {
+    if passes <= 1 {
         let mut suite = Suite::new();
         f(&mut suite);
         let engine = engine::Engine::new(suite);
         return engine.run();
     }
 
-    // Run each process silently, then print one aggregated report at the end.
-    let mut all_results: Vec<SuiteResult> = Vec::with_capacity(processes);
-    for i in 0..processes {
-        eprintln!("[zenbench] process {}/{}", i + 1, processes);
+    // Run each pass silently, then print one aggregated report at the end.
+    let mut all_results: Vec<SuiteResult> = Vec::with_capacity(passes);
+    for i in 0..passes {
+        eprintln!("[zenbench] pass {}/{}", i + 1, passes);
         let mut suite = Suite::new();
         f(&mut suite);
         let engine = engine::Engine::new(suite).quiet(true);
         all_results.push(engine.run());
     }
 
-    let aggregated = aggregate_processes(all_results, policy);
+    let aggregated = aggregate_results(all_results, policy);
 
     // Final aggregated report (header + groups + footer).
     report::print_header(
@@ -324,14 +365,14 @@ pub fn run_processes<F: FnMut(&mut Suite)>(
         aggregated.ci_environment.as_deref(),
     );
     let banner = match policy {
-        ProcessAggregation::Best => format!(
-            "[zenbench] best of {processes} processes (min process mean; within-run mad preserved)"
+        Aggregation::Best => format!(
+            "[zenbench] best of {passes} passes (min pass mean; within-run mad preserved)"
         ),
-        ProcessAggregation::Mean => {
-            format!("[zenbench] mean of {processes} processes (mad = inter-process spread)")
+        Aggregation::Mean => {
+            format!("[zenbench] mean of {passes} passes (mad = inter-pass spread)")
         }
-        ProcessAggregation::Median => format!(
-            "[zenbench] median of {processes} processes (mad = inter-process spread)"
+        Aggregation::Median => format!(
+            "[zenbench] median of {passes} passes (mad = inter-pass spread)"
         ),
     };
     eprintln!("{banner}");
@@ -348,34 +389,46 @@ pub fn run_processes<F: FnMut(&mut Suite)>(
     aggregated
 }
 
-/// Combine N `SuiteResult`s produced by separate engine invocations
-/// into a single result under the caller-chosen policy.
-///
-/// Public so external drivers (e.g. a shell wrapper that runs `cargo
-/// bench` N times in separate OS processes and deserializes each
-/// JSON) can reuse the same aggregation logic zenbench's in-process
-/// [`run_processes`] uses.
-///
-/// See [`ProcessAggregation`] for the policy definitions.
-pub fn aggregate_processes(
-    processes: Vec<SuiteResult>,
+/// Deprecated alias: renamed to `run_passes` for honesty about scope.
+#[deprecated(since = "0.1.7", note = "renamed to `run_passes` — the function runs \
+    sequential passes inside one OS process, not separate processes. \
+    See `zenbench-driver` for actual cross-OS-process aggregation.")]
+#[allow(deprecated)]
+pub fn run_processes<F: FnMut(&mut Suite)>(
+    processes: usize,
     policy: ProcessAggregation,
+    f: F,
+) -> SuiteResult {
+    run_passes(processes, policy, f)
+}
+
+/// Combine N `SuiteResult`s into one under the caller-chosen policy.
+///
+/// Source-agnostic: the inputs can be sequential passes produced by
+/// [`run_passes`] (inside one OS process) or separate OS processes
+/// collected by `zenbench-driver`. The policy treats each `SuiteResult`
+/// as one observation regardless of how it was produced.
+///
+/// See [`Aggregation`] for the policy definitions.
+pub fn aggregate_results(
+    runs: Vec<SuiteResult>,
+    policy: Aggregation,
 ) -> SuiteResult {
     use std::collections::HashMap;
 
-    if processes.is_empty() {
+    if runs.is_empty() {
         return SuiteResult::default();
     }
-    if processes.len() == 1 {
-        return processes.into_iter().next().unwrap();
+    if runs.len() == 1 {
+        return runs.into_iter().next().unwrap();
     }
 
-    // Collect per-(group, bench) the full list of per-process means.
+    // Collect per-(group, bench) the full list of per-run means.
     // Used by all policies: Best needs to find the winner; Mean and
     // Median rebuild the summary from this distribution; Best reports
-    // inter-process spread as a footer line.
+    // inter-run spread as a footer line.
     let mut means: HashMap<(String, String), Vec<f64>> = HashMap::new();
-    for result in &processes {
+    for result in &runs {
         for cmp in &result.comparisons {
             for bench in &cmp.benchmarks {
                 let key = (cmp.group_name.clone(), bench.name.clone());
@@ -384,12 +437,12 @@ pub fn aggregate_processes(
         }
     }
 
-    // For Best policy: find the process index with the lowest mean
+    // For Best policy: find the run index with the lowest mean
     // per (group, bench).
-    let winners: HashMap<(String, String), usize> = processes
+    let winners: HashMap<(String, String), usize> = runs
         .iter()
         .enumerate()
-        .fold(HashMap::new(), |mut acc, (pi, result)| {
+        .fold(HashMap::new(), |mut acc, (ri, result)| {
             for cmp in &result.comparisons {
                 for bench in &cmp.benchmarks {
                     let key = (cmp.group_name.clone(), bench.name.clone());
@@ -397,20 +450,20 @@ pub fn aggregate_processes(
                     acc.entry(key)
                         .and_modify(|best: &mut usize| {
                             let prev_mean =
-                                process_mean(&processes, *best, &cmp.group_name, &bench.name);
+                                run_mean(&runs, *best, &cmp.group_name, &bench.name);
                             if this_mean < prev_mean {
-                                *best = pi;
+                                *best = ri;
                             }
                         })
-                        .or_insert(pi);
+                        .or_insert(ri);
                 }
             }
             acc
         });
 
-    // Template = first process. Overwrite each bench's summary
-    // according to the chosen policy.
-    let mut out = processes[0].clone();
+    // Template = first run. Overwrite each bench's summary according
+    // to the chosen policy.
+    let mut out = runs[0].clone();
     for cmp in out.comparisons.iter_mut() {
         for bench in cmp.benchmarks.iter_mut() {
             let key = (cmp.group_name.clone(), bench.name.clone());
@@ -419,28 +472,28 @@ pub fn aggregate_processes(
                 None => continue,
             };
             match policy {
-                ProcessAggregation::Best => {
-                    // Copy the winning process's full summary verbatim,
-                    // including its within-run mad. Inter-process spread
+                Aggregation::Best => {
+                    // Copy the winning run's full summary verbatim,
+                    // including its within-run mad. Inter-run spread
                     // is reported separately in the banner/footer so
                     // this field continues to answer "how jittery was
                     // this specific run?".
-                    if let Some(&best_pi) = winners.get(&key) {
+                    if let Some(&best_ri) = winners.get(&key) {
                         if let Some(best_bench) =
-                            find_bench(&processes[best_pi], &key.0, &key.1)
+                            find_bench(&runs[best_ri], &key.0, &key.1)
                         {
                             bench.summary = best_bench.summary.clone();
                         }
                     }
                 }
-                ProcessAggregation::Mean => {
-                    // Rebuild summary from the distribution of per-process
-                    // means. The new `mad` is inter-process spread by
+                Aggregation::Mean => {
+                    // Rebuild summary from the distribution of per-run
+                    // means. The new `mad` is inter-run spread by
                     // construction (Summary::from_slice computes it from
                     // the input slice).
                     bench.summary = crate::stats::Summary::from_slice(samples);
                 }
-                ProcessAggregation::Median => {
+                Aggregation::Median => {
                     // Same rebuild, but replace the Welford-mean with the
                     // median so it matches the advertised policy name.
                     let fresh = crate::stats::Summary::from_slice(samples);
@@ -448,12 +501,25 @@ pub fn aggregate_processes(
                     bench.summary.mean = fresh.median;
                 }
             }
-            // The single-process bootstrap CI no longer describes the
+            // The single-run bootstrap CI no longer describes the
             // distribution the reported mean came from in any policy.
             bench.mean_ci = None;
         }
     }
     out
+}
+
+/// Deprecated alias: renamed to [`aggregate_results`] because the
+/// function is source-agnostic — it combines any N `SuiteResult`s
+/// regardless of whether they came from sequential passes inside one
+/// OS process or from separate OS processes.
+#[deprecated(since = "0.1.7", note = "renamed to `aggregate_results`")]
+#[allow(deprecated)]
+pub fn aggregate_processes(
+    processes: Vec<SuiteResult>,
+    policy: ProcessAggregation,
+) -> SuiteResult {
+    aggregate_results(processes, policy)
 }
 
 fn find_bench<'a>(
@@ -470,7 +536,7 @@ fn find_bench<'a>(
         .find(|b| b.name == bench_name)
 }
 
-fn process_mean(results: &[SuiteResult], idx: usize, group: &str, bench_name: &str) -> f64 {
+fn run_mean(results: &[SuiteResult], idx: usize, group: &str, bench_name: &str) -> f64 {
     find_bench(&results[idx], group, bench_name)
         .map(|b| b.summary.mean)
         .unwrap_or(f64::INFINITY)
@@ -579,30 +645,55 @@ pub fn run_and_save<F: FnOnce(&mut Suite)>(f: F) -> SuiteResult {
 ///     suite.compare("sort", |group| { /* ... */ });
 /// });
 /// ```
-/// Parse the `--{best,mean,median}-of-processes=N` flags. Returns the
-/// requested process count + aggregation policy, or `None` for a
+/// Parse the `--{best,mean,median}-of-passes=N` flags. Returns the
+/// requested pass count + aggregation policy, or `None` for a
 /// single-run invocation. Errors and exits on conflicting flags or
 /// invalid values.
 ///
+/// Also accepts the deprecated `--{best,mean,median}-of-processes=N`
+/// spellings for one release, emitting a warning. The short names
+/// `--passes=N`/`--policy=X` are not accepted here — those are reserved
+/// for the `zenbench-driver` bin which really does launch separate
+/// OS processes.
+///
 /// Exposed so both `main!` arms can share one implementation.
 #[doc(hidden)]
-pub fn parse_process_args() -> Option<(usize, ProcessAggregation)> {
-    let mut found: Option<(usize, ProcessAggregation, &'static str)> = None;
+pub fn parse_pass_args() -> Option<(usize, Aggregation)> {
+    let mut found: Option<(usize, Aggregation, &'static str)> = None;
+    // Prefix → policy → canonical flag name → whether the spelling is deprecated.
+    let flags: &[(&str, Aggregation, &str, bool)] = &[
+        ("--best-of-passes=", Aggregation::Best, "--best-of-passes", false),
+        ("--mean-of-passes=", Aggregation::Mean, "--mean-of-passes", false),
+        ("--median-of-passes=", Aggregation::Median, "--median-of-passes", false),
+        // Deprecated spellings — keep accepting them for one release.
+        (
+            "--best-of-processes=",
+            Aggregation::Best,
+            "--best-of-processes",
+            true,
+        ),
+        (
+            "--mean-of-processes=",
+            Aggregation::Mean,
+            "--mean-of-processes",
+            true,
+        ),
+        (
+            "--median-of-processes=",
+            Aggregation::Median,
+            "--median-of-processes",
+            true,
+        ),
+    ];
+
     for arg in std::env::args() {
-        let parsed: Option<(usize, ProcessAggregation, &'static str)> = [
-            ("--best-of-processes=", ProcessAggregation::Best, "--best-of-processes"),
-            ("--mean-of-processes=", ProcessAggregation::Mean, "--mean-of-processes"),
-            (
-                "--median-of-processes=",
-                ProcessAggregation::Median,
-                "--median-of-processes",
-            ),
-        ]
-        .iter()
-        .find_map(|(prefix, policy, name)| {
-            arg.strip_prefix(prefix).and_then(|v| v.parse().ok()).map(|n: usize| (n, *policy, *name))
-        });
-        if let Some((n, p, name)) = parsed {
+        let parsed: Option<(usize, Aggregation, &'static str, bool)> =
+            flags.iter().find_map(|(prefix, policy, name, deprecated)| {
+                arg.strip_prefix(prefix)
+                    .and_then(|v| v.parse().ok())
+                    .map(|n: usize| (n, *policy, *name, *deprecated))
+            });
+        if let Some((n, p, name, deprecated)) = parsed {
             if let Some((_, _, prev_name)) = found {
                 eprintln!(
                     "[zenbench] error: {prev_name} and {name} are mutually exclusive"
@@ -613,10 +704,25 @@ pub fn parse_process_args() -> Option<(usize, ProcessAggregation)> {
                 eprintln!("[zenbench] error: {name}=0 is not meaningful");
                 std::process::exit(2);
             }
+            if deprecated {
+                let new_name = name.replace("processes", "passes");
+                eprintln!(
+                    "[zenbench] warning: {name} is deprecated; use {new_name} instead. \
+                     run_passes runs sequential passes inside one OS process; if you wanted \
+                     actual separate processes see the zenbench-driver bin."
+                );
+            }
             found = Some((n, p, name));
         }
     }
     found.map(|(n, p, _)| (n, p))
+}
+
+/// Deprecated alias — `parse_pass_args` is the new spelling.
+#[deprecated(since = "0.1.7", note = "renamed to `parse_pass_args`")]
+#[doc(hidden)]
+pub fn parse_process_args() -> Option<(usize, Aggregation)> {
+    parse_pass_args()
 }
 
 #[macro_export]
@@ -626,7 +732,7 @@ macro_rules! main {
         fn main() {
             let group_filter: Option<String> = std::env::args()
                 .find_map(|a| a.strip_prefix("--group=").map(String::from));
-            let processes = $crate::parse_process_args();
+            let passes = $crate::parse_pass_args();
 
             let closure = |suite: &mut $crate::Suite| {
                 if let Some(ref filter) = group_filter {
@@ -635,8 +741,8 @@ macro_rules! main {
                 $( $func(suite); )+
             };
 
-            let result = match processes {
-                Some((n, policy)) => $crate::run_processes(n, policy, closure),
+            let result = match passes {
+                Some((n, policy)) => $crate::run_passes(n, policy, closure),
                 None => $crate::run(closure),
             };
 
@@ -648,7 +754,7 @@ macro_rules! main {
         fn main() {
             let group_filter: Option<String> = std::env::args()
                 .find_map(|a| a.strip_prefix("--group=").map(String::from));
-            let processes = $crate::parse_process_args();
+            let passes = $crate::parse_pass_args();
 
             let closure = |$suite: &mut $crate::Suite| {
                 if let Some(ref filter) = group_filter {
@@ -657,8 +763,8 @@ macro_rules! main {
                 $body
             };
 
-            let result = match processes {
-                Some((n, policy)) => $crate::run_processes(n, policy, closure),
+            let result = match passes {
+                Some((n, policy)) => $crate::run_passes(n, policy, closure),
                 None => $crate::run(closure),
             };
 
