@@ -131,17 +131,32 @@ impl Engine {
             );
         }
 
-        // Acquire cross-process lock if configured
-        let _lock = self
-            .lock_dir
-            .as_ref()
-            .and_then(|dir| match ProcessLock::acquire(dir) {
-                Ok(lock) => Some(lock),
+        // Acquire cross-process exclusive lock if configured. The lock
+        // file carries the project / binary / current benchmark / ETA so
+        // any waiting process can render an accurate "waiting on …"
+        // message.
+        let lock = self.lock_dir.as_ref().and_then(|dir| {
+            let lock_path = dir.join("zenbench.lock");
+            let initial_benchmark = self
+                .suite
+                .group_filter
+                .clone()
+                .or_else(|| self.suite.groups.first().map(|g| g.name.clone()))
+                .unwrap_or_default();
+            let cfg = crate::exclusive::AcquireConfig {
+                path: Some(lock_path),
+                benchmark: initial_benchmark,
+                activity: format!("{} groups queued", self.suite.groups.len()),
+                ..Default::default()
+            };
+            match crate::exclusive::Lock::acquire(cfg) {
+                Ok(l) => Some(l),
                 Err(e) => {
-                    eprintln!("[zenbench] warning: could not acquire process lock: {e}");
+                    eprintln!("[zenbench] warning: could not acquire exclusive lock: {e}");
                     None
                 }
-            });
+            }
+        });
 
         let mut comparisons = Vec::new();
         // Include pre-computed results from criterion-compat immediate mode
@@ -157,6 +172,19 @@ impl Engine {
 
         let group_filter = self.suite.group_filter.as_deref();
 
+        // Count groups that will actually run, for ETA extrapolation.
+        let total_groups: usize = self
+            .suite
+            .groups
+            .iter()
+            .filter(|g| !g.benchmarks.is_empty())
+            .filter(|g| match group_filter {
+                Some(f) => g.name == f || g.name.contains(f),
+                None => true,
+            })
+            .count();
+        let mut groups_done: usize = 0;
+
         // Run comparison groups (interleaved), streaming results to file
         for group in &mut self.suite.groups {
             if group.benchmarks.is_empty() {
@@ -167,6 +195,11 @@ impl Engine {
                 if group.name != filter && !group.name.contains(filter) {
                     continue;
                 }
+            }
+            // Tell the lock holder file what we're now running, so any
+            // process waiting on the exclusive lock sees up-to-date info.
+            if let Some(l) = lock.as_ref() {
+                l.update_benchmark(&group.name);
             }
             // Fresh gate per group — no state leaks between groups.
             // Threaded groups get gate disabled (their own threads spike CPU).
@@ -198,6 +231,20 @@ impl Engine {
             }
 
             comparisons.push(result);
+            groups_done += 1;
+
+            // Refine ETA in the lock holder file: extrapolate from
+            // elapsed time and remaining groups so peekers get a useful
+            // "ETA in …" once we have a measurement to base it on.
+            if let Some(l) = lock.as_ref() {
+                if groups_done > 0 && groups_done < total_groups {
+                    let elapsed = start.elapsed();
+                    let avg = elapsed / (groups_done as u32);
+                    let remaining = (total_groups - groups_done) as u32;
+                    let eta = std::time::SystemTime::now() + avg * remaining;
+                    l.update_eta(eta);
+                }
+            }
 
             // Stream: append completed group's LLM lines to the save file
             if let Some(path) = &save_path {
@@ -1007,60 +1054,9 @@ fn is_leap(year: i64) -> bool {
     (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
-/// Default lock directory: temp dir with a zenbench subdirectory.
+/// Default lock directory: temp dir with a zenbench subdirectory. The
+/// actual lock file lives at `<dir>/zenbench.lock` and is managed by
+/// [`crate::exclusive::Lock`].
 fn default_lock_dir() -> Option<PathBuf> {
     Some(std::env::temp_dir().join("zenbench"))
-}
-
-/// Cross-process advisory lock using fs4.
-///
-/// When multiple zenbench processes run simultaneously, they take turns
-/// via this lock. The lock is released when this struct is dropped.
-///
-/// On wasm32 this is a no-op — there are no concurrent processes.
-#[cfg(not(target_arch = "wasm32"))]
-struct ProcessLock {
-    _file: std::fs::File,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl ProcessLock {
-    fn acquire(dir: &std::path::Path) -> std::io::Result<Self> {
-        std::fs::create_dir_all(dir)?;
-        let lock_path = dir.join("zenbench.lock");
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .read(true)
-            .open(&lock_path)?;
-
-        // Write our PID so other processes can see who holds the lock
-        use std::io::Write;
-        let mut f = &file;
-        let _ = write!(f, "{}", std::process::id());
-
-        // Blocking lock — waits until other zenbench processes finish
-        fs4::FileExt::lock(&file)?;
-
-        Ok(Self { _file: file })
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl Drop for ProcessLock {
-    fn drop(&mut self) {
-        let _ = fs4::FileExt::unlock(&self._file);
-    }
-}
-
-/// No-op lock for wasm32 — no concurrent processes.
-#[cfg(target_arch = "wasm32")]
-struct ProcessLock;
-
-#[cfg(target_arch = "wasm32")]
-impl ProcessLock {
-    fn acquire(_dir: &std::path::Path) -> std::io::Result<Self> {
-        Ok(Self)
-    }
 }

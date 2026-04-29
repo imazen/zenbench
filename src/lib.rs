@@ -24,6 +24,7 @@ mod ci;
 pub mod criterion_compat;
 pub mod daemon;
 mod engine;
+pub mod exclusive;
 mod format;
 mod gate;
 mod html;
