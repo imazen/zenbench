@@ -5,7 +5,7 @@
 //! records the holder's identity (project, binary, pid, hostname), the
 //! benchmark currently running, and an estimated completion time. Other
 //! processes blocked on the lock can `peek()` the file to print accurate
-//! "waiting on <project>/<bench>, ETA in 4m" messages.
+//! `waiting on <project>/<bench>, ETA in 4m` messages.
 //!
 //! On wasm32 the lock is a no-op — there is no filesystem and no
 //! competing process to coordinate with.
