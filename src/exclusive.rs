@@ -20,7 +20,7 @@ mod imp {
     use super::{AcquireConfig, HolderInfo, Lock, LockInner, format_iso8601, parse_iso8601};
     use fs4::FileExt;
     use std::fs::OpenOptions;
-    use std::io::{Read, Seek, SeekFrom, Write};
+    use std::io::{Read, Write};
     use std::path::Path;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
@@ -35,9 +35,18 @@ mod imp {
     /// How often to refresh the "waiting on …" message while blocked.
     const WAIT_MESSAGE_FALLBACK: Duration = Duration::from_secs(15);
 
-    /// Length the holder file is rounded up to. Padding makes the layout
-    /// stable so an in-place rewrite never shrinks the file mid-read.
-    const PAD_LEN: usize = 1024;
+    /// Path of the info-companion file given a lock path.
+    ///
+    /// On Windows, `LockFileEx` makes the locked file unreadable to any
+    /// other handle, so we cannot store the heartbeat content in the
+    /// same file we lock. Use a sibling `.info` file, atomically
+    /// replaced on each update via temp + rename. POSIX rename and
+    /// Windows `MoveFileExW(MOVEFILE_REPLACE_EXISTING)` are both atomic.
+    pub(super) fn info_path(lock_path: &Path) -> std::path::PathBuf {
+        let mut p = lock_path.as_os_str().to_owned();
+        p.push(".info");
+        std::path::PathBuf::from(p)
+    }
 
     pub fn acquire(cfg: AcquireConfig) -> std::io::Result<Lock> {
         let path = cfg.path.clone().unwrap_or_else(default_path);
@@ -83,7 +92,7 @@ mod imp {
             eta: cfg.estimated_duration.map(|d| now + d),
             activity: cfg.activity.clone(),
         };
-        write_holder(&file, &info)?;
+        write_holder(&path, &info)?;
 
         if waited && !cfg.quiet {
             eprintln!(
@@ -92,7 +101,11 @@ mod imp {
             );
         }
 
-        let inner = Arc::new(Mutex::new(LockInner { file, info }));
+        let inner = Arc::new(Mutex::new(LockInner {
+            file,
+            info,
+            path: path.clone(),
+        }));
         let stop = Arc::new(AtomicBool::new(false));
 
         // Spawn the heartbeat thread. It just keeps the heartbeat
@@ -147,9 +160,13 @@ mod imp {
                     eta: cfg.estimated_duration.map(|d| now + d),
                     activity: cfg.activity.clone(),
                 };
-                write_holder(&file, &info)?;
+                write_holder(&path, &info)?;
 
-                let inner = Arc::new(Mutex::new(LockInner { file, info }));
+                let inner = Arc::new(Mutex::new(LockInner {
+                    file,
+                    info,
+                    path: path.clone(),
+                }));
                 let stop = Arc::new(AtomicBool::new(false));
                 let heartbeat_period = if cfg.heartbeat.is_zero() {
                     Duration::from_secs(5)
@@ -204,7 +221,8 @@ mod imp {
         if let Some(inner_arc) = lock.inner.as_ref() {
             if let Ok(mut inner) = inner_arc.lock() {
                 inner.info.benchmark = benchmark.to_string();
-                let _ = write_holder(&inner.file, &inner.info);
+                let path = inner.path.clone();
+                let _ = write_holder(&path, &inner.info);
             }
         }
     }
@@ -213,7 +231,8 @@ mod imp {
         if let Some(inner_arc) = lock.inner.as_ref() {
             if let Ok(mut inner) = inner_arc.lock() {
                 inner.info.eta = Some(eta);
-                let _ = write_holder(&inner.file, &inner.info);
+                let path = inner.path.clone();
+                let _ = write_holder(&path, &inner.info);
             }
         }
     }
@@ -241,7 +260,8 @@ mod imp {
             }
             if let Ok(mut g) = inner.lock() {
                 g.info.heartbeat = SystemTime::now();
-                let _ = write_holder(&g.file, &g.info);
+                let path = g.path.clone();
+                let _ = write_holder(&path, &g.info);
             }
         }
     }
@@ -287,12 +307,20 @@ mod imp {
         }
     }
 
-    fn write_holder(file: &std::fs::File, info: &HolderInfo) -> std::io::Result<()> {
-        // We hold the fs4 lock so we're the only writer. Rewrite the
-        // file in place; pad to a fixed length so a peek that races a
-        // rewrite always sees a complete record (older content tail is
-        // overwritten with whitespace, never truncated away).
-        let mut body = String::with_capacity(PAD_LEN);
+    fn write_holder(lock_path: &Path, info: &HolderInfo) -> std::io::Result<()> {
+        // We hold the fs4 lock so we're the only writer. Materialize a
+        // fresh info file via temp + atomic rename so peekers always see
+        // either the previous complete record or the new one — never a
+        // half-written file. This also sidesteps Windows mandatory
+        // locking, which would block reads of the lock file itself.
+        let info_path = info_path(lock_path);
+        let tmp_path = {
+            let mut p = info_path.as_os_str().to_owned();
+            p.push(".tmp");
+            std::path::PathBuf::from(p)
+        };
+
+        let mut body = String::with_capacity(512);
         body.push_str("zenbench-exclusive v1\n");
         body.push_str(&format!("pid={}\n", info.pid));
         body.push_str(&format!("hostname={}\n", info.hostname));
@@ -309,23 +337,22 @@ mod imp {
         }
         body.push_str("eof=1\n");
 
-        // Pad with spaces so the on-disk size is stable.
-        if body.len() < PAD_LEN {
-            body.extend(std::iter::repeat_n(' ', PAD_LEN - body.len() - 1));
-            body.push('\n');
+        {
+            let mut f = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&tmp_path)?;
+            f.write_all(body.as_bytes())?;
+            f.flush()?;
         }
-
-        let mut f = file;
-        f.seek(SeekFrom::Start(0))?;
-        f.write_all(body.as_bytes())?;
-        f.flush()?;
-        // We keep the file at PAD_LEN bytes; do not truncate.
+        std::fs::rename(&tmp_path, &info_path)?;
         Ok(())
     }
 
-    pub(super) fn read_holder(path: &Path) -> std::io::Result<Option<HolderInfo>> {
-        // Open without locking — we want to peek at the live holder.
-        let mut file = match OpenOptions::new().read(true).open(path) {
+    pub(super) fn read_holder(lock_path: &Path) -> std::io::Result<Option<HolderInfo>> {
+        let info_path = info_path(lock_path);
+        let mut file = match OpenOptions::new().read(true).open(&info_path) {
             Ok(f) => f,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(e),
@@ -333,9 +360,9 @@ mod imp {
         let mut buf = String::new();
         file.read_to_string(&mut buf)?;
 
-        // Validate the eof marker — an in-progress rewrite should still
-        // contain it because we pad to fixed length, but a brand-new
-        // empty file or a partial first write would not.
+        // Validate the eof marker — atomic rename means we shouldn't
+        // see a partial file, but the sentinel guards against a stray
+        // empty .info left from an interrupted first write.
         if !buf.contains("eof=1") {
             return Ok(None);
         }
@@ -550,6 +577,9 @@ impl HolderInfo {
 struct LockInner {
     file: std::fs::File,
     info: HolderInfo,
+    /// Lock-file path. Used to derive the sibling `.info` path each
+    /// time we rewrite the holder record.
+    path: PathBuf,
 }
 
 /// Cross-process exclusive bench lock. Drop releases.
