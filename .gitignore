@@ -1,5 +1,7 @@
 sorting_results.json
 .zenbench/
+.workongoing
+.jj/
 
 # === Standard exclusions (do not depend on user ~/.gitignore) ===
 

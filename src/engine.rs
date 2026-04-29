@@ -1041,7 +1041,7 @@ impl ProcessLock {
         let _ = write!(f, "{}", std::process::id());
 
         // Blocking lock — waits until other zenbench processes finish
-        fs4::fs_std::FileExt::lock_exclusive(&file)?;
+        fs4::FileExt::lock(&file)?;
 
         Ok(Self { _file: file })
     }
@@ -1050,7 +1050,7 @@ impl ProcessLock {
 #[cfg(not(target_arch = "wasm32"))]
 impl Drop for ProcessLock {
     fn drop(&mut self) {
-        let _ = fs4::fs_std::FileExt::unlock(&self._file);
+        let _ = fs4::FileExt::unlock(&self._file);
     }
 }
 
