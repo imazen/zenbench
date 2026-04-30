@@ -3347,7 +3347,7 @@ dependencies = [
 
 [[package]]
 name = "zenbench"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "charts-rs",
  "clap",
