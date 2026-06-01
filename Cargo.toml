@@ -9,7 +9,15 @@ repository = "https://github.com/imazen/zenbench"
 keywords = ["benchmark", "performance", "profiling", "testing"]
 categories = ["development-tools", "development-tools::profiling"]
 readme = "README.md"
-exclude = ["CLAUDE.md", "CONTEXT-HANDOFF.md", "FEEDBACK.md", ".claude/", ".superwork/", ".zenbench/", "copter-report/", ".github/", "Cross.toml", "justfile", "Cargo.toml.original.txt", "fuzz/"]
+exclude = [
+  "CLAUDE.md", "CONTEXT-HANDOFF.md", "FEEDBACK.md",
+  ".claude/", ".superwork/", ".zenbench/", ".gitignore",
+  "copter-report/", ".github/", "Cross.toml", "justfile",
+  "Cargo.toml.original.txt", "fuzz/",
+  "benches/", "tests/",
+  "docs/", "site/",
+  "CHART-GALLERY.md",
+]
 
 [features]
 default = ["cli", "daemon", "precise-timing", "alloc-profiling"]

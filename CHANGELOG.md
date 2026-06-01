@@ -6,6 +6,9 @@
 <!-- Breaking changes that will ship together in the next minor release.
      Add items here as you discover them. Do NOT ship these piecemeal — batch them. -->
 
+### Changed
+- Extended `exclude` in `Cargo.toml` to drop `.gitignore`, `benches/`, `tests/`, `docs/`, `site/`, and `CHART-GALLERY.md` from the published tarball; declarations and local builds are unaffected.
+
 ## [0.1.8] - 2026-04-29
 
 ### Added
