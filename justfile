@@ -20,9 +20,18 @@ clippy:
     cargo clippy --all-targets --features wasm -- -D warnings
     cargo clippy --all-targets --features criterion-compat -- -D warnings
 
-# Check formatting
+# Check formatting + regenerate the public-API surface snapshot (docs/public-api/)
 fmt:
     cargo fmt -- --check
+    cargo test -p zenbench --test public_api_doc
+
+# Regenerate the public-API surface snapshot only
+api-doc:
+    cargo test -p zenbench --test public_api_doc
+
+# Verify the committed snapshot is current (what CI runs)
+api-doc-check:
+    ZEN_API_DOC=check cargo test -p zenbench --test public_api_doc
 
 # Fix formatting
 fmt-fix:

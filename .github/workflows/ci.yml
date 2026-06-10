@@ -9,6 +9,9 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
   ZENBENCH_NO_SAVE: "1"
+  # Public-API snapshot regen (tests/public_api_doc.rs) needs nightly rustdoc
+  # + cargo-public-api; only the lint job carries them and runs the check.
+  ZEN_API_DOC: off
 
 jobs:
   lint:
@@ -30,6 +33,15 @@ jobs:
         run: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
+      - uses: dtolnay/rust-toolchain@nightly # rustdoc JSON for cargo-public-api
+      - uses: dtolnay/rust-toolchain@stable # restore stable as default
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-public-api
+      - name: Public-API snapshot is current
+        run: cargo test -p zenbench --test public_api_doc
+        env:
+          ZEN_API_DOC: check
 
   test:
     name: Test (${{ matrix.name }})
@@ -64,6 +76,10 @@ jobs:
     name: Cross (${{ matrix.target }})
     needs: lint
     runs-on: ubuntu-latest
+    env:
+      # cross containers don't inherit the workflow env; forward the
+      # public-API snapshot skip so tests/public_api_doc.rs stays off.
+      CROSS_CONTAINER_OPTS: "--env ZEN_API_DOC=off"
     strategy:
       fail-fast: false
       matrix:
