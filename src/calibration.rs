@@ -4,8 +4,10 @@
 //! the hardware. Results are stored in `SuiteResult.calibration` and can
 //! be used to normalize benchmark times across different machines.
 //!
-//! Calibration takes ~50ms and runs before any user benchmarks. Opt out
-//! with `ZENBENCH_NO_CALIBRATE=1`.
+//! Calibration takes ~50ms on native hardware and runs before any user
+//! benchmarks. Workloads are time-budgeted: on slow or emulated targets
+//! (e.g. qemu cross-CI) iteration counts scale down so the whole pass
+//! stays well under a second. Opt out with `ZENBENCH_NO_CALIBRATE=1`.
 
 use serde::{Deserialize, Serialize};
 
@@ -37,20 +39,43 @@ pub fn run_calibration() -> Calibration {
     }
 }
 
+/// Per-rep time budget. On native hardware every workload finishes one
+/// rep well under this, so the rep counts below stay at their historical
+/// constants and calibration values are unchanged. On slow or emulated
+/// targets (qemu cross-CI runs 30-100x slower) the counts scale down
+/// proportionally so the whole calibration stays time-bounded.
+const REP_BUDGET_NS: f64 = 25_000_000.0; // 25ms
+
+/// Scale `max_count` down so one rep fits the budget, given the probed
+/// per-iteration cost. Never below `min_count` (statistical floor),
+/// never above `max_count` (native behavior unchanged).
+fn budgeted_count(probed_ns_per_iter: f64, min_count: u64, max_count: u64) -> u64 {
+    if probed_ns_per_iter <= 0.0 {
+        return max_count;
+    }
+    let fit = (REP_BUDGET_NS / probed_ns_per_iter) as u64;
+    fit.clamp(min_count, max_count)
+}
+
 /// Tight integer loop: measures raw ALU throughput.
 fn calibrate_integer() -> f64 {
-    let iters = 10_000_000u64;
-    let mut best_ns = f64::MAX;
-
-    for _ in 0..5 {
+    fn run_iters(iters: u64) -> f64 {
         let start = std::time::Instant::now();
         let mut v = 0u64;
         for i in 0..iters {
             v = v.wrapping_add(std::hint::black_box(i));
         }
         std::hint::black_box(v);
-        let elapsed = start.elapsed().as_nanos() as f64;
-        let per_iter = elapsed / iters as f64;
+        start.elapsed().as_nanos() as f64 / iters as f64
+    }
+
+    // Probe a small batch to size the measured reps for the budget.
+    let probe_ns = run_iters(200_000);
+    let iters = budgeted_count(probe_ns, 1_000_000, 10_000_000);
+
+    let mut best_ns = f64::MAX;
+    for _ in 0..5 {
+        let per_iter = run_iters(iters);
         if per_iter < best_ns {
             best_ns = per_iter;
         }
@@ -97,18 +122,23 @@ fn calibrate_memory_latency() -> f64 {
         chain.swap(i, j);
     }
 
-    let steps = 1_000_000;
-    let mut best_ns = f64::MAX;
-
-    for _ in 0..3 {
+    fn run_steps(chain: &[usize], n_elements: usize, steps: u64) -> f64 {
         let start = std::time::Instant::now();
         let mut idx = 0usize;
         for _ in 0..steps {
             idx = chain[idx % n_elements];
         }
         std::hint::black_box(idx);
-        let elapsed_ns = start.elapsed().as_nanos() as f64;
-        let per_step = elapsed_ns / steps as f64;
+        start.elapsed().as_nanos() as f64 / steps as f64
+    }
+
+    // Probe a small batch to size the measured reps for the budget.
+    let probe_ns = run_steps(&chain, n_elements, 50_000);
+    let steps = budgeted_count(probe_ns, 250_000, 1_000_000);
+
+    let mut best_ns = f64::MAX;
+    for _ in 0..3 {
+        let per_step = run_steps(&chain, n_elements, steps);
         if per_step < best_ns {
             best_ns = per_step;
         }
