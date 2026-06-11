@@ -1,0 +1,36 @@
+# zenbench public API — doc(hidden) items and excluded-feature surface
+# excluded features: (none)
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   free functions                              4
+#   inherent methods                            3
+#   trait roster entries (type × trait)         3
+#
+# per-module pub lines:
+#   (root)                            4
+#   charts                            1
+#   criterion_compat                  1
+#   daemon                            1
+
+## items (7 lines)
+
+pub fn charts::ChartOrientation::assert_fields_are_eq(&self)
+pub fn criterion_compat::Criterion::into_suite(self) -> Suite
+pub fn daemon::RunStatus::assert_fields_are_eq(&self)
+pub fn engine_new(Suite) -> engine::Engine
+pub fn parse_pass_args() -> core::option::Option<(usize, Aggregation)>
+pub fn parse_process_args() -> core::option::Option<(usize, Aggregation)>
+pub fn postprocess_result(&SuiteResult)
+
+## trait impls (3 types)
+
+Aggregation: TrivialClone
+charts::ChartOrientation: TrivialClone
+criterion_compat::BatchSize: TrivialClone

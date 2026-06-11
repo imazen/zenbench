@@ -1,0 +1,131 @@
+# zenbench public API — additions from non-default features
+# features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,precise-timing,wasm
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   pub modules                                 3
+#   pub types (struct/enum/trait/alias)        10
+#   pub macros                                  2
+#   free functions                              3
+#   inherent methods                           48
+#   struct fields                               5
+#   enum variants                               9
+#   re-exports                                  1
+#   trait roster entries (type × trait)        16
+#   auto-trait-complete types                   4
+#   auto-trait exceptions                       5
+#
+# per-module pub lines:
+#   (root)                           13
+#   charts                           10
+#   criterion_compat                 43
+#   wasm                             15
+
+## items (81 lines)
+
+pub mod charts
+pub enum charts::ChartOrientation
+pub charts::ChartOrientation::Horizontal
+pub charts::ChartOrientation::Vertical
+pub struct charts::ChartConfig
+pub charts::ChartConfig::orientation: charts::ChartOrientation
+pub charts::ChartConfig::show_labels: bool
+pub charts::ChartConfig::show_whiskers: bool
+pub charts::ChartConfig::theme: alloc::string::String
+pub fn charts::comparison_to_svg(&ComparisonResult, &charts::ChartConfig) -> core::option::Option<alloc::string::String>
+pub fn charts::save_charts(&SuiteResult, &std::path::Path, &charts::ChartConfig) -> std::io::error::Result<()>
+pub mod criterion_compat
+pub enum criterion_compat::BatchSize
+pub criterion_compat::BatchSize::LargeInput
+pub criterion_compat::BatchSize::NumBatches(u64)
+pub criterion_compat::BatchSize::NumIterations(u64)
+pub criterion_compat::BatchSize::PerIteration
+pub criterion_compat::BatchSize::SmallInput
+pub enum criterion_compat::Throughput
+pub criterion_compat::Throughput::Bytes(u64)
+pub criterion_compat::Throughput::Elements(u64)
+pub struct criterion_compat::Bencher<'a>(_)
+pub fn criterion_compat::Bencher<'a>::iter<O, F: core::ops::function::FnMut() -> O>(&mut self, F)
+pub fn criterion_compat::Bencher<'a>::iter_batched<I, O, S, R>(&mut self, S, R, criterion_compat::BatchSize) where S: core::ops::function::FnMut() -> I + 'static, R: core::ops::function::FnMut(I) -> O
+pub fn criterion_compat::Bencher<'a>::iter_batched_ref<I, O, S, R>(&mut self, S, R, criterion_compat::BatchSize) where S: core::ops::function::FnMut() -> I + 'static, R: core::ops::function::FnMut(&mut I) -> O
+pub struct criterion_compat::BenchmarkGroup<'a>
+pub fn criterion_compat::BenchmarkGroup<'a>::baseline(&mut self, impl core::convert::Into<alloc::string::String>) -> &mut Self
+pub fn criterion_compat::BenchmarkGroup<'a>::bench_function<S, F>(&mut self, S, F) -> &mut Self where S: core::convert::Into<alloc::string::String>, F: core::ops::function::FnMut(&mut criterion_compat::Bencher<'_>)
+pub fn criterion_compat::BenchmarkGroup<'a>::bench_with_input<S, I, F>(&mut self, S, &I, F) -> &mut Self where S: core::convert::Into<alloc::string::String>, I: core::clone::Clone, F: core::ops::function::FnMut(&mut criterion_compat::Bencher<'_>, &I)
+pub fn criterion_compat::BenchmarkGroup<'a>::finish(self)
+pub fn criterion_compat::BenchmarkGroup<'a>::measurement_time(&mut self, core::time::Duration) -> &mut Self
+pub fn criterion_compat::BenchmarkGroup<'a>::nresamples(&mut self, usize) -> &mut Self
+pub fn criterion_compat::BenchmarkGroup<'a>::plot_config(&mut self, impl core::fmt::Debug) -> &mut Self
+pub fn criterion_compat::BenchmarkGroup<'a>::sample_size(&mut self, usize) -> &mut Self
+pub fn criterion_compat::BenchmarkGroup<'a>::sampling_mode(&mut self, impl core::fmt::Debug) -> &mut Self
+pub fn criterion_compat::BenchmarkGroup<'a>::significance_level(&mut self, f64) -> &mut Self
+pub fn criterion_compat::BenchmarkGroup<'a>::sort_by_speed(&mut self) -> &mut Self
+pub fn criterion_compat::BenchmarkGroup<'a>::subgroup(&mut self, impl core::convert::Into<alloc::string::String>) -> &mut Self
+pub fn criterion_compat::BenchmarkGroup<'a>::throughput(&mut self, Throughput) -> &mut Self
+pub fn criterion_compat::BenchmarkGroup<'a>::throughput_unit(&mut self, impl core::convert::Into<alloc::string::String>) -> &mut Self
+pub fn criterion_compat::BenchmarkGroup<'a>::warm_up_time(&mut self, core::time::Duration) -> &mut Self
+pub struct criterion_compat::BenchmarkId(_)
+pub fn criterion_compat::BenchmarkId::from_parameter<P: core::fmt::Display>(P) -> Self
+pub fn criterion_compat::BenchmarkId::new<S: core::fmt::Display, P: core::fmt::Display>(S, P) -> Self
+pub struct criterion_compat::Criterion
+pub fn criterion_compat::Criterion::bench_function<S, F>(&mut self, S, F) -> &mut Self where S: core::convert::Into<alloc::string::String>, F: core::ops::function::FnMut(&mut criterion_compat::Bencher<'_>)
+pub fn criterion_compat::Criterion::bench_with_input<S, I, F>(&mut self, S, &I, F) -> &mut Self where S: core::convert::Into<alloc::string::String>, I: core::clone::Clone, F: core::ops::function::FnMut(&mut criterion_compat::Bencher<'_>, &I)
+pub fn criterion_compat::Criterion::benchmark_group<S: core::convert::Into<alloc::string::String>>(&mut self, S) -> criterion_compat::BenchmarkGroup<'_>
+pub fn criterion_compat::Criterion::default() -> Self
+pub fn criterion_compat::Criterion::measurement_time(&mut self, core::time::Duration) -> &mut Self
+pub fn criterion_compat::Criterion::noise_threshold(&mut self, f64) -> &mut Self
+pub fn criterion_compat::Criterion::sample_size(&mut self, usize) -> &mut Self
+pub fn criterion_compat::Criterion::significance_level(&mut self, f64) -> &mut Self
+pub fn criterion_compat::Criterion::warm_up_time(&mut self, core::time::Duration) -> &mut Self
+pub fn criterion_compat::black_box<T>(T) -> T
+pub fn BenchGroup::current_subgroup(&self) -> core::option::Option<&alloc::string::String>
+pub fn Bencher::iter_async<O, F, Fut>(&mut self, &tokio::runtime::runtime::Runtime, F) where F: core::ops::function::FnMut() -> Fut, Fut: core::future::future::Future<Output = O>
+pub fn Suite::push_comparison(&mut self, ComparisonResult)
+pub fn SuiteResult::save_publication_charts(&self, impl core::convert::AsRef<std::path::Path>, &charts::ChartConfig) -> std::io::error::Result<()>
+pub mod wasm
+pub use wasm::wasmtime
+pub struct wasm::WasmBench
+pub fn wasm::WasmBench::engine(&self) -> &wasmtime::engine::Engine
+pub fn wasm::WasmBench::from_bytes(&[u8]) -> core::result::Result<Self, wasmtime_internal_core::error::error::Error>
+pub fn wasm::WasmBench::from_bytes_with_config(&[u8], wasmtime::config::Config) -> core::result::Result<Self, wasmtime_internal_core::error::error::Error>
+pub fn wasm::WasmBench::from_file(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, wasmtime_internal_core::error::error::Error>
+pub fn wasm::WasmBench::from_wat(&str) -> core::result::Result<Self, wasmtime_internal_core::error::error::Error>
+pub fn wasm::WasmBench::instance(&self) -> core::result::Result<wasm::WasmInstance, wasmtime_internal_core::error::error::Error>
+pub fn wasm::WasmBench::module(&self) -> &wasmtime::runtime::module::Module
+pub fn wasm::WasmBench::wasi_instance(&self) -> core::result::Result<wasm::WasmInstance, wasmtime_internal_core::error::error::Error>
+pub struct wasm::WasmInstance
+pub wasm::WasmInstance::store: wasmtime::runtime::store::Store<wasmtime_wasi::p1::WasiP1Ctx>
+pub fn wasm::WasmInstance::call<P, R>(&mut self, &str, P) -> core::result::Result<R, wasmtime_internal_core::error::error::Error> where P: wasmtime::runtime::func::typed::WasmParams, R: wasmtime::runtime::func::typed::WasmResults
+pub fn wasm::WasmInstance::raw_instance(&self) -> &wasmtime::runtime::instance::Instance
+pub fn wasm::WasmInstance::typed_func<P, R>(&mut self, &str) -> core::result::Result<wasmtime::runtime::func::typed::TypedFunc<P, R>, wasmtime_internal_core::error::error::Error> where P: wasmtime::runtime::func::typed::WasmParams, R: wasmtime::runtime::func::typed::WasmResults
+pub macro criterion_group!
+pub macro criterion_main!
+pub fn BenchGroup::current_subgroup(&self) -> core::option::Option<&alloc::string::String>
+pub fn Bencher::iter_async<O, F, Fut>(&mut self, &tokio::runtime::runtime::Runtime, F) where F: core::ops::function::FnMut() -> Fut, Fut: core::future::future::Future<Output = O>
+pub fn Suite::push_comparison(&mut self, ComparisonResult)
+pub fn SuiteResult::save_publication_charts(&self, impl core::convert::AsRef<std::path::Path>, &charts::ChartConfig) -> std::io::error::Result<()>
+
+## trait impls (7 types)
+
+alloc::string::String: From<criterion_compat::BenchmarkId>
+charts::ChartConfig: Clone, Debug, Default
+charts::ChartOrientation: Clone, Copy, Debug, Default, Eq, PartialEq
+criterion_compat::BatchSize: Clone, Copy, Debug
+criterion_compat::BenchmarkGroup<'_>: Drop
+criterion_compat::BenchmarkId: Display
+wasm::WasmBench: Clone
+
+## auto traits
+
+4 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+criterion_compat::Bencher<'a>: !UnwindSafe
+criterion_compat::BenchmarkGroup<'a>: !RefUnwindSafe !Sync !UnwindSafe
+criterion_compat::Criterion: !RefUnwindSafe !Sync !UnwindSafe
+wasm::WasmBench: !RefUnwindSafe !UnwindSafe
+wasm::WasmInstance: !RefUnwindSafe !Sync !UnwindSafe

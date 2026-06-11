@@ -1,0 +1,16 @@
+# CI-free public-API snapshot runner — the only package depending on
+# zenutils-apidoc. zenbench has no [workspace] table, so this package's own
+# empty [workspace] below keeps it self-contained: plain `cargo test` and
+# every CI job never compile the apidoc tree or run rustdoc. Regenerate via
+# `just api-doc`.
+[package]
+name = "zenbench-apidoc"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Self-contained: stays out of any parent workspace regardless of its config.
+[workspace]
+
+[dependencies]
+zenutils-apidoc = "0.1.0"
