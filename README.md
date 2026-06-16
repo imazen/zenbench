@@ -115,7 +115,8 @@ zenbench::main!(bench_sort);
 # After merging to main — save a baseline
 cargo bench -- --save-baseline=main
 
-# On PRs — check for regressions (exits 1 if > 5% slower)
+# On PRs — check for regressions (exits 1 on a >5% slowdown that's also
+# statistically significant; see "CI regression gate semantics" below)
 cargo bench -- --baseline=main
 
 # Auto-update baseline on clean runs
@@ -181,7 +182,7 @@ suite.group("dispatch", |g| {
     g.bench("StopToken", |b| b.iter(|| check_token()));
 
     g.baseline("impl Stop (Stopper)");
-    g.sort_by_speed();
+    g.config().sort_by_speed(true); // native API; the no-arg sort_by_speed() is criterion-compat only
 });
 ```
 
@@ -200,6 +201,86 @@ suite.group("dispatch", |g| {
   StopToken            ████████████ 1.03G
   &dyn Stop            ██████████ 889M
 ```
+
+## How to read an A/B result
+
+The `95% CI vs base` column is the bootstrap 95% confidence interval for the
+candidate's change against the group `baseline`, shown as `[lo% .. hi%]`
+(negative = candidate is faster). The baseline row itself shows `[lo .. hi]ns`.
+
+**When is a difference "significant"?** A change is reported significant only
+when **both** of these hold:
+
+1. The 95% CI excludes zero — i.e. `[lo .. hi]` does not straddle 0 (when a
+   `noise_threshold` is set, the CI must clear ±threshold of the baseline, not
+   just 0).
+2. The difference is **above the timer's quantization floor**. If the
+   per-iteration difference is smaller than ~2× what the hardware timer can
+   resolve, significance is forced to `false` regardless of the CI.
+
+So a CI that excludes zero is **necessary but not sufficient** — a result like
+`ci=[-1.33% .. -0.48%]` can still report `significant=false` when the absolute
+difference is below the timer resolution (this is the "resolution-limited"
+case). The significance test runs on the absolute per-iteration nanosecond CI;
+the percentages in the table are that same CI divided by the baseline mean.
+
+zenbench does **not** add a separate p-value cutoff here — the Wilcoxon
+p-value and Cohen's d are reported alongside, but the significance flag is
+CI-plus-timer-floor as described above.
+
+**Footnotes** flag results you should not over-read:
+
+- `[N] CI [lo% .. hi%] crosses zero — cannot confirm a difference` — the change
+  is **not** significant: the interval straddles zero, so the sign of the
+  change is unresolved. Treat it as noise, not a real win or regression.
+- `[N] real but tiny (effect 0.NN) — unlikely to matter` — significant, but
+  Cohen's d < 0.2, so the effect is too small to care about.
+- Drift / high-CV / sub-ns / near-timer-resolution footnotes flag noisy or
+  unmeasurable conditions; rerun on a quieter machine before trusting them.
+
+## CI regression gate semantics
+
+`--max-regression=N` is **significance-gated**, not a raw percentage cutoff. A
+benchmark fails the gate (counts as a regression, exit code 1) only when it is
+**both**:
+
+- more than `N%` slower than the saved baseline, **and**
+- statistically significant — a pooled two-sample t-test on the baseline-vs-new
+  samples gives `t > 2.0` (≈ p < 0.05). With < 2 samples per side, or zero
+  variance, the percentage alone decides.
+
+This means a noisy `+10%` swing on a loaded CI runner can **pass** the gate if
+the variance is high enough that the t-test can't confirm it — by design, so
+flaky runners don't fail your build on noise. If you need a hard percentage
+ceiling that ignores significance, gate on the raw `pct_change` in the CSV/JSON
+output yourself rather than relying on `--max-regression`.
+
+## Don't accidentally measure nothing
+
+`iter` and `with_input(...).run(...)` automatically pass the closure's return
+value (and `run`'s input) through `black_box`, so **returning the result of
+your work from the closure is what defeats dead-code elimination** — the
+compiler can't prove the value is unused. If your closure returns `()` and the
+work has no observable effect, the optimizer can delete it and you'll measure
+an empty loop (watch for the `sub-ns with near-zero variance — likely
+optimized away` footnote).
+
+Return the value when you can. When you can't (the work is a side effect, or
+you want to block a specific input from being const-folded), wrap it explicitly
+with `zenbench::black_box` (also in the prelude) or `std::hint::black_box`:
+
+```rust,ignore
+g.bench("hashes", |b| b.iter(|| compute_hash(&data)));        // returns → black_boxed for you
+g.bench("in_place", |b| b.iter(|| { sort_in_place(&mut buf); black_box(&buf); }));
+```
+
+## Throughput is per call
+
+`Throughput::Bytes(N)` / `Throughput::Elements(N)` declare the work done by a
+**single** `iter`/`run` invocation — per call, not per round or per sample.
+Reported throughput is `N / mean_time_per_call`. If one `b.iter(|| ...)`
+compresses a 64 KiB block, set `Throughput::Bytes(64 * 1024)`; the reported
+`GiB/s` is then bytes-per-call ÷ the mean per-call time.
 
 ## Migrating from criterion
 

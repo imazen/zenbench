@@ -12,6 +12,9 @@
 ### Changed
 - Extended `exclude` in `Cargo.toml` to drop `.gitignore`, `benches/`, `tests/`, `docs/`, `site/`, and `CHART-GALLERY.md` from the published tarball; declarations and local builds are unaffected.
 
+### Fixed
+- docs(readme): fix non-compiling `sort_by_speed` example (`g.sort_by_speed()` → `g.config().sort_by_speed(true)`; the no-arg form is criterion-compat only) and document the significance rule (95% CI excludes zero **and** above the timer-resolution floor), the regression-gate's significance-gating (`--max-regression=N` fails only on a `>N%` slowdown that's also t-test significant), DCE/`black_box` guidance (returning the value defeats DCE), and throughput per-call semantics — gaps found by an insulated external-developer usability test (#docfix-zenbench-readme).
+
 ## [0.1.8] - 2026-04-29
 
 ### Added
