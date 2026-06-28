@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/imazen/zenbench"
 keywords = ["benchmark", "performance", "profiling", "testing"]
 categories = ["development-tools", "development-tools::profiling"]
-readme = "README.md"
+readme = "README.crates.md"
 exclude = [
   "CLAUDE.md", "CONTEXT-HANDOFF.md", "FEEDBACK.md",
   ".claude/", ".superwork/", ".zenbench/", ".gitignore",

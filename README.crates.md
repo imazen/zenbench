@@ -1,4 +1,6 @@
-# zenbench [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenbench/ci.yml?style=flat-square&label=CI)](https://github.com/imazen/zenbench/actions/workflows/ci.yml) [![crates.io](https://img.shields.io/crates/v/zenbench?style=flat-square)](https://crates.io/crates/zenbench) [![lib.rs](https://img.shields.io/crates/v/zenbench?style=flat-square&label=lib.rs&color=blue)](https://lib.rs/crates/zenbench) [![docs.rs](https://img.shields.io/docsrs/zenbench?style=flat-square)](https://docs.rs/zenbench) [![MSRV](https://img.shields.io/badge/MSRV-1.85-blue?style=flat-square)](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field) [![license](https://img.shields.io/crates/l/zenbench?style=flat-square)](#license) [![codecov](https://img.shields.io/codecov/c/github/imazen/zenbench?style=flat-square)](https://codecov.io/gh/imazen/zenbench)
+<!-- GENERATED FROM README.md by zenutils gen-readme-crates.sh — DO NOT EDIT. -->
+
+# zenbench [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenbench/ci.yml?style=flat-square&label=CI)](https://github.com/imazen/zenbench/actions/workflows/ci.yml)
 
 Interleaved microbenchmarking for Rust with paired statistics, CI regression testing, and hardware-adaptive measurement.
 
@@ -28,54 +30,6 @@ Existing harnesses run benchmarks **sequentially**. Benchmark A runs on a hot CP
 
 Zenbench **interleaves**: each round, all benchmarks run in shuffled order. Round N of A and round N of B execute under identical conditions. Paired statistics on the round-by-round differences detect real changes — not thermal drift.
 
-<!-- crates.io:skip-start -->
-### vs criterion and divan
-
-| Feature | criterion | divan | zenbench |
-|---|:---:|:---:|:---:|
-| **Execution model** | | | |
-| Interleaved round-robin | ❌ | ❌ | ✅ |
-| Auto-convergence (stop when precise) | ❌ | ❌ | ✅ |
-| Resource gating (detect other benchmarks) | ❌ | ❌ | ✅ |
-| **Statistics** | | | |
-| Bootstrap confidence intervals | ✅ | ❌ | ✅ |
-| Paired comparison test | Welch t | ❌ | Wilcoxon |
-| Effect size metric | ❌ | ❌ | Cohen's d |
-| Drift detection (thermal/load) | ❌ | ❌ | Spearman r |
-| Noise threshold (suppress trivial diffs) | ✅ fixed 1% | ❌ | ✅ configurable |
-| **Measurement** | | | |
-| Hardware TSC timer (rdtsc/cntvct) | ❌ | ✅ opt-in | ✅ auto |
-| Overhead compensation | slope regression | loop subtraction | loop subtraction |
-| Stack alignment jitter | ✅ alloca (unsafe) | ❌ | ✅ safe trampoline |
-| Deferred drop (exclude Drop from timing) | ❌ | ✅ MaybeUninit | ✅ Vec collect |
-| Allocation profiling (GlobalAlloc) | ❌ | ✅ | ✅ |
-| **CI / Workflow** | | | |
-| Save/load baselines | ❌ | ❌ | ✅ `--baseline=` |
-| Regression exit codes (0/1/2) | ❌ | ❌ | ✅ |
-| Auto-update baseline on pass | ❌ | ❌ | ✅ `--update-on-pass` |
-| Multi-pass aggregation (in-process) | ❌ | ❌ | ✅ `--best-of-passes=N` |
-| Multi-process aggregation (cross-ASLR) | ❌ | ❌ | ✅ `--best-of-processes=N` |
-| Hardware fingerprint / testbed ID | ❌ | ❌ | ✅ |
-| Cross-run variance inflation | ❌ | ❌ | ✅ pooled t-test |
-| **Output** | | | |
-| Terminal report | table | tree | tree (default) + table |
-| Bar chart | ❌ | ❌ | ✅ sorted, throughput |
-| JSON / CSV / Markdown | ✅ JSON | ❌ | ✅ JSON + CSV + LLM + MD |
-| HTML plots (violin/PDF/regression) | ✅ plotters.rs | ❌ | ❌ |
-| HTML report (self-contained, SVG) | ❌ | ❌ | ✅ `--format=html` |
-| Streaming per-group | ❌ | ❌ | ✅ |
-| Adaptive column layout | ❌ | ❌ | ✅ terminal-width aware |
-| **API** | | | |
-| Async benchmarks | ✅ to_async() | ❌ | ✅ iter_async() |
-| Thread contention testing | ❌ | ✅ threads attr | ✅ bench_contended() |
-| Thread scaling analysis | ❌ | ❌ | ✅ bench_scaling() |
-| Drop-in criterion migration | — | ❌ | ✅ zero code changes |
-| Attribute macros | ❌ | ✅ `#[divan::bench]` | ❌ |
-| **Platform** | | | |
-| Linux x86_64 / aarch64 | ✅ | ✅ | ✅ |
-| Windows x86_64 / ARM64 | ✅ | ✅ | ✅ |
-| macOS ARM64 / Intel | ✅ | ✅ | ✅ |
-<!-- crates.io:skip-end -->
 
 ## Quick start
 
