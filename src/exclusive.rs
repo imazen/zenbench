@@ -863,13 +863,22 @@ mod tests {
         let p = temp_lock_path("hb");
         let lock = Lock::acquire(cfg(&p)).expect("acquire");
         let first = Lock::peek(&p).unwrap().unwrap().heartbeat;
-        // Sentinel file timestamps are ISO-8601 with second precision,
-        // so we must sleep across at least one second boundary.
-        std::thread::sleep(Duration::from_millis(1200));
-        let later = Lock::peek(&p).unwrap().unwrap().heartbeat;
+        // Sentinel timestamps are ISO-8601 with second precision, and the
+        // heartbeat thread can be starved for over a second on a loaded CI
+        // runner. Poll (up to a generous timeout) for the timestamp to
+        // advance rather than asserting after one fixed sleep — same
+        // guarantee, without the timing flake that failed on ARM64 CI.
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let later = loop {
+            std::thread::sleep(Duration::from_millis(200));
+            let hb = Lock::peek(&p).unwrap().unwrap().heartbeat;
+            if hb > first || std::time::Instant::now() >= deadline {
+                break hb;
+            }
+        };
         assert!(
             later > first,
-            "heartbeat should advance: first={first:?} later={later:?}"
+            "heartbeat should advance within 10s: first={first:?} later={later:?}"
         );
         drop(lock);
         let _ = std::fs::remove_file(&p);
