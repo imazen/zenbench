@@ -105,11 +105,10 @@ fn parse_divan_output(output: &str) -> HashMap<String, f64> {
 fn parse_time_value(s: &str) -> Option<f64> {
     let s = s.trim();
     // Try patterns: "123.4ns", "123.4 ns", "1.23µs", "1.23 µs", etc.
-    let (num_str, unit) = if let Some(pos) = s.find(|c: char| c.is_alphabetic() || c == 'µ') {
+    let (num_str, unit) = {
+        let pos = s.find(|c: char| c.is_alphabetic() || c == 'µ')?;
         let (n, u) = s.split_at(pos);
         (n.trim(), u.trim())
-    } else {
-        return None;
     };
 
     let value: f64 = num_str.parse().ok()?;
