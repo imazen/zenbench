@@ -254,9 +254,6 @@ impl ResourceGate {
             return;
         }
 
-        // Benchmark process names to look for (case-insensitive substrings)
-        const BENCH_NAMES: &[&str] = &["criterion", "divan", "zenbench", "cargo-bench", "bench-"];
-
         let our_pid = sysinfo::get_current_pid().ok();
 
         // Collect PIDs to exclude: ourselves, plus any ancestor PIDs set by
@@ -306,17 +303,7 @@ impl ResourceGate {
                     if scan_excluded.contains(&p.pid()) {
                         return false;
                     }
-
-                    let name = p.name().to_string_lossy().to_lowercase();
-                    let cmd: String = p
-                        .cmd()
-                        .iter()
-                        .map(|s| s.to_string_lossy().to_lowercase())
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    BENCH_NAMES
-                        .iter()
-                        .any(|&pat| name.contains(pat) || cmd.contains(pat))
+                    process_is_benchmark(p)
                 })
                 .count();
 
@@ -423,6 +410,45 @@ fn parse_launcher_pids(val: &str) -> Vec<sysinfo::Pid> {
     val.split(',')
         .filter_map(|s| s.trim().parse::<usize>().ok().map(sysinfo::Pid::from))
         .collect()
+}
+
+/// Benchmark-harness process-name patterns (case-insensitive substrings).
+/// Matched against the process NAME and the argv[0] basename only — never
+/// the full argument list (see `process_is_benchmark`).
+const BENCH_NAME_PATTERNS: &[&str] = &["criterion", "divan", "zenbench", "cargo-bench", "bench-"];
+
+/// Basename of a path-like string (after the last `/` or `\`), lowercased.
+fn basename_lower(s: &str) -> String {
+    s.rsplit(['/', '\\']).next().unwrap_or(s).to_lowercase()
+}
+
+/// Whether `p` looks like a concurrently-running benchmark harness.
+///
+/// Matches the harness patterns against the process NAME and the argv[0]
+/// basename ONLY — deliberately NOT the whole joined command line. Scanning
+/// the full cmdline produced false positives on unrelated processes that
+/// merely *name* a benchmark directory in their arguments — most painfully a
+/// periodic backup `rsync --exclude=criterion/ --exclude=cargo-timing-*.html
+/// …`, which the gate mistook for a rival benchmark and waited the full 30s
+/// timeout on, every round. A real concurrent bench binary carries the
+/// pattern in its own name / invoked path (e.g. `…/deps/foo_zenbench-<hash>`),
+/// not only in an arbitrary argument. Complements `collect_ancestors` (which
+/// excludes the harness's own launcher chain): that handles the self-parent,
+/// this handles unrelated siblings.
+fn process_is_benchmark(p: &sysinfo::Process) -> bool {
+    let name = p.name().to_string_lossy().to_lowercase();
+    if BENCH_NAME_PATTERNS.iter().any(|&pat| name.contains(pat)) {
+        return true;
+    }
+    // argv[0] as invoked (covers a bench binary launched by absolute path,
+    // whose reported `name` may be truncated by the OS).
+    if let Some(argv0) = p.cmd().first() {
+        let base = basename_lower(&argv0.to_string_lossy());
+        if BENCH_NAME_PATTERNS.iter().any(|&pat| base.contains(pat)) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Walk the parent-PID chain from `start` upward, appending every ancestor
@@ -542,13 +568,15 @@ mod tests {
         let mut ancestors = Vec::new();
         collect_ancestors(&sys, our_pid, &mut ancestors);
 
-        if let Some(pid) = our_pid
-            && let Some(parent) = sys.process(pid).and_then(|p| p.parent())
-        {
-            assert!(
-                ancestors.contains(&parent),
-                "ancestor walk should include our immediate parent {parent:?}"
-            );
+        // Nested `if let` rather than a let-chain: let-chains only stabilized
+        // in Rust 1.88, and this crate's MSRV is 1.85.
+        if let Some(pid) = our_pid {
+            if let Some(parent) = sys.process(pid).and_then(|p| p.parent()) {
+                assert!(
+                    ancestors.contains(&parent),
+                    "ancestor walk should include our immediate parent {parent:?}"
+                );
+            }
         }
         assert!(
             our_pid.is_none_or(|pid| !ancestors.contains(&pid)),
@@ -562,5 +590,30 @@ mod tests {
         let mut ancestors = Vec::new();
         collect_ancestors(&sys, None, &mut ancestors);
         assert!(ancestors.is_empty());
+    }
+
+    #[test]
+    fn basename_lower_strips_path_and_lowercases() {
+        assert_eq!(
+            basename_lower("/home/x/target/release/deps/Decode_Zenbench-abc"),
+            "decode_zenbench-abc"
+        );
+        assert_eq!(basename_lower("cargo-bench"), "cargo-bench");
+        assert_eq!(basename_lower(r"C:\bin\Foo.exe"), "foo.exe");
+        assert_eq!(basename_lower(""), "");
+    }
+
+    #[test]
+    fn bench_name_patterns_match_harness_argv0_not_backup_args() {
+        // A real bench binary's invoked path carries the pattern.
+        let argv0 = basename_lower("/w/target/release/deps/decode_zenbench-9f3");
+        assert!(BENCH_NAME_PATTERNS.iter().any(|&p| argv0.contains(p)));
+
+        // The false positive that motivated the argv0-only match: a backup
+        // rsync whose argv[0] basename is `rsync`. Only its later
+        // `--exclude=criterion/` args mention a bench dir — and those are no
+        // longer scanned, so it is correctly NOT flagged.
+        let rsync_argv0 = basename_lower("/usr/bin/rsync");
+        assert!(!BENCH_NAME_PATTERNS.iter().any(|&p| rsync_argv0.contains(p)));
     }
 }
