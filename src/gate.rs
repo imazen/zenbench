@@ -284,12 +284,26 @@ impl ResourceGate {
             let mut sys = sysinfo::System::new();
             sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
 
+            // Exclude our entire ancestor chain (cargo, the shell, CI
+            // runners, wrappers like run-heavy). `cargo bench --bench
+            // decode_zenbench` carries the harness's own name in its
+            // command line, so without this the gate detected its own
+            // parent cargo process as a "concurrent benchmark" and
+            // stalled `max_wait` on every round — leaving ~4 surviving
+            // rounds per group, on every machine, deterministically.
+            // Ancestors are blocked waiting on us; they cannot be
+            // concurrently *running* benchmarks. Siblings (a genuinely
+            // concurrent bench under the same shell) are not ancestors
+            // and are still detected.
+            let mut scan_excluded = excluded_pids.clone();
+            collect_ancestors(&sys, our_pid, &mut scan_excluded);
+
             let bench_count = sys
                 .processes()
                 .values()
                 .filter(|p| {
-                    // Skip ourselves and launcher ancestors
-                    if excluded_pids.contains(&p.pid()) {
+                    // Skip ourselves, launcher pids, and ancestors
+                    if scan_excluded.contains(&p.pid()) {
                         return false;
                     }
 
@@ -411,6 +425,38 @@ fn parse_launcher_pids(val: &str) -> Vec<sysinfo::Pid> {
         .collect()
 }
 
+/// Walk the parent-PID chain from `start` upward, appending every ancestor
+/// to `out`. Ancestors of the running harness are blocked waiting on it
+/// (`cargo bench` waits on its child), so they can never be a *concurrently
+/// running* benchmark — but `cargo bench --bench foo_zenbench` carries the
+/// harness name in its command line and would otherwise match the
+/// benchmark-name scan. Bounded by the live process set, so it always
+/// terminates even if the OS reports a cyclic/again-reused PPID.
+fn collect_ancestors(
+    sys: &sysinfo::System,
+    start: Option<sysinfo::Pid>,
+    out: &mut Vec<sysinfo::Pid>,
+) {
+    let mut cur = start;
+    // Hard cap independent of the process count: PID chains are shallow,
+    // and this guards against a reused-PID cycle the visited-set might miss.
+    for _ in 0..1024 {
+        let Some(pid) = cur else { return };
+        let Some(proc_) = sys.process(pid) else {
+            return;
+        };
+        let Some(parent) = proc_.parent() else {
+            return;
+        };
+        if out.contains(&parent) {
+            // Already walked this ancestor (shared chain) — stop.
+            return;
+        }
+        out.push(parent);
+        cur = Some(parent);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -482,5 +528,39 @@ mod tests {
         let ci = GateConfig::ci();
         assert!(ci.max_cpu_load >= default.max_cpu_load);
         assert!(ci.max_heavy_processes >= default.max_heavy_processes);
+    }
+
+    #[test]
+    fn collect_ancestors_includes_our_parent() {
+        // The test binary always has a parent (cargo / the shell). The
+        // ancestor walk from our own PID must surface it, must not include
+        // our own PID, and must terminate.
+        let mut sys = sysinfo::System::new();
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        let our_pid = sysinfo::get_current_pid().ok();
+
+        let mut ancestors = Vec::new();
+        collect_ancestors(&sys, our_pid, &mut ancestors);
+
+        if let Some(pid) = our_pid
+            && let Some(parent) = sys.process(pid).and_then(|p| p.parent())
+        {
+            assert!(
+                ancestors.contains(&parent),
+                "ancestor walk should include our immediate parent {parent:?}"
+            );
+        }
+        assert!(
+            our_pid.is_none_or(|pid| !ancestors.contains(&pid)),
+            "ancestor walk must not include our own PID"
+        );
+    }
+
+    #[test]
+    fn collect_ancestors_none_start_is_empty() {
+        let sys = sysinfo::System::new();
+        let mut ancestors = Vec::new();
+        collect_ancestors(&sys, None, &mut ancestors);
+        assert!(ancestors.is_empty());
     }
 }
