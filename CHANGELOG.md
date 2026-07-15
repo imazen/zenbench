@@ -5,6 +5,10 @@
 ### QUEUED BREAKING CHANGES
 <!-- Breaking changes that will ship together in the next minor release.
      Add items here as you discover them. Do NOT ship these piecemeal — batch them. -->
+- `wasm` feature: the wasmtime/wasmtime-wasi 43 → 44 bump changes the re-exported `wasmtime` major (`pub use wasmtime` at `zenbench::wasm::wasmtime`) and raises the `wasm`-feature build MSRV to Rust 1.92. The crate's default-build MSRV is unchanged (1.85), since wasmtime is only pulled in by the optional `wasm` feature (e521d9d).
+
+### Security
+- Bumped `wasmtime`/`wasmtime-wasi` 43.0.2 → 44.0.3, clearing the `wasmtime-wasi` advisory (WASI `path_open(TRUNCATE)` bypassed the host `FilePerms::WRITE` restriction; dependabot high). Only the optional `wasm` feature pulls wasmtime, and zenbench runs trusted benchmark wasm rather than sandboxing untrusted guests, so there was no practical exposure — the bump keeps the dependency current regardless (e521d9d).
 
 ## [0.1.9] - 2026-07-14
 
