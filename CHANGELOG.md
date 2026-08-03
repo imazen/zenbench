@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- Export `ResourceGate` and `GateReason` at the crate root alongside `GateConfig`, so external harnesses (first consumer: zensysbench) can run the busyness gate around their own child-process measurements. The methods were already annotated "Public API for external gate users"; this makes them reachable. Additive, no behavior change.
+
 ### QUEUED BREAKING CHANGES
 <!-- Breaking changes that will ship together in the next minor release.
      Add items here as you discover them. Do NOT ship these piecemeal — batch them. -->

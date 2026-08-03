@@ -146,7 +146,7 @@ pub fn engine_new(suite: Suite) -> engine::Engine {
     engine::Engine::new(suite)
 }
 pub use format::format_ns;
-pub use gate::GateConfig;
+pub use gate::{GateConfig, GateReason, ResourceGate};
 pub use platform::Testbed;
 pub use results::{BenchmarkResult, ComparisonResult, RunId, SuiteResult};
 pub use stats::{MeanCi, PairedAnalysis, Summary};
