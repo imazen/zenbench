@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`ResourceGate`'s CPU-load check never fired — `max_cpu_load` was dead config for the life of the gate.** `sysinfo` computes `cpu_usage()` as a delta between two refreshes, so a refresh landing inside `MINIMUM_CPU_UPDATE_INTERVAL` (200 ms) of the previous one reports **0.0% on every core regardless of actual load**. `ResourceGate::new(cfg).check()` constructs a `SystemMonitor` and snapshots immediately, so `cpu_load` was always exactly 0.0 and the threshold could never trip. Measured on a box at loadavg 2.65: first snapshot 0.000, second 0.059. Caught when a five-box zensysbench comparison gated **0 of 205 cells** while the dev box sat at load 17 — a gate that certifies a contaminated box as clean is worse than no gate. `SystemMonitor::snapshot()` now tracks the last CPU refresh and sleeps the remainder of the minimum interval before re-reading; the ≤200 ms cost is confined to gate checks (`gate.rs` holds the only `snapshot()` callers). Regression test `tests/gate_sees_load.rs` saturates every core and asserts both that the first snapshot sees it and that the gate refuses the box. RAM and heavy-process checks were unaffected and did work.
+
 ### Added
 - Export `ResourceGate` and `GateReason` at the crate root alongside `GateConfig`, so external harnesses (first consumer: zensysbench) can run the busyness gate around their own child-process measurements. The methods were already annotated "Public API for external gate users"; this makes them reachable. Additive, no behavior change.
 

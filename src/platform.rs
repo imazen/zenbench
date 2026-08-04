@@ -1,4 +1,5 @@
 use std::sync::Mutex;
+use std::time::Instant;
 use sysinfo::System;
 
 /// Cross-platform system state snapshot.
@@ -19,22 +20,49 @@ pub struct SystemState {
 /// Shared system info handle. sysinfo::System is not Sync, so we wrap in Mutex.
 pub struct SystemMonitor {
     sys: Mutex<System>,
+    /// When the CPU counters were last refreshed. CPU usage is a DELTA between
+    /// two refreshes; reading it too soon after the previous one yields 0.0.
+    last_cpu_refresh: Mutex<Instant>,
 }
 
 impl SystemMonitor {
     pub fn new() -> Self {
-        let sys = System::new_all();
+        let sys = System::new_all(); // establishes the first CPU sample
         Self {
             sys: Mutex::new(sys),
+            last_cpu_refresh: Mutex::new(Instant::now()),
         }
     }
 
     /// Refresh and snapshot current system state.
+    ///
+    /// Blocks for up to `sysinfo::MINIMUM_CPU_UPDATE_INTERVAL` (200 ms) when
+    /// called sooner than that after the previous refresh. That wait is
+    /// load-bearing, not politeness: `cpu_usage()` is computed from the delta
+    /// between two refreshes, so a refresh that lands inside the minimum
+    /// interval reports **0.0% on every core regardless of actual load**.
+    ///
+    /// This silently disabled the CPU half of `ResourceGate` for its whole
+    /// life — `ResourceGate::new(cfg).check()` constructs a monitor and reads
+    /// one snapshot immediately, so `cpu_load` was always 0.0 and
+    /// `max_cpu_load` never tripped. Caught 2026-08-03 when a five-box
+    /// zensysbench comparison gated 0 of 205 cells while the dev box sat at
+    /// load 17 (measured: first snapshot 0.000, second 0.059, loadavg 2.65).
+    /// A gate that cannot see the busiest box on the LAN is worse than no
+    /// gate — it certifies contaminated numbers as clean.
     pub fn snapshot(&self) -> SystemState {
+        {
+            let last = *self.last_cpu_refresh.lock().unwrap();
+            let since = last.elapsed();
+            if since < sysinfo::MINIMUM_CPU_UPDATE_INTERVAL {
+                std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL - since);
+            }
+        }
         let mut sys = self.sys.lock().unwrap();
         sys.refresh_cpu_all();
         sys.refresh_memory();
         sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        *self.last_cpu_refresh.lock().unwrap() = Instant::now();
 
         let cpus = sys.cpus();
         let cpu_load = if cpus.is_empty() {
