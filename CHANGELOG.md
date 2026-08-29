@@ -10,13 +10,13 @@
 
 ### Changed
 - Refreshed `Cargo.lock` within the existing requirements (`cargo update`). Entirely third-party: zenbench's lock contains no zen-family crate, so nothing here touches the in-flight ecosystem requirement work. Notable movers `cc` 1.2.64 → 1.4.4, `regex` 1.12.4 → 1.13.1, `tokio` 1.52.3 → 1.53.1, `wasm-bindgen` 0.2.123 → 0.2.127, `serde` 1.0.228 → 1.0.229, `libc` 0.2.186 → 0.2.189 (28e28ec).
-- Bumped `charts-rs` 0.3.28 → 1.0.0 (optional `charts` feature). The `BarChart`/`HorizontalBarChart`/`Series`/`Align` surface `src/charts.rs` uses is unchanged across the major, so no code change was needed (7682356).
+- Bumped `charts-rs` 0.3.28 → 1.0.0 (optional `charts` feature). The `BarChart`/`HorizontalBarChart`/`Series`/`Align` surface `src/charts.rs` uses is unchanged across the major, so no code change was needed (baeeb05).
 
 ### QUEUED BREAKING CHANGES
 <!-- Breaking changes that will ship together in the next minor release.
      Add items here as you discover them. Do NOT ship these piecemeal — batch them. -->
-- `wasm` feature: the wasmtime/wasmtime-wasi 43 → 44 → 48 bumps change the re-exported `wasmtime` major (`pub use wasmtime` at `zenbench::wasm::wasmtime`) and raise the `wasm`-feature build MSRV to Rust 1.95. The crate's default-build MSRV is unchanged (1.85), since wasmtime is only pulled in by the optional `wasm` feature (e521d9d, 7682356).
-- `charts` feature: `charts-rs` 0.3 → 1.0 raises the `charts`-feature build MSRV to Rust 1.88. `charts_rs` types are not re-exported, so this is a build-requirement change only, not an API break. Default-build MSRV unchanged (7682356).
+- `wasm` feature: the wasmtime/wasmtime-wasi 43 → 44 → 48 bumps change the re-exported `wasmtime` major (`pub use wasmtime` at `zenbench::wasm::wasmtime`) and raise the `wasm`-feature build MSRV to Rust 1.95. The crate's default-build MSRV is unchanged (1.85), since wasmtime is only pulled in by the optional `wasm` feature (e521d9d, baeeb05).
+- `charts` feature: `charts-rs` 0.3 → 1.0 raises the `charts`-feature build MSRV to Rust 1.88. `charts_rs` types are not re-exported, so this is a build-requirement change only, not an API break. Default-build MSRV unchanged (baeeb05).
 
 ### Deferred
 - `sysinfo` stays at 0.36.1 (latest 0.39.6). Every 0.37+ release declares a `rust-version` above zenbench's 1.85 — 0.39.x wants 1.95 — and `sysinfo` is a default, non-optional dependency that the MSRV (1.85) CI job compiles, so taking it would break that job. Needs an owner decision on raising the declared MSRV.
