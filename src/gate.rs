@@ -294,6 +294,16 @@ impl ResourceGate {
             // and are still detected.
             let mut scan_excluded = excluded_pids.clone();
             collect_ancestors(&sys, our_pid, &mut scan_excluded);
+            // Linux refresh_processes also exposes task IDs. In particular,
+            // our own "zenbench-exclusive-heartbeat" thread matches the rival
+            // name filter, but is not the process leader excluded above.
+            // Exclude only our tasks; other processes and their tasks remain
+            // eligible, including real sibling benchmark workers.
+            if let Some(our) = our_pid.and_then(|pid| sys.process(pid)) {
+                if let Some(tasks) = our.tasks() {
+                    scan_excluded.extend(tasks.iter().copied());
+                }
+            }
 
             let bench_count = sys
                 .processes()
@@ -536,6 +546,28 @@ mod tests {
         // Should return immediately without scanning
         gate.wait_for_no_benchmarks();
         assert_eq!(gate.total_waits(), 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn own_benchmark_named_thread_does_not_block_gate() {
+        // Linux sysinfo exposes task IDs alongside process IDs. Our exclusive
+        // lock's heartbeat must not be treated as a competing benchmark.
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let (stop_tx, stop_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::Builder::new()
+            .name("zenbench-exclusive-heartbeat".into())
+            .spawn(move || {
+                ready_tx.send(()).unwrap();
+                stop_rx.recv().unwrap();
+            })
+            .unwrap();
+        ready_rx.recv().unwrap();
+        let mut gate = ResourceGate::new(GateConfig::default());
+        gate.wait_for_no_benchmarks();
+        stop_tx.send(()).unwrap();
+        worker.join().unwrap();
+        assert_eq!(gate.total_waits(), 0, "our own thread caused a rival wait");
     }
 
     #[test]
