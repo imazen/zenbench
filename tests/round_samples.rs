@@ -68,8 +68,14 @@ fn engine_retains_paired_batches_and_round_trips_evidence() {
     let single = aggregate_results(vec![result.clone()], Aggregation::Mean);
     assert_eq!(single.comparisons[0].samples, cmp.samples);
     for policy in [Aggregation::Best, Aggregation::Mean, Aggregation::Median] {
-        let aggregate = aggregate_results(vec![result.clone(), result.clone()], policy);
+        let mut flagged = result.clone();
+        flagged.unreliable = true;
+        let aggregate = aggregate_results(vec![result.clone(), flagged], policy);
         assert!(aggregate.comparisons[0].samples.is_empty());
+        assert!(
+            aggregate.unreliable,
+            "aggregation must not hide a flagged run"
+        );
     }
 }
 
@@ -91,7 +97,80 @@ fn single_iteration_rounds_are_not_warmup_or_batch_averages() {
     assert_eq!(result.comparisons[0].samples.len(), 3);
     for sample in &result.comparisons[0].samples {
         assert_eq!(sample.iterations, 1);
+        assert_eq!(sample.gate_clean, None);
         assert_eq!(sample.execution_order, vec![0]);
         assert_eq!(sample.elapsed_ns.len(), 1);
     }
+}
+
+#[test]
+fn strict_gate_failure_reaches_saved_suite() {
+    let mut gate = GateConfig::strict();
+    gate.min_available_ram_bytes = u64::MAX;
+    gate.max_wait_count = 0;
+    let result = run_gated(gate, |suite| {
+        suite.compare("forced_gate_failure", |group| {
+            let config = group.config();
+            config
+                .max_rounds(3)
+                .min_rounds(3)
+                .auto_rounds(false)
+                .warmup_time(Duration::ZERO);
+            config.min_iterations = 1;
+            config.max_iterations = 1;
+            group.bench("a", |b| b.iter(|| black_box(47u64)));
+        });
+    });
+    assert_eq!(result.gate_waits, 3);
+    assert!(
+        result.unreliable,
+        "strict gate failure must reach the saved suite"
+    );
+    assert!(
+        result.comparisons[0]
+            .samples
+            .iter()
+            .all(|s| s.gate_clean == Some(false))
+    );
+}
+
+#[test]
+fn enabled_clean_gate_is_distinct_from_absent_historical_check() {
+    let mut gate = GateConfig::strict();
+    gate.min_available_ram_bytes = 0;
+    gate.max_cpu_load = 1.0;
+    gate.max_cpu_temp_c = None;
+    gate.max_heavy_processes = usize::MAX;
+    let result = run_gated(gate, |suite| {
+        suite.compare("clean", |group| {
+            let config = group.config();
+            config
+                .max_rounds(2)
+                .min_rounds(2)
+                .auto_rounds(false)
+                .warmup_time(Duration::ZERO);
+            config.min_iterations = 1;
+            config.max_iterations = 1;
+            group.bench("a", |b| b.iter(|| black_box(47u64)));
+        });
+    });
+    assert_eq!(result.gate_waits, 0);
+    assert!(!result.unreliable);
+    assert!(
+        result.comparisons[0]
+            .samples
+            .iter()
+            .all(|s| s.gate_clean == Some(true))
+    );
+    let mut old = serde_json::to_value(&result).unwrap();
+    for sample in old["comparisons"][0]["samples"].as_array_mut().unwrap() {
+        sample.as_object_mut().unwrap().remove("gate_clean");
+    }
+    let restored: SuiteResult = serde_json::from_value(old).unwrap();
+    assert!(
+        restored.comparisons[0]
+            .samples
+            .iter()
+            .all(|s| s.gate_clean.is_none())
+    );
 }

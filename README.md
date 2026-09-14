@@ -510,3 +510,10 @@ Historical JSON, immediate-mode compatibility results, and multi-run aggregates
 have empty samples. Aggregation clears them even for `Best`, since different
 arms can win in different runs. Keep original single-run results for paired
 analysis; no synthetic round population is inferred from summaries.
+
+Each retained round also has `gate_clean`: `Some(true)` for a clean pre-round
+resource check, `Some(false)` for a flagged check, and `None` when disabled or
+absent in older JSON. These checks do not monitor the entire timed body. A
+strict group's excessive-noise verdict propagates to `SuiteResult::unreliable`,
+but strictness permits its configured number of noisy checks; use round status
+when requiring every retained round to have passed admission.

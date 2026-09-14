@@ -183,6 +183,7 @@ impl Engine {
                 None => true,
             })
             .count();
+        let mut any_unreliable = false;
         let mut groups_done: usize = 0;
 
         // Run comparison groups (interleaved), streaming results to file
@@ -221,6 +222,7 @@ impl Engine {
                 tsc_ticks_per_ns,
                 timer_res,
             );
+            any_unreliable |= gate.is_unreliable();
             total_gate_waits += gate.total_waits();
             total_gate_wait_time += gate.total_wait_time();
 
@@ -255,6 +257,7 @@ impl Engine {
                     ci_environment: ci.clone(),
                     comparisons: comparisons.clone(),
                     total_time: start.elapsed(),
+                    unreliable: any_unreliable,
                     gate_waits: total_gate_waits,
                     gate_wait_time: total_gate_wait_time,
                     timer_resolution_ns: timer_res,
@@ -280,6 +283,7 @@ impl Engine {
             ci_environment: ci,
             comparisons,
             total_time,
+            unreliable: any_unreliable,
             gate_waits: total_gate_waits,
             gate_wait_time: total_gate_wait_time,
             timer_resolution_ns: timer_res,
@@ -449,7 +453,7 @@ fn run_comparison_group(
         gate.wait_for_no_benchmarks();
 
         // Record whether system is noisy (advisory, doesn't block).
-        gate.check_and_record();
+        let gate_clean = gate.check_and_record_status();
 
         // Randomize benchmark order for this round
         let order = random_permutation(n_benchmarks, &mut rng);
@@ -474,6 +478,7 @@ fn run_comparison_group(
         // Allocate bookkeeping before any benchmark timer starts. Keep the
         // declaration order and execution order distinct for paired replay.
         let mut retained = crate::results::RoundSample {
+            gate_clean,
             iterations: round_iters,
             execution_order: order.clone(),
             elapsed_ns: vec![0; n_benchmarks],

@@ -442,6 +442,7 @@ pub fn aggregate_results(runs: Vec<SuiteResult>, policy: Aggregation) -> SuiteRe
     // Template = first run. Overwrite each bench's summary according
     // to the chosen policy.
     let mut out = runs[0].clone();
+    out.unreliable = runs.iter().any(|run| run.unreliable);
     for cmp in out.comparisons.iter_mut() {
         // Even Best may select different runs for different arms. None of
         // the multi-run policies preserves a single paired round population.

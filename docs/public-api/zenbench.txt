@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenbench.txt 559 lines (supported surface) | zenbench.features.txt 94 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,precise-timing,wasm) | zenbench.internal.txt 11 lines (11 hidden + 0 excluded-feature)
+# files: zenbench.txt 560 lines (supported surface) | zenbench.features.txt 94 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,precise-timing,wasm) | zenbench.internal.txt 11 lines (11 hidden + 0 excluded-feature)
 
 ## summary
 #
@@ -16,14 +16,14 @@
 #   pub macros                                  1
 #   free functions                             37
 #   inherent methods                          173
-#   struct fields                             248
+#   struct fields                             249
 #   enum variants                              20
 #   trait roster entries (type × trait)       100
 #   auto-trait-complete types                  27
 #   auto-trait exceptions                       6
 #
 # per-module pub lines:
-#   (root)                          312
+#   (root)                          313
 #   baseline                         23
 #   calibration                       5
 #   daemon                           30
@@ -33,7 +33,7 @@
 #   prelude                          81
 #   quickchart                       30
 
-## items (522 lines)
+## items (523 lines)
 
 pub mod zenbench
 pub mod baseline
@@ -491,6 +491,7 @@ pub fn ResourceGate::wait_for_no_benchmarks(&mut self)
 pub RoundSample::compensated_ns: alloc::vec::Vec<u64>
 pub RoundSample::elapsed_ns: alloc::vec::Vec<u64>
 pub RoundSample::execution_order: alloc::vec::Vec<usize>
+pub RoundSample::gate_clean: core::option::Option<bool>
 pub RoundSample::iterations: usize
 pub struct RunId(pub alloc::string::String)
 pub fn RunId::generate() -> Self

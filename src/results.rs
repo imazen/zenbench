@@ -108,6 +108,10 @@ impl BenchmarkResult {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct RoundSample {
+    /// Pre-round resource check: true = clean, false = flagged, None = disabled
+    /// or absent in historical evidence. This does not monitor the timed body.
+    #[serde(default)]
+    pub gate_clean: Option<bool>,
     /// Actual iteration count shared by all benchmarks in this round.
     pub iterations: usize,
     /// Benchmark indices in their randomized execution order.

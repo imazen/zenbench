@@ -345,13 +345,20 @@ impl ResourceGate {
     /// Non-blocking system check. Records whether the system is noisy
     /// but never blocks. The statistical machinery handles noisy samples.
     pub fn check_and_record(&mut self) {
+        self.check_and_record_status();
+    }
+
+    /// Share the existing check with the engine's retained round evidence.
+    pub(crate) fn check_and_record_status(&mut self) -> Option<bool> {
         if !self.config.enabled {
-            return;
+            return None;
         }
         let state = self.monitor.snapshot();
-        if self.check_state(&state).is_some() {
+        let clean = self.check_state(&state).is_none();
+        if !clean {
             self.total_waits += 1;
         }
+        Some(clean)
     }
 
     /// Brief non-blocking gate check. Waits up to `max_wait` for conditions to
