@@ -414,6 +414,7 @@ fn run_comparison_group(
         None
     };
 
+    let mut retained_samples = Vec::with_capacity(config.max_rounds);
     let mut completed_rounds = 0;
     let mut measurement_time = std::time::Duration::ZERO;
 
@@ -470,6 +471,14 @@ fn run_comparison_group(
         };
         iters_per_round.push(round_iters);
 
+        // Allocate bookkeeping before any benchmark timer starts. Keep the
+        // declaration order and execution order distinct for paired replay.
+        let mut retained = crate::results::RoundSample {
+            iterations: round_iters,
+            execution_order: order.clone(),
+            elapsed_ns: vec![0; n_benchmarks],
+            compensated_ns: vec![0; n_benchmarks],
+        };
         let round_start = Instant::now();
 
         for &bench_idx in &order {
@@ -511,6 +520,8 @@ fn run_comparison_group(
             // Clamp to 1ns to avoid negative/zero times.
             let overhead_total = (loop_overhead_ns * round_iters as f64) as u64;
             let compensated = bencher.elapsed_ns.saturating_sub(overhead_total).max(1);
+            retained.elapsed_ns[bench_idx] = bencher.elapsed_ns;
+            retained.compensated_ns[bench_idx] = compensated;
             samples[bench_idx].push(compensated);
             cpu_samples[bench_idx].push(bencher.cpu_ns);
 
@@ -528,6 +539,7 @@ fn run_comparison_group(
         }
 
         measurement_time += round_start.elapsed();
+        retained_samples.push(retained);
         completed_rounds += 1;
 
         // Auto-rounds convergence check.
@@ -789,6 +801,7 @@ fn run_comparison_group(
         benchmarks: individual_results,
         analyses,
         completed_rounds,
+        samples: retained_samples,
         throughput: group.throughput.clone(),
         cache_firewall: config.cache_firewall,
         cache_firewall_bytes: config.cache_firewall_bytes,

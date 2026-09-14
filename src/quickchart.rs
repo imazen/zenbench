@@ -717,6 +717,7 @@ mod tests {
             group_name: name.to_string(),
             benchmarks,
             analyses: Vec::new(),
+            samples: Vec::new(),
             completed_rounds: 10,
             throughput,
             cache_firewall: false,

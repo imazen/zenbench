@@ -148,7 +148,7 @@ pub fn engine_new(suite: Suite) -> engine::Engine {
 pub use format::format_ns;
 pub use gate::{GateConfig, GateReason, ResourceGate};
 pub use platform::Testbed;
-pub use results::{BenchmarkResult, ComparisonResult, RunId, SuiteResult};
+pub use results::{BenchmarkResult, ComparisonResult, RoundSample, RunId, SuiteResult};
 pub use stats::{MeanCi, PairedAnalysis, Summary};
 
 // `Aggregation`, `run_passes`, and `aggregate_results` are defined below
@@ -443,6 +443,9 @@ pub fn aggregate_results(runs: Vec<SuiteResult>, policy: Aggregation) -> SuiteRe
     // to the chosen policy.
     let mut out = runs[0].clone();
     for cmp in out.comparisons.iter_mut() {
+        // Even Best may select different runs for different arms. None of
+        // the multi-run policies preserves a single paired round population.
+        cmp.samples.clear();
         for bench in cmp.benchmarks.iter_mut() {
             let key = (cmp.group_name.clone(), bench.name.clone());
             let samples = match means.get(&key) {

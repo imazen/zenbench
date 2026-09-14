@@ -6,24 +6,24 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenbench.txt 534 lines (supported surface) | zenbench.features.txt 94 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,precise-timing,wasm) | zenbench.internal.txt 10 lines (10 hidden + 0 excluded-feature)
+# files: zenbench.txt 559 lines (supported surface) | zenbench.features.txt 94 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,precise-timing,wasm) | zenbench.internal.txt 11 lines (11 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 9
-#   pub types (struct/enum/trait/alias)        41
+#   pub types (struct/enum/trait/alias)        44
 #   pub consts/statics                          2
 #   pub macros                                  1
 #   free functions                             37
-#   inherent methods                          163
-#   struct fields                             243
-#   enum variants                              16
-#   trait roster entries (type × trait)        90
-#   auto-trait-complete types                  25
-#   auto-trait exceptions                       5
+#   inherent methods                          173
+#   struct fields                             248
+#   enum variants                              20
+#   trait roster entries (type × trait)       100
+#   auto-trait-complete types                  27
+#   auto-trait exceptions                       6
 #
 # per-module pub lines:
-#   (root)                          290
+#   (root)                          312
 #   baseline                         23
 #   calibration                       5
 #   daemon                           30
@@ -33,7 +33,7 @@
 #   prelude                          81
 #   quickchart                       30
 
-## items (500 lines)
+## items (522 lines)
 
 pub mod zenbench
 pub mod baseline
@@ -329,6 +329,11 @@ pub enum Aggregation
 pub Aggregation::Best
 pub Aggregation::Mean
 pub Aggregation::Median
+pub enum GateReason
+pub GateReason::CpuLoad(f64)
+pub GateReason::CpuTemp(f64)
+pub GateReason::HeavyProcesses(usize)
+pub GateReason::LowRam(u64)
 pub enum Throughput [also: prelude]
 pub Throughput::Bytes(u64)
 pub Throughput::Elements(u64)
@@ -388,6 +393,7 @@ pub ComparisonResult::completed_rounds: usize
 pub ComparisonResult::expect_sub_ns: bool
 pub ComparisonResult::group_name: alloc::string::String
 pub ComparisonResult::iterations_per_sample: usize
+pub ComparisonResult::samples: alloc::vec::Vec<RoundSample>
 pub ComparisonResult::sort_by_speed: bool
 pub ComparisonResult::throughput: core::option::Option<Throughput>
 pub ComparisonResult::throughput_unit: core::option::Option<alloc::string::String>
@@ -470,6 +476,22 @@ pub PairedAnalysis::pct_change: f64
 pub PairedAnalysis::resolution_limited: bool
 pub PairedAnalysis::significant: bool
 pub PairedAnalysis::wilcoxon_p: f64
+pub struct ResourceGate
+pub fn ResourceGate::brief_wait(&mut self, core::time::Duration)
+pub fn ResourceGate::check(&self) -> core::option::Option<GateReason>
+pub fn ResourceGate::check_and_record(&mut self)
+pub fn ResourceGate::is_unreliable(&self) -> bool
+pub fn ResourceGate::new(GateConfig) -> Self
+pub fn ResourceGate::total_wait_time(&self) -> core::time::Duration
+pub fn ResourceGate::total_waits(&self) -> usize
+pub fn ResourceGate::wait_for_clear(&mut self) -> bool
+pub fn ResourceGate::wait_for_clear_with_deadline(&mut self, core::option::Option<core::time::Duration>) -> bool
+pub fn ResourceGate::wait_for_no_benchmarks(&mut self)
+#[non_exhaustive] pub struct RoundSample
+pub RoundSample::compensated_ns: alloc::vec::Vec<u64>
+pub RoundSample::elapsed_ns: alloc::vec::Vec<u64>
+pub RoundSample::execution_order: alloc::vec::Vec<usize>
+pub RoundSample::iterations: usize
 pub struct RunId(pub alloc::string::String)
 pub fn RunId::generate() -> Self
 pub struct Suite [also: prelude]
@@ -536,7 +558,7 @@ pub fn run_gated<F: core::ops::function::FnOnce(&mut Suite)>(GateConfig, F) -> S
 pub fn run_passes<F: core::ops::function::FnMut(&mut Suite)>(usize, Aggregation, F) -> SuiteResult
 pub fn run_processes(usize, Aggregation) -> SuiteResult
 
-## trait impls (28 types)
+## trait impls (30 types)
 
 Aggregation: Clone, Copy, Debug
 AllocProfiler<A>: GlobalAlloc
@@ -544,9 +566,11 @@ AllocStats: Clone, Debug, serde_core::de::Deserialize<'de>, serde_core::ser::Ser
 BenchmarkResult: Clone, Debug, Default, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 ComparisonResult: Clone, Debug, Default, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 GateConfig: Clone, Debug, Default
+GateReason: Clone, Debug, Display
 GroupConfig: Clone, Debug, Default
 MeanCi: Clone, Debug, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 PairedAnalysis: Clone, Debug, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+RoundSample: Clone, Debug, Default, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 RunId: Clone, Debug, Display, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 Suite: Default
 SuiteResult: Clone, Debug, Default, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
@@ -569,9 +593,10 @@ quickchart::QuickChartUrl: Clone, Debug
 
 ## auto traits
 
-25 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+27 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 AllocProfiler<A>: !Freeze !RefUnwindSafe !Send !Unpin !UnwindSafe
 BenchGroup: !RefUnwindSafe !Sync !UnwindSafe
+ResourceGate: !Freeze
 Suite: !RefUnwindSafe !Sync !UnwindSafe
 exclusive::Lock: !RefUnwindSafe !UnwindSafe
 platform::SystemMonitor: !Freeze

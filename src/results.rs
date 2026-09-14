@@ -98,6 +98,26 @@ impl BenchmarkResult {
     }
 }
 
+/// One completed measurement round, excluding warmup and resource-gate waits.
+///
+/// The timing vectors are indexed by `ComparisonResult::benchmarks`, not by
+/// execution position. The vector index in `ComparisonResult::samples` is the
+/// chronological round number. Timings cover the entire iteration batch; they
+/// are individual-call latency observations only when `iterations == 1`.
+/// Retention does not certify that the machine was quiet during the round.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct RoundSample {
+    /// Actual iteration count shared by all benchmarks in this round.
+    pub iterations: usize,
+    /// Benchmark indices in their randomized execution order.
+    pub execution_order: Vec<usize>,
+    /// Measured batch durations before loop-overhead subtraction, in ns.
+    pub elapsed_ns: Vec<u64>,
+    /// Batch durations used by summaries: overhead-subtracted, clamped to 1ns.
+    pub compensated_ns: Vec<u64>,
+}
+
 /// Result of a comparison group (multiple interleaved benchmarks).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -107,6 +127,11 @@ pub struct ComparisonResult {
     /// Paired analyses: (baseline_name, candidate_name, analysis).
     pub analyses: Vec<(String, String, PairedAnalysis)>,
     pub completed_rounds: usize,
+    /// Completed paired rounds in chronological order, with actual batch sizes.
+    /// Empty for historical results, immediate-mode compatibility results, or
+    /// multi-run aggregates, which do not describe one paired execution.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub samples: Vec<RoundSample>,
     /// Throughput declaration for this group (if set).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub throughput: Option<Throughput>,
