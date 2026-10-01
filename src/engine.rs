@@ -21,7 +21,7 @@ pub struct Engine {
     quiet: bool,
 }
 
-/// `--no-gate` (CLI) or `ZENBENCH_NO_GATE=1` (env) disables the resource gate
+/// `--no-busy-gate` (CLI) or `ZENBENCH_NO_BUSY_GATE=1` (env) disables the resource gate
 /// and the rival-benchmark wait, overriding any harness-supplied [`GateConfig`].
 ///
 /// For harnesses whose benchmarks spawn their own worker threads (e.g. a
@@ -29,8 +29,8 @@ pub struct Engine {
 /// load from a co-tenant's. The run is still reported; per-round
 /// `gate_clean` is `None`. Check machine load yourself when using it.
 pub(crate) fn gate_override() -> bool {
-    std::env::args().any(|a| a == "--no-gate")
-        || std::env::var("ZENBENCH_NO_GATE").is_ok_and(|v| !v.is_empty() && v != "0")
+    std::env::args().any(|a| a == "--no-busy-gate")
+        || std::env::var("ZENBENCH_NO_BUSY_GATE").is_ok_and(|v| !v.is_empty() && v != "0")
 }
 
 fn apply_gate_override(config: GateConfig) -> GateConfig {
@@ -39,7 +39,7 @@ fn apply_gate_override(config: GateConfig) -> GateConfig {
 
 fn resolve_gate(config: GateConfig, disable: bool) -> GateConfig {
     if disable {
-        eprintln!("[zenbench] resource gate disabled (--no-gate / ZENBENCH_NO_GATE)");
+        eprintln!("[zenbench] resource gate disabled (--no-busy-gate / ZENBENCH_NO_BUSY_GATE)");
         GateConfig::disabled()
     } else {
         config
