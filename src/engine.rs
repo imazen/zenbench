@@ -21,14 +21,39 @@ pub struct Engine {
     quiet: bool,
 }
 
+/// `--no-gate` (CLI) or `ZENBENCH_NO_GATE=1` (env) disables the resource gate
+/// and the rival-benchmark wait, overriding any harness-supplied [`GateConfig`].
+///
+/// For harnesses whose benchmarks spawn their own worker threads (e.g. a
+/// codec's internal rayon pool), where the gate cannot tell the harness's own
+/// load from a co-tenant's. The run is still reported; per-round
+/// `gate_clean` is `None`. Check machine load yourself when using it.
+pub(crate) fn gate_override() -> bool {
+    std::env::args().any(|a| a == "--no-gate")
+        || std::env::var("ZENBENCH_NO_GATE").is_ok_and(|v| !v.is_empty() && v != "0")
+}
+
+fn apply_gate_override(config: GateConfig) -> GateConfig {
+    resolve_gate(config, gate_override())
+}
+
+fn resolve_gate(config: GateConfig, disable: bool) -> GateConfig {
+    if disable {
+        eprintln!("[zenbench] resource gate disabled (--no-gate / ZENBENCH_NO_GATE)");
+        GateConfig::disabled()
+    } else {
+        config
+    }
+}
+
 impl Engine {
     pub fn new(suite: Suite) -> Self {
         // Auto-detect CI and use appropriate gate config
-        let gate_config = if platform::detect_ci().is_some() {
+        let gate_config = apply_gate_override(if platform::detect_ci().is_some() {
             GateConfig::ci()
         } else {
             GateConfig::default()
-        };
+        });
         Self {
             suite,
             gate_config,
@@ -38,10 +63,10 @@ impl Engine {
     }
 
     pub fn with_gate(suite: Suite, gate_config: GateConfig) -> Self {
-        // with_gate uses the user's config as-is
+        // with_gate uses the user's config as-is, unless overridden.
         Self {
             suite,
-            gate_config,
+            gate_config: apply_gate_override(gate_config),
             lock_dir: default_lock_dir(),
             quiet: false,
         }
@@ -1077,4 +1102,15 @@ fn is_leap(year: i64) -> bool {
 /// [`crate::exclusive::Lock`].
 fn default_lock_dir() -> Option<PathBuf> {
     Some(std::env::temp_dir().join("zenbench"))
+}
+
+#[cfg(test)]
+mod gate_override_tests {
+    use super::*;
+
+    #[test]
+    fn gate_override_disables_any_config() {
+        assert!(!resolve_gate(GateConfig::strict(), true).enabled);
+        assert!(resolve_gate(GateConfig::strict(), false).enabled);
+    }
 }

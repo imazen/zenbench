@@ -319,6 +319,7 @@ cargo bench -- --format=json          # structured JSON (stdout)
 cargo bench -- --format=csv           # spreadsheet-friendly (stdout)
 cargo bench -- --format=llm           # key=value for AI tools (stdout)
 cargo bench -- --format=md            # markdown tables (stdout)
+cargo bench -- --no-gate              # disable the resource gate (or ZENBENCH_NO_GATE=1)
 ```
 
 The default terminal output ends with a sorted, throughput-labelled bar chart
