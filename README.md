@@ -413,6 +413,24 @@ group.config()
     .sort_by_speed(true);         // fastest first in report
 ```
 
+## Cargo features
+
+| Feature | Default | Adds | Build MSRV |
+|---|---|---|---|
+| `cli` | yes | the `zenbench` CLI: background runs, results, baselines, self-compare | 1.85 |
+| `daemon` | yes | nothing yet: the `daemon` module compiles either way | 1.85 |
+| `precise-timing` | yes | TSC / `cntvct_el0` timer and asm fences | 1.85 |
+| `alloc-profiling` | yes | `AllocProfiler` for per-benchmark heap counts | 1.85 |
+| `criterion-compat` | no | drop-in criterion API for migration | 1.85 |
+| `async` | no | `Bencher::iter_async` on a tokio runtime | 1.85 |
+| `cpu-time` | no | per-thread CPU time next to wall time | 1.85 |
+| `charts` | no | SVG charts via `charts-rs` | 1.88 |
+| `wasm` | no | `zenbench::wasm`: wasmtime runner with simd128 and WASI p1 | 1.96 |
+
+The crate's declared `rust-version` is 1.85. `charts` and `wasm` pull in
+dependencies that need newer compilers; `zenbench::wasm` re-exports
+`wasmtime`, so its major version follows wasmtime's.
+
 ## Platform support
 
 Tested on all targets via GitHub Actions CI:
