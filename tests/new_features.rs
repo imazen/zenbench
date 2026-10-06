@@ -37,10 +37,12 @@ fn loop_overhead_is_recorded() {
 
 #[test]
 fn overhead_compensation_produces_lower_times() {
-    // A trivial benchmark (just black_box) should report very low times
-    // after overhead subtraction. Without subtraction, the per-iter time
-    // would be dominated by the loop + black_box overhead (~1-3ns).
-    // With subtraction, it should be near zero (but clamped to > 0).
+    // Every timed batch has the startup-measured loop overhead subtracted:
+    // compensated = max(raw - floor(overhead * iters), 1). Checked per
+    // retained round against the raw batch time, so the assertions hold on
+    // any runner. An earlier absolute check (noop mean < 2x overhead) failed
+    // on contended macOS runners: overhead is sampled once at startup and
+    // the VM's speed drifts before the group runs.
     let result = run_gated(disabled_gate(), |suite| {
         suite.compare("trivial", |group| {
             group
@@ -53,15 +55,61 @@ fn overhead_compensation_produces_lower_times() {
         });
     });
     let overhead = result.loop_overhead_ns;
-    let noop_mean = result.comparisons[0].benchmarks[0].summary.mean;
-
-    // The noop mean should be less than the overhead (since overhead is subtracted)
-    // or very close to zero. It should NOT be equal to the overhead.
     assert!(
-        noop_mean < overhead * 2.0 || noop_mean < 2.0,
-        "noop mean ({noop_mean:.2}ns) should be much less than raw overhead ({overhead:.2}ns) \
-         after compensation"
+        overhead > 0.0,
+        "loop overhead must be measured, got {overhead}"
     );
+    let comp = &result.comparisons[0];
+    assert_eq!(comp.samples.len(), comp.completed_rounds);
+    assert!(!comp.samples.is_empty(), "rounds must be retained");
+
+    for (r, round) in comp.samples.iter().enumerate() {
+        let overhead_total = (overhead * round.iterations as f64) as u64;
+        assert!(
+            overhead_total > 0,
+            "round {r}: overhead_total rounds to zero"
+        );
+        for (b, bench) in comp.benchmarks.iter().enumerate() {
+            let raw = round.elapsed_ns[b];
+            let compensated = round.compensated_ns[b];
+            assert_eq!(
+                compensated,
+                raw.saturating_sub(overhead_total).max(1),
+                "round {r} {}: compensated must be raw minus overhead",
+                bench.name
+            );
+            assert!(
+                compensated < raw,
+                "round {r} {}: compensation must lower the time ({compensated} vs raw {raw})",
+                bench.name
+            );
+        }
+    }
+
+    // The reported per-iteration mean is built from the compensated batches
+    // and sits below the raw per-iteration mean.
+    for (b, bench) in comp.benchmarks.iter().enumerate() {
+        let per_iter = |ns: &dyn Fn(&RoundSample) -> u64| {
+            comp.samples
+                .iter()
+                .map(|s| ns(s) as f64 / s.iterations as f64)
+                .sum::<f64>()
+                / comp.samples.len() as f64
+        };
+        let compensated_mean = per_iter(&|s| s.compensated_ns[b]);
+        let raw_mean = per_iter(&|s| s.elapsed_ns[b]);
+        let reported = bench.summary.mean;
+        assert!(
+            (reported - compensated_mean).abs() <= 1e-9 * compensated_mean.max(1.0),
+            "{}: summary mean {reported} must equal the compensated mean {compensated_mean}",
+            bench.name
+        );
+        assert!(
+            reported < raw_mean,
+            "{}: reported mean {reported:.3}ns must be below raw mean {raw_mean:.3}ns",
+            bench.name
+        );
+    }
 }
 
 #[test]
