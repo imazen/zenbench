@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### QUEUED BREAKING CHANGES
+<!-- Breaking changes that will ship together in the next minor release.
+     Add items here as you discover them. Do NOT ship these piecemeal — batch them. -->
+
+## [0.1.10] - 2026-10-06
+
 ### Fixed
 - Propagate strict resource-gate failures into streamed and saved `SuiteResult::unreliable`; the engine previously always left that field false. Retained rounds now record `gate_clean` as checked-clean, flagged, or disabled/unknown. A forced insufficient-RAM regression fails before the correction and passes afterward. Multi-run aggregation preserves any input unreliability. Strictness permits a configured number of noisy checks, so the suite flag alone is not proof that every round was clean (5394102).
 - Exclude the current process's Linux task IDs from the concurrent-benchmark scan. The exclusive-lock heartbeat's thread name matched the benchmark filter, making the harness wait for itself for 30 seconds per round. A live named-thread regression reproduced 29 waits before the fix and zero afterward; other processes and their tasks remain eligible (1bf8a65).
@@ -19,19 +25,18 @@
 - Bumped `wasmtime`/`wasmtime-wasi` 48 → 49.0.2 (optional `wasm` feature); no source change needed. Added `tests/wasm_smoke.rs`, the first runtime test of `zenbench::wasm`: WAT compile, plain and WASI p1 instances, simd128 lanes, and the unresolved-import error path. It passes on x86_64 and on i686 via `cross`, where wasmtime has no Cranelift backend and uses the Pulley interpreter (611c90f).
 - Bumped `charts-rs` 1.3 → 2.0.0 (optional `charts` feature). `src/charts.rs` moves six fields to 2.0's grouped option structs (`title_text` → `title.text`, …). Output is byte-identical: 36 charts rendered at charts-rs 1.3.0 and 2.0.0 (3 fixtures × 2 orientations × 3 themes × labels on/off) match byte for byte (bced140).
 - Raised requirement floors to the lock-tested versions: `serde` 1.0.229, `serde_json` 1.0.151, `clap` 4.6.7, `tokio` 1.53.2. The lock already resolved to these, and all four build on Rust 1.85 (f738573).
-- CI: `actions/checkout` → v7, `codecov/codecov-action` → v7, `actions/upload-pages-artifact` → v5, `actions/deploy-pages` → v5 (b48f08b).
+- CI: `actions/checkout` → v7, `codecov/codecov-action` → v7, `actions/upload-pages-artifact` → v5, `actions/deploy-pages` → v5 (b48f08b). The MSRV job now also checks `--all-targets --features async,cpu-time,criterion-compat` on 1.85; `--all-features` cannot resolve on 1.85 because `charts` needs 1.88 and `wasm` 1.96 (c9b414b).
 
 ### Documentation
 - README: new Cargo features table with each feature's default state and measured build MSRV (dcffa1d). Moved the "Auditable latency samples" section above the crosslink footer, and regenerated `README.crates.md`, which had drifted and lacked both `--no-busy-gate` and that section (eb6b06c).
 
-### QUEUED BREAKING CHANGES
-<!-- Breaking changes that will ship together in the next minor release.
-     Add items here as you discover them. Do NOT ship these piecemeal — batch them. -->
+### Compatibility
+- **`wasm` feature users: the re-exported `wasmtime` moves from major 43 (0.1.9) to 49.** Code that names wasmtime types through `zenbench::wasm::wasmtime`, `WasmBench`/`WasmInstance` signatures, or `WasmInstance::store` and mixes them with its own `wasmtime = "43"` dependency must move to wasmtime 49. Shipped as a patch release by owner decision (2026-10-06): 43 sits under the wasmtime advisories listed in Security, and the change is confined to the optional, non-default feature. `cargo semver-checks` passes (196 checks) because it does not track re-exported crate majors.
 - `wasm` feature: the wasmtime/wasmtime-wasi 43 → 44 → 48 → 49 bumps change the re-exported `wasmtime` major (`pub use wasmtime` at `zenbench::wasm::wasmtime`, plus the wasmtime types in `WasmBench`/`WasmInstance` signatures and the public `WasmInstance::store` field) and raise the `wasm`-feature build MSRV to Rust 1.96. The crate's default-build MSRV is unchanged (1.85), since wasmtime is only pulled in by the optional `wasm` feature (e521d9d, baeeb05, 611c90f).
 - `charts` feature: `charts-rs` 0.3 → 1.0 → 2.0 raises the `charts`-feature build MSRV to Rust 1.88. `charts_rs` types are not re-exported, so this is a build-requirement change only, not an API break. Default-build MSRV unchanged (baeeb05, bced140).
 
 ### Deferred
-- `sysinfo` stays at 0.36.1 (latest 0.39.6). Every 0.37+ release declares a `rust-version` above zenbench's 1.85 — 0.37.x and 0.38.x want 1.88, 0.39.x wants 1.95 — and `sysinfo` is a default, non-optional dependency that the MSRV (1.85) CI job compiles, so taking it would break that job. Needs an owner decision on raising the declared MSRV.
+- `sysinfo` stays at 0.36.1 (latest 0.39.6). Every 0.37+ release declares a `rust-version` above zenbench's 1.85 — 0.37.x and 0.38.x want 1.88, 0.39.x wants 1.95 — and `sysinfo` is a default, non-optional dependency that the MSRV (1.85) CI job compiles, so taking it would break that job. Owner decision (2026-10-06): keep MSRV 1.85 for 0.1.10.
 - `criterion` resolves to 0.7.0 (latest 0.8.2) with no manifest change needed: the dev-dependency requirement is already `>=0.7.0, <0.9.0`, and the MSRV-aware resolver holds 0.7.0 because 0.8.x declares `rust-version` 1.86 > 1.85. It moves on its own once the declared MSRV rises.
 
 ### Security
@@ -83,7 +88,8 @@
 ### Documentation
 - Added multi-process / multi-pass section to README; updated framework comparison table (4f3ea7b).
 
-[Unreleased]: https://github.com/imazen/zenbench/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/imazen/zenbench/compare/v0.1.10...HEAD
+[0.1.10]: https://github.com/imazen/zenbench/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/imazen/zenbench/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/imazen/zenbench/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/imazen/zenbench/compare/v0.1.6...v0.1.7
