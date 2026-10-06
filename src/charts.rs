@@ -173,10 +173,10 @@ fn render_matrix_chart(
     let base_svg = match config.orientation {
         ChartOrientation::Horizontal => {
             let mut c = HorizontalBarChart::new_with_theme(series_list, x_axis_data, &config.theme);
-            c.title_text = comp.group_name.clone();
-            c.sub_title_text = sub;
-            c.title_align = charts_rs::Align::Left;
-            c.legend_align = charts_rs::Align::Right;
+            c.title.text = comp.group_name.clone();
+            c.sub_title.text = sub;
+            c.title.align = charts_rs::Align::Left;
+            c.legend.align = charts_rs::Align::Right;
             c.width = 800.0;
             c.height = (120 + params.len() * variants.len() * 28 + params.len() * 30) as f32;
             c.margin.top = 15.0;
@@ -186,22 +186,22 @@ fn render_matrix_chart(
         }
         ChartOrientation::Vertical => {
             let mut c = BarChart::new_with_theme(series_list, x_axis_data, &config.theme);
-            c.title_text = comp.group_name.clone();
-            c.sub_title_text = sub;
-            c.title_align = charts_rs::Align::Left;
-            c.legend_align = charts_rs::Align::Right;
+            c.title.text = comp.group_name.clone();
+            c.sub_title.text = sub;
+            c.title.align = charts_rs::Align::Left;
+            c.legend.align = charts_rs::Align::Right;
             c.width =
                 (120 + params.len() * variants.len() * 32 + params.len() * 20).max(600) as f32;
             c.height = 450.0;
             c.margin.top = 15.0;
             c.margin.right = 20.0;
             c.margin.left = 10.0;
-            c.x_axis_name_rotate = if params.iter().any(|p| p.len() > 6) {
+            c.x_axis.name_rotate = if params.iter().any(|p| p.len() > 6) {
                 -30.0
             } else {
                 0.0
             };
-            c.series_label_font_size = 10.0;
+            c.series.label.font.size = 10.0;
             c.svg().unwrap_or_default()
         }
     };
@@ -243,9 +243,9 @@ fn render_flat_chart(comp: &ComparisonResult, config: &ChartConfig) -> String {
     match config.orientation {
         ChartOrientation::Horizontal => {
             let mut c = HorizontalBarChart::new_with_theme(vec![s], x_axis_data, &config.theme);
-            c.title_text = comp.group_name.clone();
-            c.sub_title_text = sub;
-            c.title_align = charts_rs::Align::Left;
+            c.title.text = comp.group_name.clone();
+            c.sub_title.text = sub;
+            c.title.align = charts_rs::Align::Left;
             c.width = 700.0;
             c.height = (100 + benches.len() * 32) as f32;
             c.margin.top = 15.0;
@@ -255,9 +255,9 @@ fn render_flat_chart(comp: &ComparisonResult, config: &ChartConfig) -> String {
         }
         ChartOrientation::Vertical => {
             let mut c = BarChart::new_with_theme(vec![s], x_axis_data, &config.theme);
-            c.title_text = comp.group_name.clone();
-            c.sub_title_text = sub;
-            c.title_align = charts_rs::Align::Left;
+            c.title.text = comp.group_name.clone();
+            c.sub_title.text = sub;
+            c.title.align = charts_rs::Align::Left;
             c.width = (80 + benches.len() * 60).max(400) as f32;
             c.height = 400.0;
             c.margin.top = 15.0;
