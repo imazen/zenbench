@@ -119,7 +119,7 @@ Don't mix bench_parallel/bench_contended with rayon — competing thread pools.
 - No tests for daemon.rs (486 lines) or mcp.rs (634 lines)
 - Markdown bar chart doesn't sort by speed like terminal bar chart does
 - `sysinfo::System::new_all()` in bench_scaling is heavy — consider caching
-- `gate::tests::own_benchmark_named_thread_does_not_block_gate` asserts zero rival waits, so it fails whenever another process named like a benchmark (`criterion`, `divan`, `zenbench`, `cargo-bench`, `bench-`) runs on the box. Seen 2026-10-06 on dev at load ~35: 6 waits, then 133/133 and 5/5 reruns passed once the box was quiet. Not a gate bug; rerun on a quiet box before treating it as a regression.
+- `gate::tests::own_benchmark_named_thread_does_not_block_gate` asserts zero rival waits, so it fails whenever another process named like a benchmark (`criterion`, `divan`, `zenbench`, `cargo-bench`, `bench-`) runs on the box. Seen 2026-10-06 on r5900xt at load ~35: 6 waits, then 133/133 and 5/5 reruns passed once the box was quiet. Not a gate bug; rerun on a quiet box before treating it as a regression.
 - The `daemon` feature gates nothing: `pub mod daemon` compiles unconditionally.
 
 ## Development notes
