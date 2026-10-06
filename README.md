@@ -377,6 +377,29 @@ g.bench_contended("mutex", 4, || Mutex::new(Map::new()), |b, m, tid| {
 g.bench_scaling("work", |b, _tid| b.iter(|| compute()));
 ```
 
+### Auditable latency samples
+
+`SuiteResult::save` includes `ComparisonResult::samples` for completed engine
+rounds. Each `RoundSample` records the actual iteration count, execution order,
+and total raw and overhead-compensated nanoseconds in benchmark declaration
+order. Warmup and gate waits are excluded. Summaries still use compensated
+per-iteration times. Individual-call latency percentiles require **every
+sample's actual iteration count to be one**; dividing batched durations does
+not recover individual latency tails. Resource admission and representative
+inputs must be established separately.
+
+Historical JSON, immediate-mode compatibility results, and multi-run aggregates
+have empty samples. Aggregation clears them even for `Best`, since different
+arms can win in different runs. Keep original single-run results for paired
+analysis; no synthetic round population is inferred from summaries.
+
+Each retained round also has `gate_clean`: `Some(true)` for a clean pre-round
+resource check, `Some(false)` for a flagged check, and `None` when disabled or
+absent in older JSON. These checks do not monitor the entire timed body. A
+strict group's excessive-noise verdict propagates to `SuiteResult::unreliable`,
+but strictness permits its configured number of noisy checks; use round status
+when requiring every retained round to have passed admission.
+
 ## Configuration
 
 ```rust,ignore
@@ -495,26 +518,3 @@ MIT OR Apache-2.0
 [imageflow-dotnet]: https://github.com/imazen/imageflow-dotnet
 [imageflow-node]: https://github.com/imazen/imageflow-node
 [imageflow-go]: https://github.com/imazen/imageflow-go
-
-### Auditable latency samples
-
-`SuiteResult::save` includes `ComparisonResult::samples` for completed engine
-rounds. Each `RoundSample` records the actual iteration count, execution order,
-and total raw and overhead-compensated nanoseconds in benchmark declaration
-order. Warmup and gate waits are excluded. Summaries still use compensated
-per-iteration times. Individual-call latency percentiles require **every
-sample's actual iteration count to be one**; dividing batched durations does
-not recover individual latency tails. Resource admission and representative
-inputs must be established separately.
-
-Historical JSON, immediate-mode compatibility results, and multi-run aggregates
-have empty samples. Aggregation clears them even for `Best`, since different
-arms can win in different runs. Keep original single-run results for paired
-analysis; no synthetic round population is inferred from summaries.
-
-Each retained round also has `gate_clean`: `Some(true)` for a clean pre-round
-resource check, `Some(false)` for a flagged check, and `None` when disabled or
-absent in older JSON. These checks do not monitor the entire timed body. A
-strict group's excessive-noise verdict propagates to `SuiteResult::unreliable`,
-but strictness permits its configured number of noisy checks; use round status
-when requiring every retained round to have passed admission.
