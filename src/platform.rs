@@ -105,15 +105,10 @@ impl SystemMonitor {
                 owned.push(pid);
             }
         }
-        // Linux also exposes each worker's tasks as process entries. The
-        // leader's CPU usage already includes them: omit owned tasks from
-        // contention counts without subtracting their CPU a second time.
-        let owned_tasks: Vec<_> = owned
-            .iter()
-            .filter_map(|pid| sys.process(*pid))
-            .filter_map(|p| p.tasks())
-            .flat_map(|tasks| tasks.iter().copied())
-            .collect();
+        // Linux exposes user threads as additional process entries. Leaders
+        // already aggregate their CPU use: count each process once, including
+        // foreign processes, and retain foreign thread CPU in global load.
+        let user_tasks = process_task_pids(&sys);
         let (cpu_load, heavy_process_count) = foreign_activity(
             cpu_load,
             cpus.len(),
@@ -121,11 +116,11 @@ impl SystemMonitor {
                 .values()
                 .map(|p| (p.pid(), f64::from(p.cpu_usage()))),
             &owned,
-            &owned_tasks,
+            &user_tasks,
         );
         if std::env::var_os("ZENBENCH_GATE_TRACE").is_some() {
             for process in sys.processes().values().filter(|p| {
-                !owned.contains(&p.pid()) && !owned_tasks.contains(&p.pid()) && p.cpu_usage() > 10.0
+                !owned.contains(&p.pid()) && !user_tasks.contains(&p.pid()) && p.cpu_usage() > 10.0
             }) {
                 eprintln!(
                     "[zenbench gate] foreign pid={} name={:?} cpu_pct={}",
@@ -148,19 +143,27 @@ impl SystemMonitor {
 
 // Process CPU percentages may exceed 100 for multithreaded work; global load
 // is a fraction of all logical CPUs. Do not compare those units directly.
+fn process_task_pids(sys: &System) -> Vec<sysinfo::Pid> {
+    sys.processes()
+        .values()
+        .filter(|p| p.thread_kind() == Some(sysinfo::ThreadKind::Userland))
+        .map(|p| p.pid())
+        .collect()
+}
+
 fn foreign_activity(
     global: f64,
     cores: usize,
     processes: impl IntoIterator<Item = (sysinfo::Pid, f64)>,
     owned: &[sysinfo::Pid],
-    owned_tasks: &[sysinfo::Pid],
+    user_tasks: &[sysinfo::Pid],
 ) -> (f64, usize) {
     let mut own_pct = 0.0;
     let mut heavy = 0;
     for (pid, pct) in processes {
         if owned.contains(&pid) {
             own_pct += pct;
-        } else if !owned_tasks.contains(&pid) && pct > 10.0 {
+        } else if !user_tasks.contains(&pid) && pct > 10.0 {
             heavy += 1;
         }
     }
@@ -175,6 +178,8 @@ fn foreign_activity(
 #[cfg(test)]
 mod owner_tests {
     use super::foreign_activity;
+    #[cfg(target_os = "linux")]
+    use super::process_task_pids;
     use sysinfo::Pid;
 
     #[test]
@@ -230,6 +235,69 @@ mod owner_tests {
         assert_eq!(
             foreign_activity(0.5, 32, [(foreign, 1600.0)], &[absent], &[]),
             (0.5, 1)
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn foreign_user_thread_is_not_a_second_process_owner() {
+        let (release, stop) = std::sync::mpsc::channel::<()>();
+        let (ready, started) = std::sync::mpsc::channel();
+        let thread = std::thread::Builder::new()
+            .name("zb-count-check".into())
+            .spawn(move || {
+                ready.send(()).unwrap();
+                let _ = stop.recv();
+            })
+            .unwrap();
+        started.recv().unwrap();
+        let sys = sysinfo::System::new_all();
+        let leader = sysinfo::get_current_pid().unwrap();
+        let task = sys
+            .process(leader)
+            .unwrap()
+            .tasks()
+            .unwrap()
+            .iter()
+            .filter_map(|pid| sys.process(*pid))
+            .find(|p| p.name() == "zb-count-check")
+            .unwrap();
+        assert_eq!(task.thread_kind(), Some(sysinfo::ThreadKind::Userland));
+        // CPU percentages are fixtures; the real thread sleeps throughout.
+        let tasks = process_task_pids(&sys);
+        assert_eq!(
+            foreign_activity(0.05, 32, [(leader, 20.0), (task.pid(), 20.0)], &[], &tasks),
+            (0.05, 1)
+        );
+        drop(release);
+        thread.join().unwrap();
+    }
+
+    #[test]
+    fn two_foreign_process_owners_remain_two_after_task_deduplication() {
+        let a = Pid::from(11);
+        let at = Pid::from(12);
+        let b = Pid::from(21);
+        let bt = Pid::from(22);
+        assert_eq!(
+            foreign_activity(
+                0.25,
+                32,
+                [(a, 400.0), (at, 400.0), (b, 400.0), (bt, 100.0)],
+                &[],
+                &[at, bt]
+            ),
+            (0.25, 2)
+        );
+        assert_eq!(
+            foreign_activity(
+                0.05,
+                32,
+                [(a, 20.0), (at, 20.0), (b, 20.0), (bt, 20.0)],
+                &[],
+                &[at, bt]
+            ),
+            (0.05, 2)
         );
     }
 }

@@ -2,7 +2,8 @@
 
 ## [Unreleased]
 
-- Add opt-in `ZENBENCH_GATE_TRACE` diagnostics for round verdicts and foreign heavy-process identities.
+- Deduplicate foreign Linux user-thread entries in heavy-process counts while retaining their global CPU contribution.
+- Add opt-in `ZENBENCH_GATE_TRACE` diagnostics for round verdicts and foreign heavy-process identities (a8986743).
 
 - Resource admission accounts for explicitly registered launcher/worker CPU ownership; foreign work and global RAM/temperature gates remain visible. A private development example reuses engine paired statistics for external-worker rounds (cca46093fe78).
 

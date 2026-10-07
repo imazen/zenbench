@@ -556,6 +556,10 @@ MIT OR Apache-2.0
  RAM and temperature checks remain global. Only explicitly listed PIDs and the
  measuring process are excluded; unrelated processes remain visible.
 
+Linux heavy-process counts count each process leader once. User-thread entries
+are deduplicated for both benchmark owners and foreign processes; global CPU
+admission still includes all foreign thread work.
+
 Set `ZENBENCH_GATE_TRACE=1` to log each round's gate verdict, blocking reason,
 system snapshot and foreign heavy-process identities to stderr. The trace is
 opt-in and runs outside benchmark timers; it uses the existing admission checks.

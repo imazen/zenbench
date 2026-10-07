@@ -163,6 +163,12 @@ Tested via WSL→PowerShell bridge (Windows cargo 1.92 nightly):
 
 ### Known Bugs (SPEEDQ)
 
+Foreign Linux process leaders and their user-thread entries were counted as
+separate heavy processes. A live sleeping-thread regression reproduced a count
+of two for one foreign owner before the correction. The gate now counts each
+leader once and keeps foreign thread CPU in global CPU admission. Two distinct
+foreign owners still count as two; admission thresholds remain unchanged.
+
 Registered external benchmark workers previously counted as foreign CPU/heavy
 processes in SystemMonitor even though the concurrent-benchmark scan excluded
 those same launcher PIDs. Both scans now honor that explicit inventory;
