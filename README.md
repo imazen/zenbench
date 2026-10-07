@@ -284,6 +284,11 @@ Reported throughput is `N / mean_time_per_call`. If one `b.iter(|| ...)`
 compresses a 64 KiB block, set `Throughput::Bytes(64 * 1024)`; the reported
 `GiB/s` is then bytes-per-call ÷ the mean per-call time.
 
+Throughput belongs to the **group**: every bench in a group shares it, and a
+second `g.throughput(...)` call replaces the first. Benchmarks over different
+input sizes therefore need one group per size, not one throughput call per
+bench inside a single group.
+
 ## Migrating from criterion
 
 Add zenbench alongside criterion — migrate one file at a time:
