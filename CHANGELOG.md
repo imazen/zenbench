@@ -18,6 +18,8 @@
 
 ### Fixed
 
+- Preserve global CPU-load checks when no worker PID inventory is supplied.
+
 - Exclude explicitly registered workers’ Linux tasks from rival counts without double-subtracting CPU usage.
 
 - Propagate strict resource-gate failures into streamed and saved `SuiteResult::unreliable`; the engine previously always left that field false. Retained rounds now record `gate_clean` as checked-clean, flagged, or disabled/unknown. A forced insufficient-RAM regression fails before the correction and passes afterward. Multi-run aggregation preserves any input unreliability. Strictness permits a configured number of noisy checks, so the suite flag alone is not proof that every round was clean (5394102).

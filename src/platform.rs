@@ -98,8 +98,12 @@ impl SystemMonitor {
         let mut owned = std::env::var("ZENBENCH_LAUNCHER_PIDS")
             .map(|s| crate::gate::parse_launcher_pids(&s))
             .unwrap_or_default();
-        if let Ok(pid) = sysinfo::get_current_pid() {
-            owned.push(pid);
+        // A standalone monitor retains its global-load contract. Only a
+        // launcher that explicitly registers workers admits its own CPU work.
+        if !owned.is_empty() {
+            if let Ok(pid) = sysinfo::get_current_pid() {
+                owned.push(pid);
+            }
         }
         // Linux also exposes each worker's tasks as process entries. The
         // leader's CPU usage already includes them: omit owned tasks from
