@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Resource admission accounts for explicitly registered launcher/worker CPU ownership; foreign work and global RAM/temperature gates remain visible. A private development example reuses engine paired statistics for external-worker rounds (cca46093fe78).
+
 ### QUEUED BREAKING CHANGES
 <!-- Breaking changes that will ship together in the next minor release.
      Add items here as you discover them. Do NOT ship these piecemeal — batch them. -->
