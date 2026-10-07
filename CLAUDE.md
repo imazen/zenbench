@@ -168,3 +168,5 @@ processes in SystemMonitor even though the concurrent-benchmark scan excluded
 those same launcher PIDs. Both scans now honor that explicit inventory;
 foreign processes, RAM and temperature remain checked. Pure admission tests
 cover MT percentage units and a foreign negative control. No burn test used.
+
+Linux resource admission must also exclude tasks belonging to explicitly registered worker leaders from heavy-process counts. Subtract CPU using leaders only; their CPU usage aggregates tasks, so subtracting task counters again would hide foreign load. The negative control keeps an unregistered heavy process visible.

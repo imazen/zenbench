@@ -101,6 +101,15 @@ impl SystemMonitor {
         if let Ok(pid) = sysinfo::get_current_pid() {
             owned.push(pid);
         }
+        // Linux also exposes each worker's tasks as process entries. The
+        // leader's CPU usage already includes them: omit owned tasks from
+        // contention counts without subtracting their CPU a second time.
+        let owned_tasks: Vec<_> = owned
+            .iter()
+            .filter_map(|pid| sys.process(*pid))
+            .filter_map(|p| p.tasks())
+            .flat_map(|tasks| tasks.iter().copied())
+            .collect();
         let (cpu_load, heavy_process_count) = foreign_activity(
             cpu_load,
             cpus.len(),
@@ -108,6 +117,7 @@ impl SystemMonitor {
                 .values()
                 .map(|p| (p.pid(), f64::from(p.cpu_usage()))),
             &owned,
+            &owned_tasks,
         );
 
         SystemState {
@@ -127,13 +137,14 @@ fn foreign_activity(
     cores: usize,
     processes: impl IntoIterator<Item = (sysinfo::Pid, f64)>,
     owned: &[sysinfo::Pid],
+    owned_tasks: &[sysinfo::Pid],
 ) -> (f64, usize) {
     let mut own_pct = 0.0;
     let mut heavy = 0;
     for (pid, pct) in processes {
         if owned.contains(&pid) {
             own_pct += pct;
-        } else if pct > 10.0 {
+        } else if !owned_tasks.contains(&pid) && pct > 10.0 {
             heavy += 1;
         }
     }
@@ -154,13 +165,46 @@ mod owner_tests {
     fn registered_mt_owner_does_not_hide_foreign_work() {
         let owner = Pid::from(11);
         let foreign = Pid::from(12);
-        let (load, heavy) =
-            foreign_activity(0.625, 32, [(owner, 1600.0), (foreign, 400.0)], &[owner]);
+        let (load, heavy) = foreign_activity(
+            0.625,
+            32,
+            [(owner, 1600.0), (foreign, 400.0)],
+            &[owner],
+            &[],
+        );
         assert_eq!(load, 0.125);
         assert_eq!(heavy, 1);
-        let (load, heavy) = foreign_activity(0.625, 32, [(owner, 1600.0), (foreign, 400.0)], &[]);
+        let (load, heavy) =
+            foreign_activity(0.625, 32, [(owner, 1600.0), (foreign, 400.0)], &[], &[]);
         assert_eq!(load, 0.625);
         assert_eq!(heavy, 2);
+    }
+
+    #[test]
+    fn registered_tasks_are_not_double_subtracted_or_counted_as_rivals() {
+        let owner = Pid::from(11);
+        let task = Pid::from(13);
+        let foreign = Pid::from(12);
+        assert_eq!(
+            foreign_activity(
+                0.625,
+                32,
+                [(owner, 1600.0), (task, 800.0), (foreign, 400.0)],
+                &[owner],
+                &[task]
+            ),
+            (0.125, 1)
+        );
+        assert_eq!(
+            foreign_activity(
+                0.625,
+                32,
+                [(owner, 1600.0), (task, 800.0), (foreign, 400.0)],
+                &[owner],
+                &[]
+            ),
+            (0.125, 2)
+        );
     }
 
     #[test]
@@ -168,7 +212,7 @@ mod owner_tests {
         let absent = Pid::from(11);
         let foreign = Pid::from(12);
         assert_eq!(
-            foreign_activity(0.5, 32, [(foreign, 1600.0)], &[absent]),
+            foreign_activity(0.5, 32, [(foreign, 1600.0)], &[absent], &[]),
             (0.5, 1)
         );
     }
