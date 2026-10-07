@@ -140,7 +140,7 @@ impl Engine {
         };
         let start = Instant::now();
 
-        // Auto-save: write results to a temp file so LLMs/tools can re-read
+        // Auto-save: write results under the target dir so LLMs/tools can re-read
         // without re-running. Opt out with ZENBENCH_NO_SAVE=1.
         let save_path = if std::env::var("ZENBENCH_NO_SAVE").is_ok() {
             None
@@ -844,11 +844,11 @@ fn run_comparison_group(
     }
 }
 
-/// Generate a temp file path for auto-saving results.
-/// Uses PID + run_id for uniqueness — no filesystem round-trips
-/// (Windows' GetTempFileName is notoriously slow).
+/// Path for auto-saving results: `<target>/zenbench/results/zenbench-<run_id>.txt`
+/// (see [`crate::paths::target_zenbench_dir`]). The run_id carries PID + time,
+/// so names are unique without filesystem round-trips.
 fn auto_save_path(run_id: &RunId) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join("zenbench");
+    let dir = crate::paths::target_zenbench_dir().join("results");
     let _ = std::fs::create_dir_all(&dir);
     dir.join(format!("zenbench-{}.txt", run_id))
 }
@@ -1097,11 +1097,13 @@ fn is_leap(year: i64) -> bool {
     (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
-/// Default lock directory: temp dir with a zenbench subdirectory. The
-/// actual lock file lives at `<dir>/zenbench.lock` and is managed by
+/// Default lock directory: the per-user cache dir
+/// ([`crate::paths::user_cache_dir`], e.g. `~/.cache/zenbench`), so every
+/// zenbench process of a user rendezvouses there whatever its `TMPDIR`. The
+/// lock file lives at `<dir>/zenbench.lock` and is managed by
 /// [`crate::exclusive::Lock`].
 fn default_lock_dir() -> Option<PathBuf> {
-    Some(std::env::temp_dir().join("zenbench"))
+    Some(crate::paths::user_cache_dir())
 }
 
 #[cfg(test)]

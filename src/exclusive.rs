@@ -27,9 +27,10 @@ mod imp {
     use std::thread;
     use std::time::{Duration, Instant, SystemTime};
 
-    /// Default lock path when the caller doesn't override it.
+    /// Default lock path when the caller doesn't override it: the per-user
+    /// cache dir, so the rendezvous doesn't move with `TMPDIR`.
     pub fn default_path() -> std::path::PathBuf {
-        std::env::temp_dir().join("zenbench-exclusive.lock")
+        crate::paths::user_cache_dir().join("zenbench-exclusive.lock")
     }
 
     /// How often to refresh the "waiting on …" message while blocked.
@@ -455,9 +456,10 @@ mod imp {
 #[derive(Clone, Debug)]
 pub struct AcquireConfig {
     /// Path to the lock file. Defaults to
-    /// `temp_dir()/zenbench-exclusive.lock` — a single well-known
-    /// system-wide rendezvous so independent benchmark harnesses
-    /// participate in the same mutex.
+    /// `<user cache>/zenbench-exclusive.lock` (`~/.cache/zenbench/…`,
+    /// `%LOCALAPPDATA%\zenbench\…` on Windows) — one well-known per-user
+    /// rendezvous so independent benchmark harnesses participate in the
+    /// same mutex. Before 0.1.11 it lived in the temp dir.
     pub path: Option<PathBuf>,
     /// Block at most this long before giving up. `None` blocks forever.
     pub timeout: Option<Duration>,

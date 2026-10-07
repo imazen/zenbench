@@ -29,6 +29,7 @@ mod format;
 mod gate;
 mod html;
 pub mod mcp;
+mod paths;
 pub mod platform;
 pub mod quickchart;
 mod report;
@@ -736,9 +737,11 @@ pub fn run_processes(processes: usize, policy: Aggregation) -> SuiteResult {
         Err(_) => pid.to_string(),
     };
 
-    let temp_dir = std::env::temp_dir();
+    // Exchange files live under <target>/zenbench/proc, not the temp dir.
+    let proc_dir = paths::target_zenbench_dir().join("proc");
+    let _ = std::fs::create_dir_all(&proc_dir);
     let temp_paths: Vec<std::path::PathBuf> = (0..processes)
-        .map(|i| temp_dir.join(format!("zenbench-proc-{run_id}-{i}.json")))
+        .map(|i| proc_dir.join(format!("zenbench-proc-{run_id}-{i}.json")))
         .collect();
 
     let mut results: Vec<SuiteResult> = Vec::with_capacity(processes);

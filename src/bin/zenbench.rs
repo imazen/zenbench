@@ -627,10 +627,14 @@ fn cmd_self_compare(bench_name: &str, git_ref: Option<&str>, cargo_args: Option<
     let current_hash = zenbench::platform::git_short_hash().unwrap_or_else(|| "HEAD".to_string());
     eprintln!("[zenbench] self-compare: {reference} (baseline) vs {current_hash} (candidate)");
 
-    // Create temp directory for results
-    let tmp_dir = std::env::temp_dir().join("zenbench-self-compare");
+    // Worktree and result files live under <target>/zenbench/self-compare,
+    // so `cargo clean` removes them and nothing lands in the temp dir.
+    let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let tmp_dir = project_target_dir(&current_dir)
+        .join("zenbench")
+        .join("self-compare");
     std::fs::create_dir_all(&tmp_dir).unwrap_or_else(|e| {
-        eprintln!("Error creating temp dir: {e}");
+        eprintln!("Error creating {}: {e}", tmp_dir.display());
         std::process::exit(1);
     });
     let baseline_result_path = tmp_dir.join("baseline.json");
@@ -639,6 +643,9 @@ fn cmd_self_compare(bench_name: &str, git_ref: Option<&str>, cargo_args: Option<
     // Step 1: Create worktree for the old ref
     let worktree_path = tmp_dir.join("worktree");
     eprintln!("[zenbench] creating worktree at {reference}...");
+    // A `cargo clean` deletes the directory but leaves git's registration
+    // behind, which would make `worktree add` refuse the path.
+    run_git(&["worktree", "prune"]);
     if worktree_path.exists() {
         // Clean up leftover worktree
         run_git(&[
@@ -670,7 +677,6 @@ fn cmd_self_compare(bench_name: &str, git_ref: Option<&str>, cargo_args: Option<
 
     // Step 3: Build and run candidate (current version)
     eprintln!("[zenbench] building and running candidate ({current_hash})...");
-    let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let candidate_ok =
         run_bench_in_dir(&current_dir, bench_name, &candidate_result_path, cargo_args);
 
@@ -715,6 +721,26 @@ fn cmd_self_compare(bench_name: &str, git_ref: Option<&str>, cargo_args: Option<
     // Clean up temp files
     let _ = std::fs::remove_file(&baseline_result_path);
     let _ = std::fs::remove_file(&candidate_result_path);
+}
+
+/// The cargo target directory of the project in `dir`: `$CARGO_TARGET_DIR` when
+/// absolute, else `target_directory` from `cargo metadata`, else `dir/target`.
+fn project_target_dir(dir: &Path) -> PathBuf {
+    if let Some(t) = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+    {
+        return t;
+    }
+    std::process::Command::new("cargo")
+        .args(["metadata", "--no-deps", "--format-version", "1"])
+        .current_dir(dir)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| serde_json::from_slice::<serde_json::Value>(&o.stdout).ok())
+        .and_then(|v| v.get("target_directory")?.as_str().map(PathBuf::from))
+        .unwrap_or_else(|| dir.join("target"))
 }
 
 /// Find the most recent version tag (matching v* pattern).

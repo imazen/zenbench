@@ -17,6 +17,7 @@ src/
   stats.rs     — Summary, PairedAnalysis, bootstrap_ci, Wilcoxon, Spearman
   gate.rs      — ResourceGate, GateConfig, system health checks, ZENBENCH_LAUNCHER_PIDS
   platform.rs  — SystemMonitor, CI detection, git hash
+  paths.rs     — where results, exchange files and locks live (target dir / user cache)
   timing.rs    — TSC reads, asm fences, frequency calibration (precise-timing feature, only unsafe)
   checks.rs    — BenchWarning, WarningKind (mostly superseded by footnotes in report.rs)
   daemon.rs    — fire-and-forget subprocess mode
@@ -35,7 +36,7 @@ benches/
 - **MAD not stddev** in display. Stddev is destroyed by one context-switch spike.
 - **Cache firewall off by default**. Most benchmarks measure hot-path code; firewall penalizes pointer-chasing unrealistically.
 - **Auto-rounds convergence** based on paired-difference CI + effect-size stability, not individual benchmark precision or p-value targets.
-- **Auto-save to /tmp/zenbench/** in LLM format. Path printed at start so tools can re-read without re-running.
+- **Auto-save to `<target>/zenbench/results/`** in LLM format. Path printed at start so tools can re-read without re-running. Never the temp dir: results, multi-process exchange files (`<target>/zenbench/proc/`) and self-compare worktrees (`<target>/zenbench/self-compare/`) live under the cargo target dir (`src/paths.rs`); the cross-process locks live in the per-user cache dir (`~/.cache/zenbench/`).
 
 ## Report output structure
 
@@ -74,7 +75,7 @@ Don't mix bench_parallel/bench_contended with rayon — competing thread pools.
 - Terminal: ANSI tables with color (stderr)
 - `--format=llm` or `ZENBENCH_FORMAT=llm`: key-value lines with `|` section separators (stdout)
 - `--format=csv|md|json`: other formats (stdout)
-- Auto-saved to `/tmp/zenbench/zenbench-{run_id}.txt` in LLM format
+- Auto-saved to `<target>/zenbench/results/zenbench-{run_id}.txt` in LLM format
 
 ## Remaining work (from METHODOLOGY.md)
 

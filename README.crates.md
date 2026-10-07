@@ -284,6 +284,12 @@ JavaScript or external assets); see the
 publication-quality SVG charts (grouped bars, themes) enable the `charts` feature
 (`charts-rs`), and the `quickchart` module emits ready-to-embed chart image URLs.
 
+Every run also saves an LLM-format copy to
+`<target dir>/zenbench/results/zenbench-<run_id>.txt` and prints the path when it
+starts (`ZENBENCH_NO_SAVE=1` turns this off). The cross-process lock that keeps
+concurrent benchmark runs from overlapping lives in the per-user cache directory
+(`~/.cache/zenbench/`, `%LOCALAPPDATA%\zenbench\` on Windows).
+
 ## Multi-pass and multi-process
 
 ```bash
