@@ -6,6 +6,12 @@
 <!-- Breaking changes that will ship together in the next minor release.
      Add items here as you discover them. Do NOT ship these piecemeal — batch them. -->
 
+### Changed
+- **Nothing goes to the temp dir any more.** Auto-saved results move from `/tmp/zenbench/` to `<target>/zenbench/results/`, `--best-of-processes` exchange files to `<target>/zenbench/proc/`, and `self-compare`'s git worktree and builds to `<target>/zenbench/self-compare/`; the engine lock (`zenbench.lock`) and `exclusive::Lock::default_path()` move to the per-user cache dir (`~/.cache/zenbench/`, `%LOCALAPPDATA%\zenbench\`), so the rendezvous no longer follows `TMPDIR`. Versions up to 0.1.10 still lock in the temp dir, so mixed old/new runs on one box don't wait for each other until both sides upgrade (c62baca).
+- `self-compare` prunes stale git worktree registrations before creating its worktree, so a `cargo clean` can't make `worktree add` refuse the path (c62baca).
+- Lockfiles refreshed within requirements: `arbitrary` 1.5.0, `either` 1.19.0. `sysinfo` 0.39 needs Rust 1.95 (0.37+ needs 1.88) and stays at 0.36 under the 1.85 MSRV (a50173c).
+- README: throughput is per group; a second `throughput()` call replaces the first (b4e7f4f).
+
 ## [0.1.10] - 2026-10-06
 
 ### Fixed
