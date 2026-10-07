@@ -160,3 +160,11 @@ Tested via WSL→PowerShell bridge (Windows cargo 1.92 nightly):
 - ANSI colors: ✓ work in Windows Terminal (PowerShell 7)
 - PathBuf paths: ✓ baselines save/load correctly
 - Git commands: ✓ git available in PATH, worktree works
+
+### Known Bugs (SPEEDQ)
+
+Registered external benchmark workers previously counted as foreign CPU/heavy
+processes in SystemMonitor even though the concurrent-benchmark scan excluded
+those same launcher PIDs. Both scans now honor that explicit inventory;
+foreign processes, RAM and temperature remain checked. Pure admission tests
+cover MT percentage units and a foreign negative control. No burn test used.

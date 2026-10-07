@@ -264,11 +264,7 @@ impl ResourceGate {
             excluded_pids.push(our);
         }
         if let Ok(pids_str) = std::env::var("ZENBENCH_LAUNCHER_PIDS") {
-            for s in pids_str.split(',') {
-                if let Ok(pid) = s.trim().parse::<usize>() {
-                    excluded_pids.push(sysinfo::Pid::from(pid));
-                }
-            }
+            excluded_pids.extend(parse_launcher_pids(&pids_str));
         }
 
         let start = Instant::now();
@@ -422,8 +418,7 @@ impl ResourceGate {
 /// Parse the `ZENBENCH_LAUNCHER_PIDS` env var value into a list of PIDs.
 /// Comma-separated, ignores invalid entries. Used by `wait_for_no_benchmarks`
 /// (integrated via PR #8 / fix/self-compare-gate).
-#[cfg(test)]
-fn parse_launcher_pids(val: &str) -> Vec<sysinfo::Pid> {
+pub(crate) fn parse_launcher_pids(val: &str) -> Vec<sysinfo::Pid> {
     val.split(',')
         .filter_map(|s| s.trim().parse::<usize>().ok().map(sysinfo::Pid::from))
         .collect()

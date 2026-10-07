@@ -547,3 +547,18 @@ MIT OR Apache-2.0
 [imageflow-dotnet]: https://github.com/imazen/imageflow-dotnet
 [imageflow-node]: https://github.com/imazen/imageflow-node
 [imageflow-go]: https://github.com/imazen/imageflow-go
+
+### Benchmark owners in separate processes
+
+`ZENBENCH_LAUNCHER_PIDS` lists comma-separated launcher/worker PIDs belonging
+ to the current benchmark. Resource admission subtracts their CPU contribution
+ from global load and excludes them from foreign heavy-process/benchmark scans.
+ RAM and temperature checks remain global. Only explicitly listed PIDs and the
+ measuring process are excluded; unrelated processes remain visible.
+
+The `paired_rounds` development example analyzes retained external-worker
+ timings through the same private `stats.rs` owner as the engine, including
+ paired IQR filtering and 10,000-resample bootstrap intervals. It accepts a
+ JSON array of `{baseline, candidate, iterations, timer_resolution_ns}` packets
+ on stdin and writes analyses on stdout. It does not run a workload or modify
+ the public library API.

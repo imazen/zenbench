@@ -127,3 +127,12 @@ wasm-check-all:
 wasm-test-all:
     just wasm-test-both linear-srgb
     just wasm-test zenflate --no-default-features --features std
+
+# SPEEDQ external-worker measurements reuse the engine's statistics owner.
+paired-rounds-build:
+    cargo build --release --example paired_rounds --no-default-features
+
+paired-rounds-check:
+    cargo test --lib --no-default-features
+    cargo test --example paired_rounds --no-default-features
+    cargo clippy --lib --example paired_rounds --no-default-features -- -D warnings

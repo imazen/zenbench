@@ -92,21 +92,23 @@ impl SystemMonitor {
                 .reduce(f64::max)
         };
 
-        // Count heavy processes (>10% CPU usage on any core)
-        let our_pid = sysinfo::get_current_pid().ok();
-        let heavy_process_count = sys
-            .processes()
-            .values()
-            .filter(|p| {
-                // Exclude ourselves
-                if let Some(our) = our_pid {
-                    if p.pid() == our {
-                        return false;
-                    }
-                }
-                p.cpu_usage() > 10.0
-            })
-            .count();
+        // Registered launcher/worker PIDs are part of this benchmark's work.
+        // Their CPU counters use the same refresh interval as global CPU use.
+        // Keep temperature/RAM checks global and every unregistered process visible.
+        let mut owned = std::env::var("ZENBENCH_LAUNCHER_PIDS")
+            .map(|s| crate::gate::parse_launcher_pids(&s))
+            .unwrap_or_default();
+        if let Ok(pid) = sysinfo::get_current_pid() {
+            owned.push(pid);
+        }
+        let (cpu_load, heavy_process_count) = foreign_activity(
+            cpu_load,
+            cpus.len(),
+            sys.processes()
+                .values()
+                .map(|p| (p.pid(), f64::from(p.cpu_usage()))),
+            &owned,
+        );
 
         SystemState {
             cpu_load,
@@ -115,6 +117,60 @@ impl SystemMonitor {
             cpu_temp_c,
             heavy_process_count,
         }
+    }
+}
+
+// Process CPU percentages may exceed 100 for multithreaded work; global load
+// is a fraction of all logical CPUs. Do not compare those units directly.
+fn foreign_activity(
+    global: f64,
+    cores: usize,
+    processes: impl IntoIterator<Item = (sysinfo::Pid, f64)>,
+    owned: &[sysinfo::Pid],
+) -> (f64, usize) {
+    let mut own_pct = 0.0;
+    let mut heavy = 0;
+    for (pid, pct) in processes {
+        if owned.contains(&pid) {
+            own_pct += pct;
+        } else if pct > 10.0 {
+            heavy += 1;
+        }
+    }
+    let foreign = if cores == 0 {
+        global
+    } else {
+        (global - own_pct / cores as f64 / 100.0).max(0.0)
+    };
+    (foreign, heavy)
+}
+
+#[cfg(test)]
+mod owner_tests {
+    use super::foreign_activity;
+    use sysinfo::Pid;
+
+    #[test]
+    fn registered_mt_owner_does_not_hide_foreign_work() {
+        let owner = Pid::from(11);
+        let foreign = Pid::from(12);
+        let (load, heavy) =
+            foreign_activity(0.625, 32, [(owner, 1600.0), (foreign, 400.0)], &[owner]);
+        assert_eq!(load, 0.125);
+        assert_eq!(heavy, 1);
+        let (load, heavy) = foreign_activity(0.625, 32, [(owner, 1600.0), (foreign, 400.0)], &[]);
+        assert_eq!(load, 0.625);
+        assert_eq!(heavy, 2);
+    }
+
+    #[test]
+    fn registering_an_absent_pid_cannot_reduce_foreign_load() {
+        let absent = Pid::from(11);
+        let foreign = Pid::from(12);
+        assert_eq!(
+            foreign_activity(0.5, 32, [(foreign, 1600.0)], &[absent]),
+            (0.5, 1)
+        );
     }
 }
 
