@@ -350,7 +350,11 @@ impl ResourceGate {
             return None;
         }
         let state = self.monitor.snapshot();
-        let clean = self.check_state(&state).is_none();
+        let reason = self.check_state(&state);
+        let clean = reason.is_none();
+        if std::env::var_os("ZENBENCH_GATE_TRACE").is_some() {
+            eprintln!("[zenbench gate] clean={clean} reason={reason:?} state={state:?}");
+        }
         if !clean {
             self.total_waits += 1;
         }

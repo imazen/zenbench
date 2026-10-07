@@ -123,6 +123,18 @@ impl SystemMonitor {
             &owned,
             &owned_tasks,
         );
+        if std::env::var_os("ZENBENCH_GATE_TRACE").is_some() {
+            for process in sys.processes().values().filter(|p| {
+                !owned.contains(&p.pid()) && !owned_tasks.contains(&p.pid()) && p.cpu_usage() > 10.0
+            }) {
+                eprintln!(
+                    "[zenbench gate] foreign pid={} name={:?} cpu_pct={}",
+                    process.pid(),
+                    process.name(),
+                    process.cpu_usage()
+                );
+            }
+        }
 
         SystemState {
             cpu_load,

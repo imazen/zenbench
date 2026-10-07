@@ -556,6 +556,10 @@ MIT OR Apache-2.0
  RAM and temperature checks remain global. Only explicitly listed PIDs and the
  measuring process are excluded; unrelated processes remain visible.
 
+Set `ZENBENCH_GATE_TRACE=1` to log each round's gate verdict, blocking reason,
+system snapshot and foreign heavy-process identities to stderr. The trace is
+opt-in and runs outside benchmark timers; it uses the existing admission checks.
+
 The `paired_rounds` development example analyzes retained external-worker
  timings through the same private `stats.rs` owner as the engine, including
  paired IQR filtering and 10,000-resample bootstrap intervals. It accepts a
