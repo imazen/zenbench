@@ -218,3 +218,20 @@ cpu-policy-subprocess-check:
 
 cpu-policy-arm-check:
     ZENBENCH_CPU_POLICY=unrestricted cross test --target armv7-unknown-linux-gnueabihf --no-default-features --features cli --test cpu_policy
+
+# Fixed-work diagnostics: an actual Rayon pool and new CLI diagnostic workers.
+cpu-probe-check:
+    cargo fmt --check
+    cargo clippy --all-targets --features criterion-compat -- -D warnings
+    cargo clippy --lib --tests --examples --no-default-features -- -D warnings
+    cargo test --lib platform::probe
+    cargo test --test cpu_probe
+    cargo test --test cpu_probe --no-default-features
+    ZENBENCH_AFFINITY_TEST_RUNNER=/usr/bin/env cargo test --test cpu_probe
+    cargo build --bin zenbench --example cpu_probe
+
+cpu-probe-example:
+    cargo run --example cpu_probe
+
+cpu-probe-info:
+    cargo run --bin zenbench -- cpu-info --probe --workers 2

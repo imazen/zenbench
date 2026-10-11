@@ -132,3 +132,46 @@ It requires an enforced single-class process set. No large sweep is involved.
 
 Measured confinement and negative controls are recorded in
 [CPU placement verification](cpu-placement-verification.md).
+
+## Worker warmup observations
+
+Fixed-work probes complement placement checks. A worker that remains slower
+across repeated batches differs from a worker with isolated slow batches.
+Neither observation alone identifies its cause: CPU class, SMT contention,
+clock changes, or unrelated load can affect both. Similar times cannot prove
+that workers obeyed a scheduling hint.
+
+Inspect new diagnostic threads without running a benchmark:
+
+```sh
+zenbench cpu-info --probe --workers 2
+```
+
+The JSON keeps admission evidence separate from the probe. Each worker records
+dependent integer and private 64 KiB pointer-chase batches, its observed affinity
+before/after, and Linux's last CPU at batch boundaries. Summaries show medians,
+MAD, within-worker max/min ratios, and between-worker median ratios. CPU IDs
+are unavailable on other platforms, and migration between observations is
+unknown. The report always states `certifies_cpu_class=false`; it has no
+"passed" status and cannot weaken default CPU admission.
+
+Those new threads do not inspect an existing pool. To observe the actual
+workers of a private Rayon pool, execute the probe inside that pool:
+
+```rust,no_run
+use zenbench::platform::{CpuProbeConfig, CpuProbeReport, probe_cpu_thread};
+let pool = rayon::ThreadPoolBuilder::new().num_threads(2).build().unwrap();
+let workers = pool.broadcast(|_| probe_cpu_thread(CpuProbeConfig::default()))
+    .into_iter().collect::<Result<Vec<_>, _>>().unwrap();
+let report = CpuProbeReport::from_workers(workers).unwrap();
+println!("{}", serde_json::to_string_pretty(&report).unwrap());
+```
+
+`examples/cpu_probe.rs` runs that example. The sampler retains the caller's
+affinity and QoS; apply any hints before invoking it. Configuration bounds
+sample counts and work per batch, and every combined worker must use identical
+configuration. Callers control simultaneity and which workers participate;
+oversubscribing one CPU can create large ratios even with enforced placement.
+Repeat probes between measurement windows to observe later scheduling changes.
+The current diagnostic reports observations and does not set an automatic
+timing threshold or infer a performance/efficiency class from timings.

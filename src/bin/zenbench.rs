@@ -31,7 +31,14 @@ enum Commands {
         args: Vec<std::ffi::OsString>,
     },
     /// Show detected classes and the current process placement check as JSON.
-    CpuInfo,
+    CpuInfo {
+        /// Exercise new diagnostic workers; this does not certify CPU placement.
+        #[arg(long)]
+        probe: bool,
+        /// Number of diagnostic workers (does not inspect external pools).
+        #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u16).range(1..=128), requires = "probe")]
+        workers: u16,
+    },
     /// Run a benchmark as a background process.
     ///
     /// Spawns `cargo bench --bench <name>` in the background and tracks it.
@@ -230,8 +237,17 @@ fn main() {
                 });
             std::process::exit(status.code().unwrap_or(1));
         }
-        Commands::CpuInfo => {
-            println!("{}", serde_json::to_string_pretty(&serde_json::json!({"topology": zenbench::platform::detect_cpu_topology(), "placement": zenbench::platform::check_cpu_placement()})).unwrap());
+        Commands::CpuInfo { probe, workers } => {
+            let mut output = serde_json::json!({
+                "topology": zenbench::platform::detect_cpu_topology(),
+                "placement": zenbench::platform::check_cpu_placement(),
+            });
+            if probe {
+                output["probe"] =
+                    serde_json::to_value(cpu_probe_workers(usize::from(workers))).unwrap();
+                output["probe_scope"] = serde_json::json!("new_diagnostic_workers_only");
+            }
+            println!("{}", serde_json::to_string_pretty(&output).unwrap());
         }
         Commands::Run {
             bench,
@@ -338,6 +354,39 @@ fn main() {
             },
         },
     }
+}
+
+fn cpu_probe_workers(workers: usize) -> Result<zenbench::platform::CpuProbeReport, String> {
+    std::thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(workers);
+        let mut starts = Vec::with_capacity(workers);
+        // Only start measuring once all workers exist. If a spawn fails, dropping
+        // senders releases earlier workers without leaving a broken barrier.
+        for index in 0..workers {
+            let (start, ready) = std::sync::mpsc::channel();
+            let handle = std::thread::Builder::new()
+                .name(format!("cpu-probe-{index}"))
+                .spawn_scoped(scope, move || {
+                    ready.recv().map_err(|e| e.to_string())?;
+                    zenbench::platform::probe_cpu_thread(Default::default())
+                })
+                .map_err(|e| format!("CPU probe worker creation failed: {e}"))?;
+            starts.push(start);
+            handles.push(handle);
+        }
+        for start in starts {
+            start.send(()).map_err(|e| e.to_string())?;
+        }
+        let observations = handles
+            .into_iter()
+            .map(|handle| {
+                handle
+                    .join()
+                    .map_err(|_| "CPU probe worker panicked".to_string())?
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        zenbench::platform::CpuProbeReport::from_workers(observations)
+    })
 }
 
 fn cpu_exec(
