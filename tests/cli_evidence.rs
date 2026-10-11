@@ -82,7 +82,7 @@ fn saved_evidence_is_readable_and_carries_working_commands() {
     assert!(output.status.success(), "{:?}", output);
     let decoded: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(decoded, serde_json::to_value(&result).unwrap());
-    let reference = std::fs::read_dir(root.join("data/runs"))
+    let reference = std::fs::read_dir(root.join("data").join("runs"))
         .unwrap()
         .next()
         .unwrap()

@@ -23,8 +23,9 @@ struct Reference {
 // Argument arrays preserve spaces and shell metacharacters without suggesting
 // that stored metadata should ever be evaluated as shell code.
 pub(crate) fn usage(input: &Path) -> serde_json::Value {
+    let input = input.to_str().unwrap_or("<INPUT>");
     serde_json::json!({
-        "syntax": "command argument arrays; replace <BASELINE> with a saved JSON/gzip/reference path",
+        "syntax": "command argument arrays; replace <BASELINE> with a saved JSON/gzip/reference path; <INPUT> denotes a filesystem path that is not UTF-8",
         "read": ["zenbench", "read", input, "--format", "llm"],
         "decode": ["zenbench", "read", input, "--format", "json"],
         "compare": ["zenbench", "compare", "<BASELINE>", input],
@@ -277,6 +278,18 @@ pub(crate) fn save_reference(result: &SuiteResult, path: &Path) -> io::Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn evidence_instructions_handle_non_utf8_paths_without_panicking() {
+        use std::os::unix::ffi::OsStringExt;
+        let path = PathBuf::from(std::ffi::OsString::from_vec(vec![0xff]));
+        let commands = usage(&path);
+        assert_eq!(commands["read"][2], "<INPUT>");
+        assert_eq!(commands["decode"][2], "<INPUT>");
+        assert_eq!(commands["compare"][3], "<INPUT>");
+        assert!(commands["syntax"].as_str().unwrap().contains("not UTF-8"));
+    }
 
     #[test]
     fn oversized_packets_are_refused_before_publication() {
