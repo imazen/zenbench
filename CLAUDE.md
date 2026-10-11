@@ -238,3 +238,12 @@ now holds an affinity-limited Job Object for the process lifetime. The native Ru
 fixture checked existing Rayon/ordinary workers and an inherited child process.
 Windows can return success for a widen request while preserving the job mask;
 an unchanged actual mask is the confinement evidence.
+
+### Durable result storage (2026-10-11)
+
+New automatic evidence lives under ignored `.zenbench/data/`, configurable with
+`ZENBENCH_DATA_DIR`, as compact gzip objects and hash-verified references.
+`zenbench snapshot` exports a selected small CSV; do not commit every raw run.
+Partial checkpoints and failed process outputs remain available. See
+`docs/result-storage.md`. Exact JSON float parsing prevents the one-bit drift
+found by the independent gzip/Python round-trip check.

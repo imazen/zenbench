@@ -111,6 +111,13 @@ fn bench_sort(suite: &mut Suite) {
 zenbench::main!(bench_sort);
 ```
 
+## Retaining results
+
+Raw results are compressed in the ignored `.zenbench/data/` directory. Export
+only selected baselines with `zenbench snapshot <result> --output benchmarks/baseline.csv`:
+one stable row per benchmark, with a hash referencing the complete evidence.
+See [storage and compact exports](docs/result-storage.md).
+
 ## CPU placement and affinity
 
 By default, detected asymmetric or unknown CPU topology requires a verified

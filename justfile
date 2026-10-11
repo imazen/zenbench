@@ -1,5 +1,12 @@
 # zenbench development recipes
 
+evidence-check:
+    cargo fmt -p zenbench
+    ZENBENCH_CPU_POLICY=unrestricted cargo test --lib storage::
+    ZENBENCH_CPU_POLICY=unrestricted cargo test --test aggregation_evidence --test round_samples
+    cargo clippy --all-targets -- -D warnings
+    just api-doc
+
 # Audit harness runtime/storage; invoke heavy recipes through run-heavy.
 defaults-audit-build:
     cargo fmt -p zenbench -- --check
