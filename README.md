@@ -24,9 +24,11 @@ Interleaved microbenchmarking for Rust with paired statistics, CI regression tes
 
 ## Why zenbench
 
-Existing harnesses run benchmarks **sequentially**. Benchmark A runs on a hot CPU; benchmark B runs on an even hotter CPU with degraded turbo boost. System load changes between runs corrupt results.
-
-Zenbench **interleaves**: each round, all benchmarks run in shuffled order. Round N of A and round N of B execute under identical conditions. Paired statistics on the round-by-round differences detect real changes — not thermal drift.
+Zenbench **interleaves**: each round, benchmarks run in shuffled order, keeping
+comparison arms close in time. Paired observations help account for shared noise;
+they do not guarantee identical clocks, caches or scheduling. Local results are
+exploratory. Fixed-process confirmation adds an explicit plan, independent-run
+intervals and fail-closed evidence checks.
 
 <!-- crates.io:skip-start -->
 ### vs criterion and divan
@@ -56,7 +58,7 @@ Zenbench **interleaves**: each round, all benchmarks run in shuffled order. Roun
 | Multi-pass aggregation (in-process) | ❌ | ❌ | ✅ `--best-of-passes=N` |
 | Multi-process aggregation (cross-ASLR) | ❌ | ❌ | ✅ `--best-of-processes=N` |
 | Hardware fingerprint / testbed ID | ❌ | ❌ | ✅ |
-| Cross-run variance inflation | ❌ | ❌ | ✅ pooled t-test |
+| Process-level confirmation | ❌ | ❌ | ✅ fixed-plan log-ratio / Welch intervals |
 | **Output** | | | |
 | Terminal report | table | tree | tree (default) + table |
 | Bar chart | ❌ | ❌ | ✅ sorted, throughput |
@@ -171,35 +173,24 @@ See [the pinned example](examples/pinned.rs)
 before/during/after scoped mask checks on an available CPU. This example opts out
 of process-class certification explicitly.
 
-## CI regression testing
+## Iteration and confirmation
 
-```bash
-# After merging to main — save a baseline
-cargo bench -- --save-baseline=main
+Local runs default to exploratory **Iterate**: one process, up to 30 rounds and
+100 ms warmup per arm. Use **Confirm** for a frozen candidate and **Evidence**
+for a named hardware/workload matrix cell. Both use five fresh processes by
+default and refuse incomplete, noisy or unverified evidence.
 
-# On PRs — check for regressions (exits 1 on a >5% slowdown that's also
-# statistically significant; see "CI regression gate semantics" below)
-cargo bench -- --baseline=main
-
-# Auto-update baseline on clean runs
-cargo bench -- --baseline=main --update-on-pass --max-regression=5
+```sh
+cargo bench -- --mode=confirm --workload-id=inputs-v3 --dry-run
+cargo bench -- --mode=confirm --workload-id=inputs-v3 --save-baseline=main
+cargo bench -- --mode=confirm --workload-id=inputs-v3 --baseline=main --update-on-pass
 ```
 
-```text
-  Baseline comparison
-  ───────────────────
-  compress::level_1     16.2µs →   16.4µs    +1.2%    unchanged
-  compress::level_6     15.1µs →   15.3µs    +1.3%    unchanged
-  compress::level_9     15.0µs →   15.6µs    +4.0%    unchanged
-  compress::mixed      401.0µs →  412.3µs    +2.8%    unchanged
-  decompress::zenflate  91.5µs →   92.7µs    +1.3%    unchanged
-
-  Summary: 0 regressions, 0 improvements, 5 unchanged
-
-[zenbench] PASS: no regressions exceed 5% threshold
-```
-
-Full CI guide with GitHub Actions workflows: [REGRESSION-TESTING.md](https://github.com/imazen/zenbench/blob/main/REGRESSION-TESTING.md)
+A baseline updates only when every required case establishes non-inferiority
+within the declared margin. Missing cases and inconclusive intervals cannot pass.
+CPU scope is separate from mode. The CLI and environment override `Suite::plan()`
+and suite CPU defaults. See [modes and assumptions](docs/benchmark-modes.md) and
+[regression testing](REGRESSION-TESTING.md).
 
 ## Thread scaling
 
@@ -302,20 +293,13 @@ CI-plus-timer-floor as described above.
 
 ## CI regression gate semantics
 
-`--max-regression=N` is **significance-gated**, not a raw percentage cutoff. A
-benchmark fails the gate (counts as a regression, exit code 1) only when it is
-**both**:
-
-- more than `N%` slower than the saved baseline, **and**
-- statistically significant — a pooled two-sample t-test on the baseline-vs-new
-  samples gives `t > 2.0` (≈ p < 0.05). With < 2 samples per side, or zero
-  variance, the percentage alone decides.
-
-This means a noisy `+10%` swing on a loaded CI runner can **pass** the gate if
-the variance is high enough that the t-test can't confirm it — by design, so
-flaky runners don't fail your build on noise. If you need a hard percentage
-ceiling that ignores significance, gate on the raw `pct_change` in the CSV/JSON
-output yourself rather than relying on `--max-regression`.
+`--max-regression=N` uses process-level intervals with a declared practical margin.
+Exit 1 means a confirmed regression; exit 2 means inconclusive or invalid evidence.
+A wide interval cannot pass merely because it fails to detect a regression.
+The [shared comparison policy](docs/benchmark-modes.md#decisions-and-promotion)
+uses fixed independent processes, paired log ratios within a binary and Welch
+log-latency intervals across retained baseline populations. The within-process
+statistics above remain exploratory.
 
 ## Don't accidentally measure nothing
 
@@ -395,9 +379,9 @@ JavaScript or external assets); see the
 publication-quality SVG charts (grouped bars, themes) enable the `charts` feature
 (`charts-rs`), and the `quickchart` module emits ready-to-embed chart image URLs.
 
-Every run also saves an LLM-format copy to
-`<target dir>/zenbench/results/zenbench-<run_id>.txt` and prints the path when it
-starts (`ZENBENCH_NO_SAVE=1` turns this off). The cross-process lock that keeps
+Every run retains a complete gzip packet under `.zenbench/data/` and prints its
+evidence reference. `ZENBENCH_DATA_DIR` selects an external durable root.
+`ZENBENCH_NO_SAVE=1` disables storage for Iterate only; confirmation requires it. The cross-process lock that keeps
 concurrent benchmark runs from overlapping lives in the per-user cache directory
 (`~/.cache/zenbench/`, `%LOCALAPPDATA%\zenbench\` on Windows).
 
@@ -475,7 +459,7 @@ when requiring every retained round to have passed admission.
 
 ```rust,ignore
 group.config()
-    .max_rounds(200)              // default 200
+    .max_rounds(200)              // default 30; explicit override
     .noise_threshold(0.02)        // ±2% significance gate
     .bootstrap_resamples(100_000) // CI precision (default 10K)
     .linear_sampling(true)        // slope regression for sub-100ns

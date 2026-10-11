@@ -67,10 +67,11 @@ group.subgroup("SIMD variants");       // visual section headers
 CLI flags work immediately:
 
 ```bash
-cargo bench -- --save-baseline=main       # CI baselines
-cargo bench -- --baseline=main            # regression gates
 cargo bench -- --format=html              # browser report
 ```
+
+CI confirmation and baseline promotion require registered native Suite groups;
+immediate-mode compatibility measurements remain exploratory.
 
 ## Switching to the native API
 

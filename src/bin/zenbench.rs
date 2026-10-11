@@ -156,6 +156,13 @@ enum Commands {
         output: PathBuf,
     },
 
+    /// Recompute a versioned process analysis from retained evidence, without measuring.
+    Reanalyze {
+        input: PathBuf,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+
     /// Compare two result files.
     Compare {
         /// Baseline result file.
@@ -339,6 +346,14 @@ fn main() {
                 eprintln!("cannot write snapshot: {e}");
                 std::process::exit(2);
             });
+        }
+        Commands::Reanalyze { input, output } => {
+            zenbench::SuiteResult::load(input)
+                .and_then(|r| r.save_analysis(output))
+                .unwrap_or_else(|e| {
+                    eprintln!("cannot reanalyze evidence: {e}");
+                    std::process::exit(2);
+                });
         }
         Commands::Compare {
             baseline,
@@ -808,18 +823,18 @@ fn cmd_compare(baseline_path: &Path, candidate_path: &Path) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("Error loading baseline: {e}");
-            return;
+            std::process::exit(2);
         }
     };
     let candidate = match zenbench::SuiteResult::load(candidate_path) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("Error loading candidate: {e}");
-            return;
+            std::process::exit(2);
         }
     };
 
-    print_comparison(&baseline, &candidate);
+    std::process::exit(print_comparison(&baseline, &candidate));
 }
 
 fn cmd_self_compare(bench_name: &str, git_ref: Option<&str>, cargo_args: Option<&str>) {
@@ -848,8 +863,7 @@ fn cmd_self_compare(bench_name: &str, git_ref: Option<&str>, cargo_args: Option<
     let current_hash = zenbench::platform::git_short_hash().unwrap_or_else(|| "HEAD".to_string());
     eprintln!("[zenbench] self-compare: {reference} (baseline) vs {current_hash} (candidate)");
 
-    // Worktree and result files live under <target>/zenbench/self-compare,
-    // so `cargo clean` removes them and nothing lands in the temp dir.
+    // Build workspaces are disposable; measurement packets are durable.
     let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let tmp_dir = project_target_dir(&current_dir)
         .join("zenbench")
@@ -858,8 +872,35 @@ fn cmd_self_compare(bench_name: &str, git_ref: Option<&str>, cargo_args: Option<
         eprintln!("Error creating {}: {e}", tmp_dir.display());
         std::process::exit(1);
     });
-    let baseline_result_path = tmp_dir.join("baseline.json");
-    let candidate_result_path = tmp_dir.join("candidate.json");
+    let evidence_root = std::env::var_os("ZENBENCH_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| current_dir.join(".zenbench/data"));
+    std::fs::create_dir_all(&evidence_root).expect("cannot create evidence root");
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(evidence_root.join(".gitignore"))
+    {
+        Ok(mut file) => {
+            use std::io::Write;
+            file.write_all(b"*\n")
+                .expect("cannot protect raw evidence from Git");
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => panic!("cannot protect raw evidence: {e}"),
+    }
+    let evidence_dir = evidence_root
+        .canonicalize()
+        .expect("cannot resolve evidence root")
+        .join("self-compare")
+        .join(zenbench::RunId::generate().0);
+    std::fs::create_dir_all(&evidence_dir).expect("cannot retain self-compare evidence");
+    let baseline_result_path = evidence_dir.join("baseline.json");
+    let candidate_result_path = evidence_dir.join("candidate.json");
+    eprintln!(
+        "[zenbench] retained self-compare evidence → {}",
+        evidence_dir.display()
+    );
 
     // Step 1: Create worktree for the old ref
     let worktree_path = tmp_dir.join("worktree");
@@ -937,11 +978,7 @@ fn cmd_self_compare(bench_name: &str, git_ref: Option<&str>, cargo_args: Option<
     };
 
     eprintln!();
-    print_comparison(&baseline, &candidate);
-
-    // Clean up temp files
-    let _ = std::fs::remove_file(&baseline_result_path);
-    let _ = std::fs::remove_file(&candidate_result_path);
+    std::process::exit(print_comparison(&baseline, &candidate));
 }
 
 /// The cargo target directory of the project in `dir`: `$CARGO_TARGET_DIR` when
@@ -1019,6 +1056,11 @@ fn run_bench_in_dir(
         Err(_) => our_pid.to_string(),
     };
     cmd.env("ZENBENCH_LAUNCHER_PIDS", &launcher_pids);
+    // Do not leave auto-saved child evidence inside a disposable build workspace.
+    cmd.env(
+        "ZENBENCH_DATA_DIR",
+        result_path.parent().expect("result parent"),
+    );
 
     if let Some(args) = cargo_args {
         for arg in args.split_whitespace() {
@@ -1045,10 +1087,6 @@ fn run_bench_in_dir(
     }
 }
 
-fn format_ns(ns: f64) -> String {
-    zenbench::format_ns(ns)
-}
-
 /// Print a colored comparison between two suite results.
 fn print_cpu_evidence(label: &str, placement: &Option<zenbench::platform::CpuPlacement>) {
     use zenbench::platform::PlacementStatus;
@@ -1064,100 +1102,31 @@ fn print_cpu_evidence(label: &str, placement: &Option<zenbench::platform::CpuPla
     );
 }
 
-fn print_comparison(baseline: &zenbench::SuiteResult, candidate: &zenbench::SuiteResult) {
-    baseline
-        .check_cpu_compatibility(candidate)
-        .unwrap_or_else(|e| {
-            eprintln!("{e}");
-            std::process::exit(2);
-        });
-    let base_git = baseline
-        .git_hash
-        .as_deref()
-        .map(|h| if h.len() > 8 { &h[..8] } else { h })
-        .unwrap_or("?");
-    let cand_git = candidate
-        .git_hash
-        .as_deref()
-        .map(|h| if h.len() > 8 { &h[..8] } else { h })
-        .unwrap_or("?");
-
-    eprintln!("═══════════════════════════════════════════════════════════════");
-    eprintln!("  zenbench comparison");
-    eprintln!("  baseline:  {} (git: {})", baseline.run_id, base_git);
-    eprintln!("  candidate: {} (git: {})", candidate.run_id, cand_git);
-    eprintln!("═══════════════════════════════════════════════════════════════");
-
-    // Compare comparison groups by name
-    for cand_group in &candidate.comparisons {
-        if let Some(base_group) = baseline
-            .comparisons
-            .iter()
-            .find(|g| g.group_name == cand_group.group_name)
-        {
-            print_cpu_evidence("baseline CPU", &base_group.cpu_placement);
-            print_cpu_evidence("candidate CPU", &cand_group.cpu_placement);
-            let is_single = cand_group.benchmarks.len() == 1
-                && cand_group.benchmarks[0].name == cand_group.group_name;
-
-            if !is_single {
-                eprintln!();
-                eprintln!("  group: {}", cand_group.group_name);
-                eprintln!("  ───────────────────────────────────────────────────────────");
-            }
-
-            for cand_bench in &cand_group.benchmarks {
-                if let Some(base_bench) = base_group
-                    .benchmarks
-                    .iter()
-                    .find(|b| b.name == cand_bench.name)
-                {
-                    print_bench_diff(
-                        &cand_bench.name,
-                        base_bench.summary.mean,
-                        cand_bench.summary.mean,
-                    );
-                } else {
-                    eprintln!(
-                        "    {:<30}  {:>10}  (new)",
-                        cand_bench.name,
-                        format_ns(cand_bench.summary.mean)
-                    );
-                }
-            }
-        }
+fn print_comparison(baseline: &zenbench::SuiteResult, candidate: &zenbench::SuiteResult) -> i32 {
+    print_cpu_evidence("baseline CPU", &baseline.cpu_placement);
+    print_cpu_evidence("candidate CPU", &candidate.cpu_placement);
+    let margin = candidate
+        .execution
+        .as_ref()
+        .map(|e| e.plan.margin_pct)
+        .unwrap_or(1.0);
+    if let Err(e) = baseline.check_cpu_compatibility(candidate) {
+        eprintln!("INVALID comparison: {e}");
+        std::process::exit(2);
     }
-
-    eprintln!();
-    eprintln!("═══════════════════════════════════════════════════════════════");
-    eprintln!();
-}
-
-/// Print a single benchmark comparison line with color.
-fn print_bench_diff(name: &str, base_mean: f64, cand_mean: f64) {
-    let pct = if base_mean.abs() > f64::EPSILON {
-        (cand_mean - base_mean) / base_mean * 100.0
+    let comparison = zenbench::baseline::compare_against_baseline(baseline, candidate, margin);
+    zenbench::baseline::print_comparison_report(&comparison);
+    if comparison
+        .confirmed
+        .iter()
+        .any(|c| c.verdict == zenbench::Verdict::Regression)
+    {
+        1
+    } else if comparison.promotable {
+        0
     } else {
-        0.0
-    };
-
-    let (arrow, reset) = if pct < -1.0 {
-        ("\x1b[32m", "\x1b[0m") // green = faster
-    } else if pct > 1.0 {
-        ("\x1b[31m", "\x1b[0m") // red = slower
-    } else {
-        ("", "") // no change
-    };
-
-    eprintln!(
-        "    {:<30}  {:>10} → {:>10}  {}{:+.2}%{}",
-        name,
-        format_ns(base_mean),
-        format_ns(cand_mean),
-        arrow,
-        pct,
-        reset,
-    );
+        2
+    }
 }
 
 fn cmd_clean(project: &Path, max_age_hours: u64) {

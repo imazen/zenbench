@@ -3,109 +3,23 @@ title = "CI Regression Testing"
 weight = 2
 +++
 
-## Save a baseline
+Use explicit `--mode=confirm --workload-id=inputs-v3` with registered native Suite
+groups. Iterate is the local exploratory default and cannot promote CI baselines.
 
-After merging to main, save benchmark results:
-
-```bash
-cargo bench -- --save-baseline=main
+```sh
+cargo bench -- --mode=confirm --workload-id=inputs-v3 --save-baseline=main
+cargo bench -- --mode=confirm --workload-id=inputs-v3 --baseline=main --update-on-pass
 ```
 
-This writes `.zenbench/baselines/main.json` — a complete snapshot of all benchmark results.
+Confirmation uses fixed fresh processes, verified CPU admission and retained raw
+evidence. Exit 1 means confirmed regression. Exit 2 means inconclusive or invalid
+evidence. Promotion requires non-inferiority for every required case; noisy,
+missing or incompatible measurements cannot replace the baseline.
 
-## Check for regressions on PRs
+See the [complete regression guide](https://github.com/imazen/zenbench/blob/main/REGRESSION-TESTING.md),
+[mode contract](https://github.com/imazen/zenbench/blob/main/docs/benchmark-modes.md)
+and [compact storage guide](https://github.com/imazen/zenbench/blob/main/docs/result-storage.md).
 
-```bash
-cargo bench -- --baseline=main
-```
-
-Exit codes:
-- **0** — pass, no regressions exceed threshold
-- **1** — fail, regressions detected
-- **2** — error (baseline not found, etc.)
-
-Output:
-
-```text
-  Baseline comparison
-  ───────────────────
-  ⚠ git hash differs: baseline=abc12345 current=def67890
-
-  compress::level_1     16.2µs →   16.4µs    +1.2%    unchanged
-  compress::level_6     15.1µs →   15.3µs    +1.3%    unchanged
-  compress::mixed      401.0µs →  425.3µs    +6.1%  ▲ REGRESSION
-
-  Summary: 1 regressions, 0 improvements, 2 unchanged
-
-[zenbench] FAIL: 1 regression(s) exceed 5% threshold
-```
-
-## Configure the threshold
-
-```bash
-# Fail if any benchmark regresses more than 3%
-cargo bench -- --baseline=main --max-regression=3
-
-# Auto-update baseline when the run passes
-cargo bench -- --baseline=main --update-on-pass
-```
-
-## GitHub Actions workflow
-
-```yaml
-name: Benchmarks
-on: [pull_request]
-
-jobs:
-  bench:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Restore baseline
-        uses: actions/cache@v4
-        with:
-          path: .zenbench/baselines
-          key: bench-baselines-${{ github.base_ref }}
-
-      - name: Check for regressions
-        run: cargo bench -- --baseline=main --max-regression=5
-
-      - name: Update baseline (main only)
-        if: github.ref == 'refs/heads/main'
-        run: cargo bench -- --save-baseline=main
-```
-
-## How comparison works
-
-When comparing against a baseline, zenbench:
-
-1. Runs the full benchmark suite (interleaved, converging)
-2. Loads the baseline JSON
-3. Matches benchmarks by `group::name`
-4. Computes percentage change for each
-5. Applies **both** a percentage threshold AND a statistical t-test
-6. Only flags a regression if it exceeds the threshold AND is statistically significant
-
-The t-test prevents false positives from noisy CI runners — if the mean shifted but the variance is high, the test won't flag it.
-
-## Hardware fingerprinting
-
-Baselines include a hardware fingerprint (CPU model, arch, OS, core count). When comparing, zenbench warns if the hardware changed:
-
-```text
-  ⚠ CPU changed: baseline='AMD EPYC 7763' current='Intel Xeon E5-2686'
-```
-
-## Comparing against git tags
-
-```bash
-# Save baseline at release time
-cargo bench -- --save-baseline=v0.3.0
-
-# Later, check for regressions vs release
-cargo bench -- --baseline=v0.3.0
-
-# Or use worktree-based comparison (builds both versions, interleaves)
-zenbench self-compare --bench my_bench --ref v0.3.0
-```
+Named references and complete raw objects must both survive CI jobs. Export one
+selected CSV to a stable Git path; do not commit each process's result file.
+Immediate-mode criterion compatibility results do not support confirmation.

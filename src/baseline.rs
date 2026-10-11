@@ -6,10 +6,10 @@
 //!
 //! ```bash
 //! # Save current results as the "main" baseline
-//! cargo bench -- --save-baseline main
+//! cargo bench -- --mode=confirm --workload-id=inputs-v1 --save-baseline=main
 //!
 //! # Compare against saved baseline (exit 1 if regressions)
-//! cargo bench -- --baseline main
+//! cargo bench -- --mode=confirm --workload-id=inputs-v1 --baseline=main
 //! ```
 
 use crate::results::SuiteResult;
@@ -22,9 +22,24 @@ fn baseline_dir() -> PathBuf {
     PathBuf::from(".zenbench").join("baselines")
 }
 
+fn validate_name(name: &str) -> std::io::Result<()> {
+    if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\']) {
+        return Err(std::io::Error::other(
+            "baseline name must be a single filename",
+        ));
+    }
+    Ok(())
+}
+
 /// Result of comparing a benchmark run against a saved baseline.
 #[derive(Debug)]
 pub struct BaselineComparison {
+    /// Process-level decisions. Empty when the evidence contract is invalid.
+    pub confirmed: Vec<crate::ProcessComparison>,
+    /// Reasons this comparison cannot support CI acceptance or promotion.
+    pub validity_issues: Vec<String>,
+    /// Every required case establishes non-inferiority within the declared margin.
+    pub promotable: bool,
     /// Per-benchmark comparisons: (group, benchmark, analysis, regression?).
     pub benchmarks: Vec<BenchmarkDelta>,
     /// Number of benchmarks that regressed beyond the threshold.
@@ -60,15 +75,21 @@ pub struct BenchmarkDelta {
 
 /// Save a `SuiteResult` as a named baseline.
 pub fn save_baseline(result: &SuiteResult, name: &str) -> std::io::Result<PathBuf> {
+    validate_name(name)?;
     let dir = baseline_dir();
-    std::fs::create_dir_all(&dir)?;
+    crate::storage::ignore_raw_dir(&dir)?;
+    let history = dir.join("history").join(name);
+    std::fs::create_dir_all(&history)?;
+    let version = history.join(format!("{}.json", crate::RunId::generate()));
+    crate::storage::save_reference(result, &version)?;
     let path = dir.join(format!("{name}.json"));
-    result.save(&path)?;
+    crate::storage::atomic_write(&path, &std::fs::read(version)?)?;
     Ok(path)
 }
 
 /// Load a named baseline.
 pub fn load_baseline(name: &str) -> Result<SuiteResult, String> {
+    validate_name(name).map_err(|e| e.to_string())?;
     let path = baseline_dir().join(format!("{name}.json"));
     if !path.exists() {
         return Err(format!(
@@ -124,6 +145,7 @@ pub fn prune_baselines(max_age_secs: u64) -> std::io::Result<usize> {
 
 /// Delete a named baseline.
 pub fn delete_baseline(name: &str) -> std::io::Result<()> {
+    validate_name(name)?;
     let path = baseline_dir().join(format!("{name}.json"));
     std::fs::remove_file(path)
 }
@@ -144,7 +166,7 @@ fn format_bench_key(group: &str, name: &str) -> String {
 /// Benchmarks that regress by more than this are flagged.
 ///
 /// Returns the comparison result. The caller decides whether to fail CI based on
-/// `comparison.regressions > 0`.
+/// process-level `confirmed` decisions and `promotable`; legacy count fields are descriptive.
 pub fn compare_against_baseline(
     baseline: &SuiteResult,
     current: &SuiteResult,
@@ -154,6 +176,10 @@ pub fn compare_against_baseline(
         .check_cpu_compatibility(current)
         .unwrap_or_else(|e| panic!("{e}"));
     let mut warnings = Vec::new();
+    let validity_issues = crate::inference::compatibility_issues(baseline, current);
+    if !max_regression_pct.is_finite() || !(0.0..100.0).contains(&max_regression_pct) {
+        panic!("regression margin must be finite and between 0 and 100 percent");
+    }
     if current
         .cpu_placement
         .as_ref()
@@ -298,7 +324,42 @@ pub fn compare_against_baseline(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
+    let family = baseline_map.len().max(1);
+    let confirmed = if validity_issues.is_empty() {
+        benchmarks
+            .iter()
+            .filter_map(|b| {
+                crate::inference::compare_benchmark(
+                    baseline,
+                    current,
+                    &b.group,
+                    &b.name,
+                    max_regression_pct,
+                    family,
+                )
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let promotable = validity_issues.is_empty()
+        && !confirmed.is_empty()
+        && confirmed.len() == baseline_map.len()
+        && new_benchmarks.is_empty()
+        && missing_benchmarks.is_empty()
+        && confirmed.iter().all(|c| {
+            matches!(
+                c.verdict,
+                crate::Verdict::Improvement
+                    | crate::Verdict::Equivalent
+                    | crate::Verdict::NonInferior
+            )
+        });
+
     BaselineComparison {
+        confirmed,
+        validity_issues,
+        promotable,
         benchmarks,
         regressions,
         improvements,
@@ -314,6 +375,25 @@ pub fn print_comparison_report(comparison: &BaselineComparison) {
     eprintln!();
     eprintln!("  Baseline comparison");
     eprintln!("  ───────────────────");
+    for issue in &comparison.validity_issues {
+        eprintln!("  UNCONFIRMED: {issue}");
+    }
+    for decision in &comparison.confirmed {
+        eprintln!(
+            "  {}::{}: {:+.4}% [{:+.4}%, {:+.4}%] {} ({})",
+            decision.group,
+            decision.candidate,
+            decision.estimate_pct,
+            decision.lower_pct,
+            decision.upper_pct,
+            decision.verdict,
+            decision.method
+        );
+    }
+    eprintln!(
+        "  Arithmetic changes below are descriptive; promotion eligible={}",
+        comparison.promotable
+    );
 
     for w in &comparison.warnings {
         eprintln!("  \x1b[33m⚠ {w}\x1b[0m");
@@ -326,9 +406,9 @@ pub fn print_comparison_report(comparison: &BaselineComparison) {
 
     for delta in &comparison.benchmarks {
         let marker = if delta.regressed {
-            "\x1b[31m▲ REGRESSION\x1b[0m"
+            "\x1b[31m▲ slower (descriptive)\x1b[0m"
         } else if delta.improved {
-            "\x1b[32m▼ improved\x1b[0m"
+            "\x1b[32m▼ faster (descriptive)\x1b[0m"
         } else {
             "  unchanged"
         };
@@ -355,7 +435,7 @@ pub fn print_comparison_report(comparison: &BaselineComparison) {
     }
 
     eprintln!(
-        "  Summary: {} regressions, {} improvements, {} unchanged",
+        "  Descriptive counts: {} slower, {} faster, {} unchanged",
         comparison.regressions, comparison.improvements, comparison.unchanged,
     );
 }

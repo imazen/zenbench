@@ -6,44 +6,47 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenbench.txt 686 lines (supported surface) | zenbench.features.txt 94 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,precise-timing,wasm) | zenbench.internal.txt 26 lines (26 hidden + 0 excluded-feature)
+# files: zenbench.txt 752 lines (supported surface) | zenbench.features.txt 94 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,precise-timing,wasm) | zenbench.internal.txt 30 lines (30 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 9
-#   pub types (struct/enum/trait/alias)        60
+#   pub types (struct/enum/trait/alias)        65
 #   pub consts/statics                          2
 #   pub macros                                  1
 #   free functions                             44
-#   inherent methods                          189
-#   struct fields                             301
-#   enum variants                              37
-#   trait roster entries (type × trait)       188
-#   auto-trait-complete types                  41
+#   inherent methods                          199
+#   struct fields                             337
+#   enum variants                              47
+#   trait roster entries (type × trait)       222
+#   auto-trait-complete types                  46
 #   auto-trait exceptions                       8
 #
 # per-module pub lines:
-#   (root)                          332
-#   baseline                         23
+#   (root)                          388
+#   baseline                         26
 #   calibration                       5
 #   daemon                           30
 #   exclusive                        32
 #   mcp                               1
 #   platform                        106
-#   prelude                          84
+#   prelude                          86
 #   quickchart                       30
 
-## items (631 lines)
+## items (692 lines)
 
 pub mod zenbench
 pub mod baseline
 pub struct baseline::BaselineComparison
 pub baseline::BaselineComparison::benchmarks: alloc::vec::Vec<baseline::BenchmarkDelta>
+pub baseline::BaselineComparison::confirmed: alloc::vec::Vec<ProcessComparison>
 pub baseline::BaselineComparison::improvements: usize
 pub baseline::BaselineComparison::missing_benchmarks: alloc::vec::Vec<alloc::string::String>
 pub baseline::BaselineComparison::new_benchmarks: alloc::vec::Vec<alloc::string::String>
+pub baseline::BaselineComparison::promotable: bool
 pub baseline::BaselineComparison::regressions: usize
 pub baseline::BaselineComparison::unchanged: usize
+pub baseline::BaselineComparison::validity_issues: alloc::vec::Vec<alloc::string::String>
 pub baseline::BaselineComparison::warnings: alloc::vec::Vec<alloc::string::String>
 pub struct baseline::BenchmarkDelta
 pub baseline::BenchmarkDelta::baseline_mean: f64
@@ -342,18 +345,22 @@ pub fn Suite::cpu_policy(&mut self, platform::CpuPolicy) -> &mut Self
 pub fn Suite::cpu_set(&mut self, &[usize]) -> &mut Self
 pub fn Suite::group<F: core::ops::function::FnOnce(&mut BenchGroup)>(&mut self, impl core::convert::Into<alloc::string::String>, F)
 pub fn Suite::merge(&mut self, Suite)
+pub fn Suite::mode(&mut self, BenchmarkMode) -> &mut Self
 pub fn Suite::new() -> Self
+pub fn Suite::plan(&mut self) -> &mut BenchmarkPlan
 pub fn Suite::push_group(&mut self, BenchGroup)
 pub fn Suite::set_group_filter(&mut self, alloc::string::String)
 pub prelude::SuiteResult::calibration: core::option::Option<calibration::Calibration>
 pub prelude::SuiteResult::ci_environment: core::option::Option<alloc::string::String>
 pub prelude::SuiteResult::comparisons: alloc::vec::Vec<ComparisonResult>
 pub prelude::SuiteResult::cpu_placement: core::option::Option<platform::CpuPlacement>
+pub prelude::SuiteResult::execution: core::option::Option<ExecutionRecord>
 pub prelude::SuiteResult::gate_wait_time: core::time::Duration
 pub prelude::SuiteResult::gate_waits: usize
 pub prelude::SuiteResult::git_hash: core::option::Option<alloc::string::String>
 pub prelude::SuiteResult::incomplete: bool
 pub prelude::SuiteResult::loop_overhead_ns: f64
+pub prelude::SuiteResult::process_comparisons: alloc::vec::Vec<ProcessComparison>
 pub prelude::SuiteResult::replicates: alloc::vec::Vec<SuiteResult>
 pub prelude::SuiteResult::run_id: RunId
 pub prelude::SuiteResult::standalones: alloc::vec::Vec<BenchmarkResult>
@@ -363,10 +370,13 @@ pub prelude::SuiteResult::timestamp: alloc::string::String
 pub prelude::SuiteResult::total_time: core::time::Duration
 pub prelude::SuiteResult::unreliable: bool
 pub fn SuiteResult::check_cpu_compatibility(&self, &Self) -> core::result::Result<(), alloc::string::String>
+pub fn SuiteResult::confirmation_issues(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn SuiteResult::group_by_tag(&self, &str) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::vec::Vec<(&str, &BenchmarkResult)>>
 pub fn SuiteResult::load(impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<Self>
 pub fn SuiteResult::print_report(&self)
+pub fn SuiteResult::process_report(&self) -> alloc::string::String
 pub fn SuiteResult::save(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
+pub fn SuiteResult::save_analysis(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
 pub fn SuiteResult::save_charts(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
 pub fn SuiteResult::save_snapshot(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
 pub fn SuiteResult::to_csv(&self) -> alloc::string::String
@@ -425,6 +435,10 @@ pub enum Aggregation
 pub Aggregation::Best
 pub Aggregation::Mean
 pub Aggregation::Median
+#[non_exhaustive] pub enum BenchmarkMode
+pub BenchmarkMode::Confirm
+pub BenchmarkMode::Evidence
+pub BenchmarkMode::Iterate
 pub enum GateReason
 pub GateReason::CpuLoad(f64)
 pub GateReason::CpuTemp(f64)
@@ -436,6 +450,14 @@ pub Throughput::Elements(u64)
 pub fn Throughput::compute(&self, f64, core::option::Option<&str>) -> (f64, alloc::string::String)
 pub fn Throughput::element_count(&self) -> core::option::Option<u64>
 pub fn Throughput::format(&self, f64, core::option::Option<&str>) -> alloc::string::String
+#[non_exhaustive] pub enum Verdict
+pub Verdict::Equivalent
+pub Verdict::Exploratory
+pub Verdict::Improvement
+pub Verdict::Inconclusive
+pub Verdict::Invalid
+pub Verdict::NonInferior
+pub Verdict::Regression
 pub struct AllocProfiler<A>
 pub const fn AllocProfiler::system() -> Self
 pub const fn AllocProfiler<A>::new(A) -> Self
@@ -467,6 +489,15 @@ pub struct Bencher [also: prelude]
 pub fn Bencher::iter<O, F: core::ops::function::FnMut() -> O>(&mut self, F)
 pub fn Bencher::iter_deferred_drop<O, F: core::ops::function::FnMut() -> O>(&mut self, F)
 pub fn Bencher::with_input<I, S: core::ops::function::FnMut() -> I + 'static>(&mut self, S) -> bench::InputBencher<'_, I, S>
+#[non_exhaustive] pub struct BenchmarkPlan
+pub BenchmarkPlan::confidence: f64
+pub BenchmarkPlan::margin_pct: f64
+pub BenchmarkPlan::mode: BenchmarkMode
+pub BenchmarkPlan::processes: usize
+pub BenchmarkPlan::rounds: core::option::Option<usize>
+pub BenchmarkPlan::scope: core::option::Option<alloc::string::String>
+pub BenchmarkPlan::timeout: core::time::Duration
+pub BenchmarkPlan::workload_id: core::option::Option<alloc::string::String>
 #[non_exhaustive] pub struct BenchmarkResult
 pub BenchmarkResult::alloc_stats: core::option::Option<AllocStats>
 pub BenchmarkResult::cold_start_ns: f64
@@ -487,6 +518,7 @@ pub ComparisonResult::cache_firewall: bool
 pub ComparisonResult::cache_firewall_bytes: usize
 pub ComparisonResult::cold_start: bool
 pub ComparisonResult::completed_rounds: usize
+pub ComparisonResult::config: core::option::Option<GroupConfig>
 pub ComparisonResult::cpu_placement: core::option::Option<platform::CpuPlacement>
 pub ComparisonResult::expect_sub_ns: bool
 pub ComparisonResult::group_name: alloc::string::String
@@ -495,6 +527,13 @@ pub ComparisonResult::samples: alloc::vec::Vec<RoundSample>
 pub ComparisonResult::sort_by_speed: bool
 pub ComparisonResult::throughput: core::option::Option<Throughput>
 pub ComparisonResult::throughput_unit: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct ExecutionRecord
+pub ExecutionRecord::binary_sha256: alloc::string::String
+pub ExecutionRecord::independent_processes: bool
+pub ExecutionRecord::plan: BenchmarkPlan
+pub ExecutionRecord::process_id: u32
+pub ExecutionRecord::protocol: alloc::string::String
+pub ExecutionRecord::timer_backend: alloc::string::String
 #[non_exhaustive] pub struct GateConfig [also: prelude]
 pub GateConfig::enabled: bool
 pub GateConfig::max_cpu_load: f64
@@ -574,6 +613,20 @@ pub PairedAnalysis::pct_change: f64
 pub PairedAnalysis::resolution_limited: bool
 pub PairedAnalysis::significant: bool
 pub PairedAnalysis::wilcoxon_p: f64
+#[non_exhaustive] pub struct ProcessComparison
+pub ProcessComparison::baseline: alloc::string::String
+pub ProcessComparison::baseline_processes: usize
+pub ProcessComparison::candidate: alloc::string::String
+pub ProcessComparison::candidate_processes: usize
+pub ProcessComparison::comparisons_in_family: usize
+pub ProcessComparison::estimate_pct: f64
+pub ProcessComparison::family_confidence: f64
+pub ProcessComparison::group: alloc::string::String
+pub ProcessComparison::lower_pct: f64
+pub ProcessComparison::margin_pct: f64
+pub ProcessComparison::method: alloc::string::String
+pub ProcessComparison::upper_pct: f64
+pub ProcessComparison::verdict: Verdict
 pub struct ResourceGate
 pub fn ResourceGate::brief_wait(&mut self, core::time::Duration)
 pub fn ResourceGate::check(&self) -> core::option::Option<GateReason>
@@ -590,6 +643,7 @@ pub RoundSample::compensated_ns: alloc::vec::Vec<u64>
 pub RoundSample::elapsed_ns: alloc::vec::Vec<u64>
 pub RoundSample::execution_order: alloc::vec::Vec<usize>
 pub RoundSample::gate_clean: core::option::Option<bool>
+pub RoundSample::gate_observation: core::option::Option<alloc::string::String>
 pub RoundSample::gate_observation_age_ns: core::option::Option<u64>
 pub RoundSample::iterations: usize
 pub struct RunId(pub alloc::string::String)
@@ -603,7 +657,9 @@ pub fn Suite::cpu_policy(&mut self, platform::CpuPolicy) -> &mut Self
 pub fn Suite::cpu_set(&mut self, &[usize]) -> &mut Self
 pub fn Suite::group<F: core::ops::function::FnOnce(&mut BenchGroup)>(&mut self, impl core::convert::Into<alloc::string::String>, F)
 pub fn Suite::merge(&mut self, Suite)
+pub fn Suite::mode(&mut self, BenchmarkMode) -> &mut Self
 pub fn Suite::new() -> Self
+pub fn Suite::plan(&mut self) -> &mut BenchmarkPlan
 pub fn Suite::push_group(&mut self, BenchGroup)
 pub fn Suite::set_group_filter(&mut self, alloc::string::String)
 #[non_exhaustive] pub struct SuiteResult [also: prelude]
@@ -611,11 +667,13 @@ pub SuiteResult::calibration: core::option::Option<calibration::Calibration>
 pub SuiteResult::ci_environment: core::option::Option<alloc::string::String>
 pub SuiteResult::comparisons: alloc::vec::Vec<ComparisonResult>
 pub SuiteResult::cpu_placement: core::option::Option<platform::CpuPlacement>
+pub SuiteResult::execution: core::option::Option<ExecutionRecord>
 pub SuiteResult::gate_wait_time: core::time::Duration
 pub SuiteResult::gate_waits: usize
 pub SuiteResult::git_hash: core::option::Option<alloc::string::String>
 pub SuiteResult::incomplete: bool
 pub SuiteResult::loop_overhead_ns: f64
+pub SuiteResult::process_comparisons: alloc::vec::Vec<ProcessComparison>
 pub SuiteResult::replicates: alloc::vec::Vec<SuiteResult>
 pub SuiteResult::run_id: RunId
 pub SuiteResult::standalones: alloc::vec::Vec<BenchmarkResult>
@@ -625,10 +683,13 @@ pub SuiteResult::timestamp: alloc::string::String
 pub SuiteResult::total_time: core::time::Duration
 pub SuiteResult::unreliable: bool
 pub fn SuiteResult::check_cpu_compatibility(&self, &Self) -> core::result::Result<(), alloc::string::String>
+pub fn SuiteResult::confirmation_issues(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn SuiteResult::group_by_tag(&self, &str) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::vec::Vec<(&str, &BenchmarkResult)>>
 pub fn SuiteResult::load(impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<Self>
 pub fn SuiteResult::print_report(&self)
+pub fn SuiteResult::process_report(&self) -> alloc::string::String
 pub fn SuiteResult::save(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
+pub fn SuiteResult::save_analysis(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
 pub fn SuiteResult::save_charts(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
 pub fn SuiteResult::save_snapshot(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
 pub fn SuiteResult::to_csv(&self) -> alloc::string::String
@@ -667,24 +728,29 @@ pub fn run_gated<F: core::ops::function::FnOnce(&mut Suite)>(GateConfig, F) -> S
 pub fn run_passes<F: core::ops::function::FnMut(&mut Suite)>(usize, Aggregation, F) -> SuiteResult
 pub fn run_processes(usize, Aggregation) -> SuiteResult
 
-## trait impls (46 types)
+## trait impls (51 types)
 
 Aggregation: Clone, Copy, Debug
 AllocProfiler<A>: GlobalAlloc
 AllocStats: Clone, Debug, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+BenchmarkMode: Clone, Copy, Debug, Default, Display, Eq, FromStr, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+BenchmarkPlan: Clone, Debug, Default, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 BenchmarkResult: Clone, Debug, Default, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 ComparisonResult: Clone, Debug, Default, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+ExecutionRecord: Clone, Debug, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 GateConfig: Clone, Debug, Default
 GateReason: Clone, Debug, Display
-GroupConfig: Clone, Debug, Default
+GroupConfig: Clone, Debug, Default, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 MeanCi: Clone, Debug, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 PairedAnalysis: Clone, Debug, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+ProcessComparison: Clone, Debug, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 RoundSample: Clone, Debug, Default, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 RunId: Clone, Debug, Display, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 Suite: Default
 SuiteResult: Clone, Debug, Default, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 Summary: Clone, Debug, Default, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 Throughput: Clone, Debug, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+Verdict: Clone, Copy, Debug, Display, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 baseline::BaselineComparison: Debug
 baseline::BenchmarkDelta: Debug
 calibration::Calibration: Clone, Debug, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
@@ -718,7 +784,7 @@ quickchart::QuickChartUrl: Clone, Debug
 
 ## auto traits
 
-41 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+46 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 AllocProfiler<A>: !Freeze !RefUnwindSafe !Send !Unpin !UnwindSafe
 BenchGroup: !RefUnwindSafe !Sync !UnwindSafe
 ResourceGate: !Freeze !RefUnwindSafe !UnwindSafe

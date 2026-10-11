@@ -2,6 +2,18 @@
 
 ### Known bugs: defaults audit (2026-10-11)
 
+Executable hashing made debug tests under ARMv7 emulation expensive. The SHA-256
+dependency now uses optimization level 3 in the development/test profile, leaving
+the test and benchmark code unoptimized. A prebuilt dry-run command measured
+7 seconds before and 1 second after; both executable hashes matched Python's
+independent SHA-256. See `benchmarks/armv7_hash_2026-10-11.json`; these are emulated
+debug startup observations, not release benchmark timings.
+
+Windows x64 CI exposed an ancestor walk that could append its starting PID
+when the observed parent links formed a cycle. The walk now stops before that
+append, even when its output was initially empty. Deterministic self-cycle and
+two-process-cycle regressions supplement the unchanged live parent assertion.
+
 Known bugs identified by the defaults audit: multi-process aggregation retains
 the first run's paired analyses after changing benchmark summaries; a synthetic
 -20%/+20% pair averages to equal means but still reports -20%, significant.
@@ -49,12 +61,13 @@ benches/
 ## Key design decisions
 
 - **Interleaving is the core design**, not opt-in. Every round shuffles benchmark order.
-- **Significance = 95% CI excludes zero**. No p-value thresholds, no hardcoded percentage cutoffs.
+- **Within-process significance is exploratory**: the paired bootstrap interval must clear the configured noise margin (default 1%). Confirm/Evidence decisions use the recorded process-level policy and practical margin.
 - **Bootstrap percentile CI** (10K resamples, 2.5th/50th/97.5th). Non-parametric, captures asymmetry.
 - **MAD not stddev** in display. Stddev is destroyed by one context-switch spike.
 - **Cache firewall off by default**. Most benchmarks measure hot-path code; firewall penalizes pointer-chasing unrealistically.
 - **Auto-rounds convergence** based on paired-difference CI + effect-size stability, not individual benchmark precision or p-value targets.
-- **Auto-save to `<target>/zenbench/results/`** in LLM format. Path printed at start so tools can re-read without re-running. Never the temp dir: results, multi-process exchange files (`<target>/zenbench/proc/`) and self-compare worktrees (`<target>/zenbench/self-compare/`) live under the cargo target dir (`src/paths.rs`); the cross-process locks live in the per-user cache dir (`~/.cache/zenbench/`).
+- **Durable gzip evidence** lives under ignored `.zenbench/data/` or `ZENBENCH_DATA_DIR`, with immutable hash objects, process attempts and small references. Explicit selected CSV snapshots belong in Git. See `docs/result-storage.md`. Self-compare build workspaces stay under target; cross-process locks stay in the user cache.
+- **Modes:** Iterate is exploratory (30 rounds, 100 ms warmup per arm by default). Confirm/Evidence use fixed fresh processes and the process-level inference in `src/inference.rs`; see `docs/benchmark-modes.md`. Legacy within-process significance and aggregate descriptive means cannot authorize promotion.
 
 ## Report output structure
 
@@ -77,7 +90,7 @@ Read METHODOLOGY.md for the full cross-reference with academic papers. Key point
 - STABILIZER (ASPLOS 2013): 30+ rounds minimum for stable distributions
 - Chen & Revels (2016): min as floor estimator, noise is additive
 - Kalibera & Jones (ISMM 2013): always report uncertainty
-- Convergence: paired-diff CI must exclude zero AND effect size must be stable (CI half-width < 10% of difference magnitude)
+- Iterate convergence can resolve direction or a sufficiently narrow interval; larger effects also require stable effect size. Confirmation disables adaptive stopping and requires the full fixed plan.
 
 ## Threading APIs
 
@@ -93,7 +106,7 @@ Don't mix bench_parallel/bench_contended with rayon — competing thread pools.
 - Terminal: ANSI tables with color (stderr)
 - `--format=llm` or `ZENBENCH_FORMAT=llm`: key-value lines with `|` section separators (stdout)
 - `--format=csv|md|json`: other formats (stdout)
-- Auto-saved to `<target>/zenbench/results/zenbench-{run_id}.txt` in LLM format
+- Auto-saved as compressed raw evidence plus a hash-verified reference in `.zenbench/data/`
 
 ## Remaining work (from METHODOLOGY.md)
 
@@ -264,3 +277,25 @@ HOME was read-only, so exclusive-lock acquisition failed with EACCES. Once lock
 failure correctly flagged results, the clean-gate integration assertion exposed
 that environment defect. The target mount is writable and a native container
 control acquired an exclusive OS lock there; assertions remain unchanged.
+
+### Confirmation controls (2026-10-11)
+
+`examples/check_protocol.py` retains every control attempt, including invalid runs.
+One local Evidence control recorded 30 flagged rounds in one child and correctly
+refused a verdict. Cached observation diagnostics are now retained with rounds
+so future refusals include the resource values/reason. Never weaken admission to
+make a known-work control pass. Approved deterministic shuffle tests replace the
+old probabilistic requirement to change order within ten random two-arm rounds.
+
+Extreme confidence/family settings can make a process interval unrepresentable.
+Confirmation validates that every required interval was produced; missing numerical
+results cannot become a successful exit or baseline promotion. A deterministic
+large-dynamic-range control exercises that refusal.
+
+Baseline/candidate comparisons must use disjoint child run identities. Reusing the
+same saved measurement on both sides cannot establish an independent confirmation.
+
+The CLI evidence integration test must honor `ZENBENCH_AFFINITY_TEST_RUNNER`
+like the existing CPU-policy subprocess tests. Directly launching its ARMv7
+executable under cross returned a launcher error rather than exercising the CLI.
+The expected CLI status and diagnostic remain unchanged.

@@ -939,11 +939,8 @@ fn print_report_body(result: &SuiteResult) {
 /// Print a complete report (header + all groups + footer).
 /// Used by SuiteResult::print_report() for batch mode.
 pub fn print_report(result: &SuiteResult) {
-    if let Some(placement) = &result.cpu_placement {
-        eprintln!("[zenbench] {}", placement.llm());
-    } else {
-        eprintln!("[zenbench] cpu_placement=LEGACY_UNKNOWN cpu_class_uniform=unknown");
-    }
+    eprintln!("[zenbench] {}", result.cpu_evidence(None));
+    eprint!("{}", result.process_report());
     print_header(
         &result.run_id,
         result.git_hash.as_deref(),

@@ -118,6 +118,9 @@ pub struct RoundSample {
     /// None means no fresh background observation; not continuous quietness proof.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate_observation_age_ns: Option<u64>,
+    /// Diagnostic values and admission reason for the cached pre-round observation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_observation: Option<String>,
     /// Actual iteration count shared by all benchmarks in this round.
     pub iterations: usize,
     /// Benchmark indices in their randomized execution order.
@@ -132,6 +135,9 @@ pub struct RoundSample {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ComparisonResult {
+    /// Resolved sampling settings; absent on historical/immediate-mode results.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<crate::GroupConfig>,
     /// Process CPU-placement evidence. None means historical/unknown.
     #[serde(default)]
     pub cpu_placement: Option<crate::platform::CpuPlacement>,
@@ -178,6 +184,12 @@ pub struct ComparisonResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct SuiteResult {
+    /// Resolved measurement intent and executed binary identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<crate::ExecutionRecord>,
+    /// Inference across independent process populations, separate from round analyses.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub process_comparisons: Vec<crate::ProcessComparison>,
     /// Process CPU-placement evidence. None never certifies uniform placement.
     #[serde(default)]
     pub cpu_placement: Option<crate::platform::CpuPlacement>,
@@ -230,6 +242,8 @@ impl Default for SuiteResult {
     #[allow(deprecated)] // standalones field kept for serde compat
     fn default() -> Self {
         Self {
+            execution: None,
+            process_comparisons: Vec::new(),
             run_id: RunId(String::new()),
             timestamp: String::new(),
             git_hash: None,
@@ -252,6 +266,49 @@ impl Default for SuiteResult {
 }
 
 impl SuiteResult {
+    /// Reasons this packet cannot support confirmation or baseline promotion.
+    pub fn confirmation_issues(&self) -> Vec<String> {
+        let mut issues = crate::inference::issues(self);
+        if issues.is_empty() {
+            let expected = self
+                .replicates
+                .first()
+                .map(|r| {
+                    r.comparisons
+                        .iter()
+                        .map(|g| g.analyses.len())
+                        .sum::<usize>()
+                })
+                .unwrap_or(0);
+            if crate::inference::confirm(self).len() != expected {
+                issues.push("one or more process intervals are numerically unresolved".into());
+            }
+        }
+        issues
+    }
+
+    /// Process-level inference rendered from the same decisions used by CI/JSON.
+    pub fn process_report(&self) -> String {
+        use std::fmt::Write;
+        let mut out = String::new();
+        for comparison in &self.process_comparisons {
+            let _ = writeln!(
+                out,
+                "process_comparison group={:?} baseline={:?} candidate={:?} estimate={:+.4}% interval=[{:+.4}%,{:+.4}%] verdict={} processes={}/{} method={}",
+                comparison.group,
+                comparison.baseline,
+                comparison.candidate,
+                comparison.estimate_pct,
+                comparison.lower_pct,
+                comparison.upper_pct,
+                comparison.verdict,
+                comparison.baseline_processes,
+                comparison.candidate_processes,
+                comparison.method
+            );
+        }
+        out
+    }
     /// Refuse aggregation/baseline comparisons across differing CPU boundaries.
     /// Two historical results are comparable with unknown placement; they do
     /// not acquire certification by being compared.
@@ -287,9 +344,26 @@ impl SuiteResult {
     }
 
     pub(crate) fn cpu_evidence(&self, comp: Option<&ComparisonResult>) -> String {
-        comp.map_or(self.cpu_placement.as_ref(), |c| c.cpu_placement.as_ref())
+        let placement = comp.map_or(self.cpu_placement.as_ref(), |c| c.cpu_placement.as_ref())
             .map(|placement| placement.llm())
-            .unwrap_or_else(|| "cpu_placement=LEGACY_UNKNOWN cpu_class_uniform=unknown cpu_enforcement=unknown pool_thread_count=unknown".into())
+            .unwrap_or_else(|| "cpu_placement=LEGACY_UNKNOWN cpu_class_uniform=unknown cpu_enforcement=unknown pool_thread_count=unknown".into());
+        let mode = self
+            .execution
+            .as_ref()
+            .map(|e| e.plan.mode.to_string())
+            .unwrap_or_else(|| "legacy".into());
+        let status = if self
+            .execution
+            .as_ref()
+            .is_some_and(|e| e.plan.mode == crate::BenchmarkMode::Iterate)
+        {
+            "exploratory"
+        } else if !self.process_comparisons.is_empty() {
+            "process_analysis"
+        } else {
+            "unconfirmed"
+        };
+        format!("mode={mode} inference={status} {placement}")
     }
     /// Atomically save compact JSON, compressed when the filename ends in `.gz`.
     pub fn save(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
@@ -299,6 +373,23 @@ impl SuiteResult {
     /// Load JSON, gzip JSON, or an immutable evidence reference.
     pub fn load(path: impl AsRef<Path>) -> std::io::Result<Self> {
         crate::storage::load(path.as_ref())
+    }
+
+    /// Recompute the recorded process analysis without running benchmarks.
+    /// The separate versioned artifact references a retained immutable raw packet.
+    pub fn save_analysis(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
+        crate::storage::persist(self)?;
+        let report = serde_json::json!({
+            "zenbench_analysis": 1,
+            "policy": "zenbench-process-v1",
+            "evidence_sha256": crate::storage::evidence_digest(self)?,
+            "validity_issues": self.confirmation_issues(),
+            "comparisons": crate::inference::confirm(self),
+        });
+        crate::storage::atomic_write(
+            path.as_ref(),
+            &serde_json::to_vec(&report).map_err(std::io::Error::other)?,
+        )
     }
 
     /// Stable CSV summary for an explicitly selected version-control snapshot.
@@ -313,9 +404,15 @@ impl SuiteResult {
         rows.sort_by(|(ga, ba), (gb, bb)| {
             (&ga.group_name, &ba.name).cmp(&(&gb.group_name, &bb.name))
         });
-        let mut out = String::from("group,benchmark,mean_ns,mad_ns,n,scope,unreliable\n");
+        let mut out = String::from(
+            "group,benchmark,mean_ns,mad_ns,n,scope,unreliable,mode,baseline,change_pct,lo_pct,hi_pct,verdict\n",
+        );
         for (group, bench) in rows {
             use std::fmt::Write;
+            let decision = self
+                .process_comparisons
+                .iter()
+                .find(|c| c.group == group.group_name && c.candidate == bench.name);
             let scope = if self.replicates.is_empty() {
                 "within_process"
             } else {
@@ -323,14 +420,33 @@ impl SuiteResult {
             };
             let _ = writeln!(
                 out,
-                "{},{},{},{},{},{},{}",
+                "{},{},{},{},{},{},{},{},{},{},{},{},{}",
                 csv_escape(&group.group_name),
                 csv_escape(&bench.name),
                 bench.summary.mean,
                 bench.summary.mad,
                 bench.summary.n,
                 scope,
-                self.unreliable
+                self.unreliable,
+                self.execution
+                    .as_ref()
+                    .map(|e| e.plan.mode.to_string())
+                    .unwrap_or_else(|| "legacy".into()),
+                decision
+                    .map(|c| csv_escape(&c.baseline))
+                    .unwrap_or_default(),
+                decision
+                    .map(|c| c.estimate_pct.to_string())
+                    .unwrap_or_default(),
+                decision
+                    .map(|c| c.lower_pct.to_string())
+                    .unwrap_or_default(),
+                decision
+                    .map(|c| c.upper_pct.to_string())
+                    .unwrap_or_default(),
+                decision
+                    .map(|c| c.verdict.to_string())
+                    .unwrap_or_else(|| "unconfirmed".into())
             );
         }
         out
@@ -344,8 +460,18 @@ impl SuiteResult {
         }
         crate::storage::persist(self)?;
         let hash = crate::storage::evidence_digest(self)?;
+        let context = serde_json::json!({
+            "testbed": self.testbed,
+            "cpu_class": self.cpu_placement.as_ref().and_then(|p| p.core_class.as_deref()),
+            "cpu_set": self.cpu_placement.as_ref().map(|p| &p.effective_cpus),
+            "execution": self.execution.as_ref().map(|e| serde_json::json!({
+                "mode": e.plan.mode, "workload_id": e.plan.workload_id,
+                "scope": e.plan.scope, "binary_sha256": e.binary_sha256,
+                "confidence": e.plan.confidence, "margin_pct": e.plan.margin_pct,
+            })),
+        });
         let text = format!(
-            "# zenbench-snapshot-v1 evidence_sha256={hash}\n{}",
+            "# zenbench-snapshot-v1 evidence_sha256={hash}\n# context={context}\n{}",
             self.to_snapshot()
         );
         crate::storage::atomic_write(path.as_ref(), text.as_bytes())
@@ -544,6 +670,7 @@ impl SuiteResult {
             }
         }
 
+        out.push_str(&self.process_report());
         out
     }
 
@@ -763,6 +890,11 @@ impl SuiteResult {
             out.push('\n');
         }
 
+        if !self.process_comparisons.is_empty() {
+            out.push_str("\n```text\n");
+            out.push_str(&self.process_report());
+            out.push_str("```\n");
+        }
         out
     }
 
@@ -777,7 +909,7 @@ impl SuiteResult {
             .to_string();
         #[cfg(feature = "alloc-profiling")]
         header.push_str(",allocs_per_iter,deallocs_per_iter,reallocs_per_iter,bytes_per_iter");
-        header.push_str(",cpu_placement_evidence");
+        header.push_str(",cpu_placement_evidence,process_comparisons");
         header.push('\n');
         out.push_str(&header);
 
@@ -936,6 +1068,15 @@ impl SuiteResult {
                 }
                 out.push(',');
                 out.push_str(&csv_escape(&self.cpu_evidence(Some(comp))));
+                out.push(',');
+                let decisions = self
+                    .process_comparisons
+                    .iter()
+                    .filter(|c| c.group == comp.group_name && c.candidate == bench.name)
+                    .collect::<Vec<_>>();
+                out.push_str(&csv_escape(
+                    &serde_json::to_string(&decisions).expect("process comparisons serialize"),
+                ));
                 out.push('\n');
             }
         }
