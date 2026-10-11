@@ -12,9 +12,10 @@ when accepting a baseline. Do not export every iteration:
 zenbench snapshot .zenbench/data/runs/<id>.json --output benchmarks/baseline.csv
 ```
 
-The CSV has one sorted row per benchmark and one header containing the SHA-256
-of its complete gzip packet. Export retains that packet before writing the CSV.
-Rows contain descriptive mean/MAD/count/scope/reliability; exporting does not
+The CSV has one sorted row per benchmark, an evidence-hash header and a compact
+context header with testbed/CPU, workload/scope, executable hash and decision policy. Export retains that packet before writing the CSV.
+Rows contain descriptive mean/MAD/count/scope/reliability plus available
+process-level intervals/verdicts; exporting does not
 certify a performance claim. Timing values are not rounded away. Snapshot size
 depends on benchmark count, not round count or number of child processes.
 
@@ -30,6 +31,8 @@ JSON. This crate does not upload data or create a second fleet scheduler.
 - `runs/<id>.json`: small versioned reference. Loading verifies the object hash.
 - `attempts/<id>.json.gz`: checkpoint of an active/interrupted attempt, marked
   incomplete. A successful publication retires its own checkpoint.
+- `processes/<experiment>/experiment.json`: plan, executable hash and per-attempt
+  lifecycle status. Child stderr remains beside the packets, including failures.
 - `processes/<experiment>/<index>.json.gz`: subprocess output, retained even if a
   subsequent child fails. Aggregates also retain the original replicate packets.
 
@@ -37,7 +40,7 @@ Writes to ordinary result/snapshot paths use a sibling temporary file and rename
 write failures are errors. Evidence references appear only after the object is
 written and synced. Interrupted object creation cannot become a successful
 reference. Unknown or corrupt references fail loading; there is no silent fallback.
-Loading caps both encoded and decoded packets at 256 MiB. Larger experiments must
+Reading and publication cap both encoded and decoded packets at 256 MiB. Larger experiments must
 be split into separate suites rather than silently truncate their measurements.
 
 `SuiteResult::save("result.json")` writes compact JSON without indentation;
@@ -55,7 +58,8 @@ management. Compression uses the Rust backend of flate2; no C library is needed.
 ## Measured size check
 
 The retained two-arm, 200-round audit packet was 69,511 bytes as pretty JSON.
-The new lossless archive is 5,915 bytes; its selected Git snapshot is 318 bytes.
+At the storage-only revision, the lossless archive was 5,915 bytes and its
+selected Git snapshot was 318 bytes.
 Python's independent gzip/JSON decoder verified every historical field and all
 200 raw rounds. These are this fixture's measured sizes, not a universal ratio.
 See [the size record](../benchmarks/compact_storage_2026-10-11.json).
@@ -63,3 +67,25 @@ See [the size record](../benchmarks/compact_storage_2026-10-11.json).
 JSON float round-trip parsing is enabled: the independent check caught one-bit
 changes in three historical floating-point fields with the prior parser settings.
 The regression preserves those exact floating-point values through load/archive.
+
+## Analysis and baseline references
+
+`zenbench reanalyze INPUT --output analysis.json` recomputes the recorded fixed
+process policy from raw rounds. The separate artifact includes its policy version,
+evidence hash, validity issues and decisions. It does not change measurements or
+turn exploratory measurements into confirmation.
+
+Named baselines are references with an absolute data-root locator. Earlier versions
+remain under `.zenbench/baselines/history/`; deleting a name leaves history/raw
+objects intact. When moving evidence between machines, copy the objects and
+update the locator, or use a portable `.json.gz` packet directly. The low-level
+save API stores descriptive populations; CLI promotion applies the mode contract.
+
+The final mode implementation's two-arm Confirm fixture retained five processes
+and 150 rounds: **146,109 bytes** as pretty JSON, **9,729 bytes** as gzip, and an
+**874-byte** selected Git snapshot, including context and process interval. The
+separate reanalysis was 532 bytes. Independent Python/SciPy replay checked the
+complete round trip and reconstructed interval. See the
+[measured sizes/times](../benchmarks/modes_2026-10-11.summary.json) and
+[raw evidence pointer](../benchmarks/modes_2026-10-11.pointer.md). This is one fixture;
+size depends on the selected benchmark inventory and retained metadata.

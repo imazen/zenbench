@@ -3,7 +3,10 @@
 Audit date: 2026-10-11. Implementation examined: `98100750` (harness behavior
 unchanged from `37033b7b`). This document distinguishes the current implementation,
 measured diagnostic results, and proposed behavior. The proposed modes are not
-implemented presets.
+implemented presets at the audited revision. The subsequent implementation is
+documented in [benchmark modes](benchmark-modes.md) and
+[result storage](result-storage.md); the historical findings below retain their
+original revision scope.
 
 ## Findings that affect the design
 
