@@ -235,7 +235,7 @@ impl Engine {
                 None => true,
             })
             .count();
-        let mut any_unreliable = false;
+        let mut any_unreliable = self.lock_dir.is_some() && lock.is_none();
         let mut groups_done: usize = 0;
 
         // Run comparison groups (interleaved), streaming results to file
@@ -254,19 +254,8 @@ impl Engine {
             if let Some(l) = lock.as_ref() {
                 l.update_benchmark(&group.name);
             }
-            // Fresh gate per group — no state leaks between groups.
-            // Threaded groups get gate disabled (their own threads spike CPU).
-            let has_threads = group.benchmarks.iter().any(|b| {
-                b.tags
-                    .iter()
-                    .any(|(k, v)| k == "threads" && v.parse::<usize>().unwrap_or(0) > 1)
-            });
-            let group_gate_config = if has_threads {
-                GateConfig::disabled()
-            } else {
-                self.gate_config.clone()
-            };
-            let mut gate = ResourceGate::new(group_gate_config);
+            // The sampler excludes the benchmark owner, including its threads.
+            let mut gate = ResourceGate::new(self.gate_config.clone());
             let result = run_comparison_group(
                 group,
                 &mut gate,
@@ -423,6 +412,9 @@ fn run_comparison_group(
     let n_benchmarks = group.benchmarks.len();
     let group_start = Instant::now();
 
+    gate.wait_for_no_benchmarks();
+    gate.start_monitoring();
+
     // Phase 1: Warmup + iteration estimation
     crate::report::status(&format!("[zenbench] warming up '{}'...", group.name));
 
@@ -537,8 +529,6 @@ fn run_comparison_group(
             ));
         }
 
-        // Wait for other benchmark processes to finish (they'd corrupt our data).
-        gate.wait_for_no_benchmarks();
         verify();
 
         // Record whether system is noisy (advisory, doesn't block).
@@ -568,6 +558,7 @@ fn run_comparison_group(
         // declaration order and execution order distinct for paired replay.
         let mut retained = crate::results::RoundSample {
             gate_clean,
+            gate_observation_age_ns: gate.observation_age_ns(),
             iterations: round_iters,
             execution_order: order.clone(),
             elapsed_ns: vec![0; n_benchmarks],

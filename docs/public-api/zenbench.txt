@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenbench.txt 685 lines (supported surface) | zenbench.features.txt 94 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,precise-timing,wasm) | zenbench.internal.txt 26 lines (26 hidden + 0 excluded-feature)
+# files: zenbench.txt 686 lines (supported surface) | zenbench.features.txt 94 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,precise-timing,wasm) | zenbench.internal.txt 26 lines (26 hidden + 0 excluded-feature)
 
 ## summary
 #
@@ -16,14 +16,14 @@
 #   pub macros                                  1
 #   free functions                             44
 #   inherent methods                          189
-#   struct fields                             300
+#   struct fields                             301
 #   enum variants                              37
 #   trait roster entries (type × trait)       188
 #   auto-trait-complete types                  41
 #   auto-trait exceptions                       8
 #
 # per-module pub lines:
-#   (root)                          331
+#   (root)                          332
 #   baseline                         23
 #   calibration                       5
 #   daemon                           30
@@ -33,7 +33,7 @@
 #   prelude                          84
 #   quickchart                       30
 
-## items (630 lines)
+## items (631 lines)
 
 pub mod zenbench
 pub mod baseline
@@ -590,6 +590,7 @@ pub RoundSample::compensated_ns: alloc::vec::Vec<u64>
 pub RoundSample::elapsed_ns: alloc::vec::Vec<u64>
 pub RoundSample::execution_order: alloc::vec::Vec<usize>
 pub RoundSample::gate_clean: core::option::Option<bool>
+pub RoundSample::gate_observation_age_ns: core::option::Option<u64>
 pub RoundSample::iterations: usize
 pub struct RunId(pub alloc::string::String)
 pub fn RunId::generate() -> Self
@@ -720,7 +721,7 @@ quickchart::QuickChartUrl: Clone, Debug
 41 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 AllocProfiler<A>: !Freeze !RefUnwindSafe !Send !Unpin !UnwindSafe
 BenchGroup: !RefUnwindSafe !Sync !UnwindSafe
-ResourceGate: !Freeze
+ResourceGate: !Freeze !RefUnwindSafe !UnwindSafe
 Suite: !RefUnwindSafe !Sync !UnwindSafe
 exclusive::Lock: !RefUnwindSafe !UnwindSafe
 platform::AffinityGuard: !Send !Sync
