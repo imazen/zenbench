@@ -8,6 +8,10 @@ use std::time::Instant;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct CpuProbeConfig {
+    /// Separate compute warmup before collecting samples, in 50..=1000 ms.
+    /// It encourages sustained demand; it does not certify maximum frequency.
+    #[serde(default)]
+    pub warmup_ms: u64,
     /// Number of measured batches for each workload, in 3..=128.
     pub samples: usize,
     /// Identical work per batch on every worker, in 1_024..=1_048_576.
@@ -17,6 +21,7 @@ pub struct CpuProbeConfig {
 impl Default for CpuProbeConfig {
     fn default() -> Self {
         Self {
+            warmup_ms: 100,
             samples: 12,
             iterations: 32_768,
         }
@@ -25,8 +30,11 @@ impl Default for CpuProbeConfig {
 
 impl CpuProbeConfig {
     fn validate(self) -> Result<(), String> {
-        if !(3..=128).contains(&self.samples) || !(1_024..=1_048_576).contains(&self.iterations) {
-            return Err("CPU probe requires 3..=128 samples and 1024..=1048576 iterations".into());
+        if !(50..=1000).contains(&self.warmup_ms)
+            || !(3..=128).contains(&self.samples)
+            || !(1_024..=1_048_576).contains(&self.iterations)
+        {
+            return Err("CPU probe requires 50..=1000 ms warmup, 3..=128 samples and 1024..=1048576 iterations".into());
         }
         Ok(())
     }
@@ -49,6 +57,15 @@ pub struct CpuProbeSample {
 #[non_exhaustive]
 pub struct CpuProbeThread {
     pub config: CpuProbeConfig,
+    /// Actual time spent in the separate compute warmup, outside sample timers.
+    /// Zero in historical records means no recorded warmup observation.
+    #[serde(default)]
+    pub warmup_elapsed_ns: u64,
+    /// Requested macOS QoS readbacks, not physical core-class observations.
+    #[serde(default)]
+    pub qos_before: Option<super::ThreadQosState>,
+    #[serde(default)]
+    pub qos_after: Option<super::ThreadQosState>,
     /// The calling thread's diagnostic Rust ID, not an OS CPU or thread index.
     pub thread_id: String,
     /// Read errors are retained; missing masks never become placement evidence.
@@ -115,9 +132,13 @@ impl CpuProbeReport {
         for worker in &workers {
             if worker.config.samples != first.config.samples
                 || worker.config.iterations != first.config.iterations
+                || worker.config.warmup_ms != first.config.warmup_ms
                 || worker.samples.len() != first.config.samples
             {
                 return Err("CPU probe workers must use identical work and sample counts".into());
+            }
+            if worker.warmup_elapsed_ns < worker.config.warmup_ms * 1_000_000 {
+                return Err("CPU probe worker lacks the requested separate warmup".into());
             }
             if !ids.insert(&worker.thread_id) {
                 return Err("CPU probe workers must have distinct thread IDs".into());
@@ -174,6 +195,21 @@ impl CpuProbeReport {
     }
 }
 
+pub(crate) fn warmup_cpu_for(duration: std::time::Duration) -> std::time::Duration {
+    let start = Instant::now();
+    let mut value = 1u64;
+    while start.elapsed() < duration {
+        for i in 0..4096u64 {
+            value = std::hint::black_box(value)
+                .wrapping_mul(6364136223846793005)
+                .rotate_left(7)
+                ^ i;
+        }
+        std::hint::black_box(value);
+    }
+    start.elapsed()
+}
+
 /// Warm up, then measure dependent integer and 64 KiB pointer-chase workloads
 /// on the calling thread. Does not change affinity or QoS, nor create a pool.
 ///
@@ -189,6 +225,7 @@ pub fn probe_cpu_thread(config: CpuProbeConfig) -> Result<CpuProbeThread, String
     config.validate()?;
     let mask = || super::current_thread_affinity().map_err(|e| e.to_string());
     let affinity_before = mask();
+    let qos_before = super::current_thread_qos().ok();
     // A permutation cycle spanning 8192 elements; each worker has private data.
     let chain: Vec<u64> = (0..8192).map(|i| (i + 4051) % 8192).collect();
     let integer = || {
@@ -208,6 +245,12 @@ pub fn probe_cpu_thread(config: CpuProbeConfig) -> Result<CpuProbeThread, String
         }
         std::hint::black_box(index);
     };
+    // Keep clock-demand warmup completely outside the measured batches.
+    let warmup_duration = std::time::Duration::from_millis(config.warmup_ms);
+    let warmup_elapsed_ns = warmup_cpu_for(warmup_duration)
+        .as_nanos()
+        .min(u128::from(u64::MAX)) as u64;
+    // Seed workload data independently, still outside all sample timers.
     for _ in 0..2 {
         integer();
         cache();
@@ -236,6 +279,9 @@ pub fn probe_cpu_thread(config: CpuProbeConfig) -> Result<CpuProbeThread, String
     }
     Ok(CpuProbeThread {
         config,
+        warmup_elapsed_ns,
+        qos_before,
+        qos_after: super::current_thread_qos().ok(),
         thread_id: format!("{:?}", std::thread::current().id()),
         affinity_before,
         affinity_after: mask(),
@@ -276,6 +322,9 @@ mod tests {
         };
         CpuProbeThread {
             config,
+            warmup_elapsed_ns: config.warmup_ms * 1_000_000,
+            qos_before: None,
+            qos_after: None,
             thread_id: id.into(),
             affinity_before: Err("unavailable".into()),
             affinity_after: Err("unavailable".into()),
@@ -322,6 +371,14 @@ mod tests {
         let mut b = worker("b", &[1.0; 3]);
         b.config.iterations *= 2;
         assert!(CpuProbeReport::from_workers(vec![a, b]).is_err());
+        let mut too_short = worker("short", &[1.0; 3]);
+        too_short.warmup_elapsed_ns -= 1;
+        assert!(CpuProbeReport::from_workers(vec![too_short]).is_err());
+        let unconfigured = CpuProbeConfig {
+            warmup_ms: 49,
+            ..Default::default()
+        };
+        assert!(probe_cpu_thread(unconfigured).is_err());
     }
 
     #[cfg(target_os = "linux")]

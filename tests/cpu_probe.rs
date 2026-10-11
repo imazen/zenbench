@@ -18,6 +18,8 @@ fn probes_the_actual_rayon_workers_and_preserves_their_masks() {
     assert_eq!(report.workers.len(), 2);
     assert_eq!(report.integer.len(), 2);
     for worker in &report.workers {
+        assert!(worker.warmup_elapsed_ns >= config.warmup_ms * 1_000_000);
+        assert_eq!(worker.qos_before, worker.qos_after);
         assert_eq!(worker.samples.len(), config.samples);
         assert_eq!(worker.affinity_before, worker.affinity_after);
         #[cfg(any(target_os = "linux", target_os = "windows"))]

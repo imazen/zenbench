@@ -7,11 +7,16 @@ mod placement;
 mod probe;
 pub use affinity::{AffinityError, AffinityGuard, current_thread_affinity, pin_current_thread};
 pub(crate) use affinity::{GroupAffinityGuard, benchmark_affinity, configured_affinity};
+pub use affinity::{
+    QosGuard, ThreadQos, ThreadQosState, current_thread_qos, set_current_thread_qos,
+};
 pub(crate) use placement::CpuSession;
 pub use placement::{
     CoreClass, CpuPlacement, CpuPolicy, CpuTopology, PlacementStatus, TopologyKind,
     check_cpu_placement, detect_cpu_topology,
 };
+#[cfg(target_os = "macos")]
+pub(crate) use probe::warmup_cpu_for;
 pub use probe::{
     CpuProbeConfig, CpuProbeReport, CpuProbeSample, CpuProbeSpread, CpuProbeThread,
     probe_cpu_thread,
