@@ -122,3 +122,43 @@ The repeatable oracle is `examples/macos_affinity_probe.py`, invoked with
 without writing or building in a remote checkout. The
 [raw result](../benchmarks/macos_mach_policy_2026-10-11.json) records the observed
 OS, CPU, topology, API error, and explicit absence of placement certification.
+
+## Native macOS QoS with a separate warmup
+
+A later native probe on the same Apple M4 Pro tested both pthread QoS requests
+using `just mac-qos-probe <trusted-ssh-alias>`. Each fresh worker saved its prior
+requested QoS, applied interactive (33) or background (9) at relative priority
+zero, and verified the readback. Both workers restored their prior default
+class (21) and relative priority zero after the experiment.
+
+Before any sample timer, each worker exercised the identical native PBKDF2
+workload for at least 100 ms of measured thread CPU time. Twelve timed calls
+then produced the following observations, recorded separately:
+
+| Requested QoS | Warmup thread CPU time (ns) | Warmup wall time (ns) | Median sample (ns) |
+|---|---:|---:|---:|
+| Interactive | 100225292 | 100226750 | 297375 |
+| Background | 101606333 | 101744209 | 1913146 |
+
+These are single sequential observations, interactive then background. They
+provide no repeated-run uncertainty, actual core IDs, or frequency measurements.
+Requested QoS readback does not reveal scheduling overrides or certify P/E
+placement. The native Python oracle exercises the same pthread ABI; it is not
+an execution of the compiled Rust crate. Native Rust guard tests run in CI.
+
+The [raw observations](../benchmarks/macos_qos_warmup_2026-10-11.json) and
+[command, source, and resource record](../benchmarks/macos_qos_warmup_2026-10-11.meta.json)
+preserve both classes and every sample. Native `/usr/bin/time -l` measured
+22,396,928 bytes maximum resident set size. The interpreter ran niced with a
+CPU-time limit and RSS monitoring, without a native hard memory cap. The local
+SSH-launcher wrapper separately reported:
+`run-heavy: done rc=0 0s | peak-RSS 0.01GiB | min-avail 25835MiB | peak-load 0.67`.
+Its memory cap and peak RSS describe the local launcher only.
+
+The Rust worker probe now performs its own separate 100 ms compute exercise
+(default; configurable from 50 to 1000 ms), outside its integer/cache sample
+timers, and records elapsed warmup and requested QoS. macOS engine startup and
+Criterion compatibility also exercise the coordinator for 100 ms before
+calibration. Opaque external pools must warm their actual workers separately.
+All CPU evidence rows retain `cpu_frequency_verified=false`; these exercises
+do not establish maximum frequency or replace fail-closed admission.
