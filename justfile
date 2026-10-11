@@ -1,5 +1,17 @@
 # zenbench development recipes
 
+# Audit harness runtime/storage; invoke heavy recipes through run-heavy.
+defaults-audit-build:
+    cargo fmt -p zenbench -- --check
+    cargo clippy --example defaults_audit -- -D warnings
+    cargo build --release --example defaults_audit
+
+defaults-audit-run output plan="full" cpus="0":
+    docker run --rm --user $(id -u):$(id -g) --memory=2g --memory-swap=2g --cpuset-cpus={{cpus}} --mount type=bind,src={{justfile_directory()}},dst=/work --workdir /work --env HOME=/work/.git/defaults-audit-home --entrypoint /usr/bin/nice zenbench-audit -n19 python3 -B examples/audit_defaults.py /work/target/release/examples/defaults_audit {{output}} --plan {{plan}}
+
+defaults-audit-image:
+    docker build -t zenbench-audit -f tools/defaults-audit.Dockerfile tools
+
 wasm_target := "wasm32-wasip1"
 wasm_simd_flags := "-C target-feature=+simd128"
 zen := env("HOME") / "work/zen"
