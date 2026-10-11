@@ -156,6 +156,13 @@ enum Commands {
         output: PathBuf,
     },
 
+    /// Recompute a versioned process analysis from retained evidence, without measuring.
+    Reanalyze {
+        input: PathBuf,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+
     /// Compare two result files.
     Compare {
         /// Baseline result file.
@@ -339,6 +346,14 @@ fn main() {
                 eprintln!("cannot write snapshot: {e}");
                 std::process::exit(2);
             });
+        }
+        Commands::Reanalyze { input, output } => {
+            zenbench::SuiteResult::load(input)
+                .and_then(|r| r.save_analysis(output))
+                .unwrap_or_else(|e| {
+                    eprintln!("cannot reanalyze evidence: {e}");
+                    std::process::exit(2);
+                });
         }
         Commands::Compare {
             baseline,
@@ -1045,10 +1060,6 @@ fn run_bench_in_dir(
     }
 }
 
-fn format_ns(ns: f64) -> String {
-    zenbench::format_ns(ns)
-}
-
 /// Print a colored comparison between two suite results.
 fn print_cpu_evidence(label: &str, placement: &Option<zenbench::platform::CpuPlacement>) {
     use zenbench::platform::PlacementStatus;
@@ -1065,99 +1076,19 @@ fn print_cpu_evidence(label: &str, placement: &Option<zenbench::platform::CpuPla
 }
 
 fn print_comparison(baseline: &zenbench::SuiteResult, candidate: &zenbench::SuiteResult) {
-    baseline
-        .check_cpu_compatibility(candidate)
-        .unwrap_or_else(|e| {
-            eprintln!("{e}");
-            std::process::exit(2);
-        });
-    let base_git = baseline
-        .git_hash
-        .as_deref()
-        .map(|h| if h.len() > 8 { &h[..8] } else { h })
-        .unwrap_or("?");
-    let cand_git = candidate
-        .git_hash
-        .as_deref()
-        .map(|h| if h.len() > 8 { &h[..8] } else { h })
-        .unwrap_or("?");
-
-    eprintln!("═══════════════════════════════════════════════════════════════");
-    eprintln!("  zenbench comparison");
-    eprintln!("  baseline:  {} (git: {})", baseline.run_id, base_git);
-    eprintln!("  candidate: {} (git: {})", candidate.run_id, cand_git);
-    eprintln!("═══════════════════════════════════════════════════════════════");
-
-    // Compare comparison groups by name
-    for cand_group in &candidate.comparisons {
-        if let Some(base_group) = baseline
-            .comparisons
-            .iter()
-            .find(|g| g.group_name == cand_group.group_name)
-        {
-            print_cpu_evidence("baseline CPU", &base_group.cpu_placement);
-            print_cpu_evidence("candidate CPU", &cand_group.cpu_placement);
-            let is_single = cand_group.benchmarks.len() == 1
-                && cand_group.benchmarks[0].name == cand_group.group_name;
-
-            if !is_single {
-                eprintln!();
-                eprintln!("  group: {}", cand_group.group_name);
-                eprintln!("  ───────────────────────────────────────────────────────────");
-            }
-
-            for cand_bench in &cand_group.benchmarks {
-                if let Some(base_bench) = base_group
-                    .benchmarks
-                    .iter()
-                    .find(|b| b.name == cand_bench.name)
-                {
-                    print_bench_diff(
-                        &cand_bench.name,
-                        base_bench.summary.mean,
-                        cand_bench.summary.mean,
-                    );
-                } else {
-                    eprintln!(
-                        "    {:<30}  {:>10}  (new)",
-                        cand_bench.name,
-                        format_ns(cand_bench.summary.mean)
-                    );
-                }
-            }
-        }
+    print_cpu_evidence("baseline CPU", &baseline.cpu_placement);
+    print_cpu_evidence("candidate CPU", &candidate.cpu_placement);
+    let margin = candidate
+        .execution
+        .as_ref()
+        .map(|e| e.plan.margin_pct)
+        .unwrap_or(1.0);
+    if let Err(e) = baseline.check_cpu_compatibility(candidate) {
+        eprintln!("INVALID comparison: {e}");
+        std::process::exit(2);
     }
-
-    eprintln!();
-    eprintln!("═══════════════════════════════════════════════════════════════");
-    eprintln!();
-}
-
-/// Print a single benchmark comparison line with color.
-fn print_bench_diff(name: &str, base_mean: f64, cand_mean: f64) {
-    let pct = if base_mean.abs() > f64::EPSILON {
-        (cand_mean - base_mean) / base_mean * 100.0
-    } else {
-        0.0
-    };
-
-    let (arrow, reset) = if pct < -1.0 {
-        ("\x1b[32m", "\x1b[0m") // green = faster
-    } else if pct > 1.0 {
-        ("\x1b[31m", "\x1b[0m") // red = slower
-    } else {
-        ("", "") // no change
-    };
-
-    eprintln!(
-        "    {:<30}  {:>10} → {:>10}  {}{:+.2}%{}",
-        name,
-        format_ns(base_mean),
-        format_ns(cand_mean),
-        arrow,
-        pct,
-        reset,
-    );
+    let comparison = zenbench::baseline::compare_against_baseline(baseline, candidate, margin);
+    zenbench::baseline::print_comparison_report(&comparison);
 }
 
 fn cmd_clean(project: &Path, max_age_hours: u64) {

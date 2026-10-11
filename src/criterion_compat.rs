@@ -476,6 +476,11 @@ macro_rules! criterion_group {
 macro_rules! criterion_main {
     ($($group:path),+ $(,)?) => {
         fn main() {
+            if let Some((n, policy)) = $crate::parse_process_args() {
+                let result = $crate::run_processes(n, policy);
+                $crate::postprocess_result(&result);
+                return;
+            }
             let mut suite = $crate::Suite::new();
 
             let group_filter: Option<String> = std::env::args()
