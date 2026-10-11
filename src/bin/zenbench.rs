@@ -13,6 +13,25 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Launch in a verified process CPU boundary. Child processes inherit it.
+    Exec {
+        #[arg(long, default_value = "performance")]
+        cpu_policy: zenbench::platform::CpuPolicy,
+        /// Explicit IDs/ranges, for cache classes without a unique P/E ranking.
+        #[arg(long)]
+        cpu_set: Option<String>,
+        program: PathBuf,
+        #[arg(last = true)]
+        args: Vec<std::ffi::OsString>,
+    },
+    #[command(hide = true)]
+    CpuChild {
+        program: PathBuf,
+        #[arg(last = true)]
+        args: Vec<std::ffi::OsString>,
+    },
+    /// Show detected classes and the current process placement check as JSON.
+    CpuInfo,
     /// Run a benchmark as a background process.
     ///
     /// Spawns `cargo bench --bench <name>` in the background and tracks it.
@@ -183,6 +202,37 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Exec {
+            cpu_policy,
+            cpu_set,
+            program,
+            args,
+        } => cpu_exec(cpu_policy, cpu_set.as_deref(), &program, &args),
+        Commands::CpuChild { program, args } => {
+            let placement = zenbench::platform::check_cpu_placement().unwrap_or_else(|e| {
+                eprintln!("{e}");
+                std::process::exit(2);
+            });
+            if placement.status != zenbench::platform::PlacementStatus::EnforcedUniform {
+                eprintln!("launcher requires an enforced uniform process boundary");
+                std::process::exit(2);
+            }
+            eprintln!(
+                "[zenbench] verified before program launch: {}",
+                serde_json::to_string(&placement).unwrap()
+            );
+            let status = std::process::Command::new(&program)
+                .args(&args)
+                .status()
+                .unwrap_or_else(|e| {
+                    eprintln!("program launch failed: {e}");
+                    std::process::exit(2);
+                });
+            std::process::exit(status.code().unwrap_or(1));
+        }
+        Commands::CpuInfo => {
+            println!("{}", serde_json::to_string_pretty(&serde_json::json!({"topology": zenbench::platform::detect_cpu_topology(), "placement": zenbench::platform::check_cpu_placement()})).unwrap());
+        }
         Commands::Run {
             bench,
             project,
@@ -288,6 +338,86 @@ fn main() {
             },
         },
     }
+}
+
+fn cpu_exec(
+    policy: zenbench::platform::CpuPolicy,
+    explicit: Option<&str>,
+    program: &Path,
+    args: &[std::ffi::OsString],
+) {
+    use zenbench::platform::{CpuPolicy, detect_cpu_topology};
+    let topology = detect_cpu_topology();
+    let selected = if let Some(spec) = explicit {
+        // Reuse the harness's public policy check through a child; the parser
+        // below validates input before it is passed to systemd as one argument.
+        let mut cpus = std::collections::BTreeSet::new();
+        for part in spec.split(',') {
+            let (low, high) = part.split_once('-').unwrap_or((part, part));
+            let low = low.parse::<usize>();
+            let high = high.parse::<usize>();
+            match (low, high) {
+                (Ok(low), Ok(high)) if low <= high && high < 1024 => cpus.extend(low..=high),
+                _ => {
+                    eprintln!("invalid --cpu-set");
+                    std::process::exit(2);
+                }
+            }
+        }
+        cpus.into_iter().collect::<Vec<_>>()
+    } else {
+        topology.select(policy).unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(2);
+        })
+    };
+    if policy == CpuPolicy::Unrestricted || selected.is_empty() {
+        eprintln!("exec requires a nonempty uniform CPU set and a checked policy");
+        std::process::exit(2);
+    }
+    let set = selected
+        .iter()
+        .map(usize::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let executable = std::env::current_exe().unwrap();
+    #[cfg(target_os = "linux")]
+    let mut child = {
+        let already_enforced = zenbench::platform::check_cpu_placement().is_ok_and(|p| {
+            p.status == zenbench::platform::PlacementStatus::EnforcedUniform
+                && p.effective_cpus == selected
+        });
+        if already_enforced {
+            std::process::Command::new(&executable)
+        } else {
+            let mut child = std::process::Command::new("systemd-run");
+            child
+                .args([
+                    "--user",
+                    "--scope",
+                    "--quiet",
+                    &format!("--property=AllowedCPUs={set}"),
+                ])
+                .arg(&executable);
+            child
+        }
+    };
+    #[cfg(not(target_os = "linux"))]
+    let mut child = std::process::Command::new(&executable);
+    let status = child
+        .arg("cpu-child")
+        .arg(program)
+        .arg("--")
+        .args(args)
+        .env("ZENBENCH_CPU_POLICY", policy.to_string())
+        .env("ZENBENCH_CPU_SET", &set)
+        .env("RAYON_NUM_THREADS", selected.len().to_string())
+        .status()
+        .unwrap_or_else(|e| {
+            eprintln!("CPU scope launch failed: {e}");
+            std::process::exit(2);
+        });
+    std::process::exit(status.code().unwrap_or(1));
 }
 
 fn cmd_run(
@@ -829,7 +959,27 @@ fn format_ns(ns: f64) -> String {
 }
 
 /// Print a colored comparison between two suite results.
+fn print_cpu_evidence(label: &str, placement: &Option<zenbench::platform::CpuPlacement>) {
+    use zenbench::platform::PlacementStatus;
+    let status = match placement.as_ref().map(|p| p.status) {
+        Some(PlacementStatus::UniformHardware) => "uniform_hardware",
+        Some(PlacementStatus::EnforcedUniform) => "enforced_uniform",
+        Some(PlacementStatus::Unrestricted) => "UNVERIFIED_UNRESTRICTED",
+        _ => "LEGACY_UNKNOWN",
+    };
+    eprintln!(
+        "{label}: cpu_placement={status} evidence={}",
+        serde_json::to_string(placement).unwrap()
+    );
+}
+
 fn print_comparison(baseline: &zenbench::SuiteResult, candidate: &zenbench::SuiteResult) {
+    baseline
+        .check_cpu_compatibility(candidate)
+        .unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(2);
+        });
     let base_git = baseline
         .git_hash
         .as_deref()
@@ -854,6 +1004,8 @@ fn print_comparison(baseline: &zenbench::SuiteResult, candidate: &zenbench::Suit
             .iter()
             .find(|g| g.group_name == cand_group.group_name)
         {
+            print_cpu_evidence("baseline CPU", &base_group.cpu_placement);
+            print_cpu_evidence("candidate CPU", &cand_group.cpu_placement);
             let is_single = cand_group.benchmarks.len() == 1
                 && cand_group.benchmarks[0].name == cand_group.group_name;
 
