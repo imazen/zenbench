@@ -128,6 +128,10 @@ around `thread.run()` in a
 An existing pool is unaffected by group pinning; a global pool initialized during
 one group keeps its worker configuration for subsequent groups.
 
+For pools outside the harness's control, see the
+[process-level placement design](docs/process-affinity.md). Its launcher policy
+is proposed; the current API provides group and thread scopes.
+
 For a whole harness, set `ZENBENCH_PIN=2-7` or `ZENBENCH_PIN=0,2-4,7` before
 launching it. Ranges are inclusive, IDs are zero based, and the environment is
 parsed once per process. A group's explicit setting overrides the environment.
