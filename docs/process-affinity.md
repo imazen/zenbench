@@ -100,6 +100,14 @@ Windows x86/x64 uses safe CPUID queries and a restrictive
 [`SetProcessAffinityMask`](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-setprocessaffinitymask)
 mask. Explicit P/E or CPU-set selection applies to the process for its lifetime;
 it is not restored after a group. The mask is checked again outside timed rounds.
+Admission also assigns the process to an affinity-limited
+[Windows Job Object](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_basic_limit_information)
+using the published safe `win32job` API. The job remains alive for the process;
+its CPU boundary applies to existing threads and future child processes. A
+library's attempt to change the process mask cannot widen this job boundary.
+Windows may return success while retaining the restricted mask, so readback
+of the actual mask is the confinement oracle. Job creation/assignment failure
+aborts admission before calibration or callbacks.
 Multiple processor groups and Windows ARM class discovery are unsupported and
 fail closed by default. Start a fresh process to change classes; unavailable
 classes cannot be selected from a previously narrowed mask.
@@ -299,3 +307,10 @@ Measurement-order shuffles receive an independent seed per group and process.
 The retained execution-order vectors describe the realized schedule. Bootstrap
 resampling keeps a deterministic seed so analyzing the same observations remains
 repeatable.
+
+The `windows_job_boundary` integration fixture runs in isolated native Windows
+processes, including Windows ARM CI. It creates its Rayon and ordinary workers
+before installing the affinity job, attempts process/thread escape, and checks
+an inherited descendant process. This tests the OS boundary independently of
+CPU class discovery; Windows ARM P/E discovery remains unsupported and default
+benchmark admission still fails closed there.

@@ -5,6 +5,8 @@ use sysinfo::System;
 mod affinity;
 mod placement;
 mod probe;
+#[cfg(target_os = "windows")]
+mod windows_job;
 pub use affinity::{AffinityError, AffinityGuard, current_thread_affinity, pin_current_thread};
 pub(crate) use affinity::{GroupAffinityGuard, benchmark_affinity, configured_affinity};
 pub use affinity::{

@@ -211,3 +211,12 @@ in each group because the engine used a constant shuffle seed. A fresh-process
 regression failed with that seed and passed after each group received an
 independent RandomState seed. Bootstrap resampling stays deterministic; actual
 round permutations remain in results for inspection and replay.
+
+### Windows process-mask mutation (2026-10-11)
+
+A process-mask boundary can be widened by code that calls SetProcessAffinityMask;
+the native restoration controls exercise that behavior. Strict Windows admission
+now holds an affinity-limited Job Object for the process lifetime. The native Rust
+fixture checked existing Rayon/ordinary workers and an inherited child process.
+Windows can return success for a widen request while preserving the job mask;
+an unchanged actual mask is the confinement evidence.

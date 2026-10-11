@@ -191,7 +191,8 @@ pub struct CpuPlacement {
     pub thread_affinity_requested: Option<Vec<usize>>,
     /// Coordinator's observed mask; opaque external workers are not queried.
     pub thread_affinity_effective: Option<Vec<usize>>,
-    /// "cpuset", "process_mask", or "none". A thread mask is never enforcement.
+    /// "cpuset", "job_affinity", "process_mask", or "none".
+    /// A thread mask is never enforcement.
     pub enforcement: String,
 }
 
@@ -641,7 +642,16 @@ fn boundary() -> Result<(Vec<usize>, &'static str), String> {
     #[cfg(target_os = "windows")]
     {
         return affinity::get_process_affinity()
-            .map(|cpus| (cpus, "process_mask"))
+            .map(|cpus| {
+                (
+                    cpus,
+                    if super::windows_job::installed() {
+                        "job_affinity"
+                    } else {
+                        "process_mask"
+                    },
+                )
+            })
             .map_err(|e| e.to_string());
     }
     #[allow(unreachable_code)]
@@ -770,10 +780,13 @@ impl CpuSession {
                 {
                     return Err("process CPU placement is fixed for its lifetime; launch a fresh process to change classes".into());
                 }
-                affinity::set_process_affinity(&selected).map_err(|e| e.to_string())?;
+                if !super::windows_job::installed() {
+                    affinity::set_process_affinity(&selected).map_err(|e| e.to_string())?;
+                }
             }
         }
-        let placement = resolve(topology, policy, cpus, boundary())?;
+        #[allow(unused_mut)]
+        let mut placement = resolve(topology, policy, cpus, boundary())?;
         #[cfg(target_os = "windows")]
         if placement.status == PlacementStatus::EnforcedUniform {
             if process_cpus
@@ -782,6 +795,14 @@ impl CpuSession {
             {
                 return Err("process CPU boundary changed since first admission".into());
             }
+            super::windows_job::install(&placement.effective_cpus)?;
+            let (actual, enforcement) = boundary()?;
+            if actual != placement.effective_cpus {
+                return Err(
+                    "CPU affinity job did not preserve the requested process boundary".into(),
+                );
+            }
+            placement.enforcement = enforcement.into();
             *process_cpus = Some(placement.effective_cpus.clone());
         }
         Ok(Self { placement })
