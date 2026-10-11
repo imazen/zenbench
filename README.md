@@ -119,6 +119,15 @@ parallel/contention workers. It restores the calling thread's prior affinity whe
 the group ends, including panic unwinding. Existing external thread pools retain
 their own affinity; configure those pools separately.
 
+Rayon parallel iterators use Rayon's current pool. Configure that pool's worker
+affinity and thread count explicitly, and execute the benchmark through
+[`ThreadPool::install`](https://docs.rs/rayon/latest/rayon/struct.ThreadPool.html#method.install).
+Hold each worker's `AffinityGuard` for its entire worker lifetime, for example
+around `thread.run()` in a
+[`spawn_handler`](https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html#method.spawn_handler).
+An existing pool is unaffected by group pinning; a global pool initialized during
+one group keeps its worker configuration for subsequent groups.
+
 For a whole harness, set `ZENBENCH_PIN=2-7` or `ZENBENCH_PIN=0,2-4,7` before
 launching it. Ranges are inclusive, IDs are zero based, and the environment is
 parsed once per process. A group's explicit setting overrides the environment.
