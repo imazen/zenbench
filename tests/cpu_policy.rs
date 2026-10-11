@@ -8,6 +8,16 @@ use std::time::Duration;
 use zenbench::platform::{CpuPolicy, PlacementStatus, check_cpu_placement};
 use zenbench::{GateConfig, run_gated};
 
+fn child_command(executable: impl AsRef<std::ffi::OsStr>) -> Command {
+    if let Some(runner) = std::env::var_os("ZENBENCH_AFFINITY_TEST_RUNNER") {
+        let mut child = Command::new(runner);
+        child.arg(executable);
+        child
+    } else {
+        Command::new(executable)
+    }
+}
+
 #[test]
 fn process_policy() {
     if let Ok(mode) = std::env::var("ZENBENCH_CPU_TEST_MODE") {
@@ -78,14 +88,7 @@ fn process_policy() {
             ("suite_override", None),
         ] {
             let executable = std::env::current_exe().unwrap();
-            let mut child = if let Some(runner) = std::env::var_os("ZENBENCH_AFFINITY_TEST_RUNNER")
-            {
-                let mut command = Command::new(runner);
-                command.arg(executable);
-                command
-            } else {
-                Command::new(executable)
-            };
+            let mut child = child_command(executable);
             child
                 .args(["--exact", "process_policy", "--nocapture"])
                 .env("ZENBENCH_CPU_TEST_MODE", mode)
@@ -151,7 +154,7 @@ fn suite_affinity_is_inherited_and_groups_can_override() {
 #[cfg(feature = "cli")]
 #[test]
 fn launcher_helper_cannot_certify_an_opt_out() {
-    let output = Command::new(env!("CARGO_BIN_EXE_zenbench"))
+    let output = child_command(env!("CARGO_BIN_EXE_zenbench"))
         .args(["cpu-child", "this-program-must-never-be-launched"])
         .env("ZENBENCH_CPU_POLICY", "unrestricted")
         .env_remove("ZENBENCH_CPU_SET")

@@ -211,3 +211,10 @@ cpu-policy-cli-check:
 cpu-policy-chart-check:
     cargo clippy --all-targets --features criterion-compat,charts -- -D warnings
     cargo test --lib --features charts charts::tests
+
+cpu-policy-subprocess-check:
+    cargo clippy --test cpu_policy -- -D warnings
+    ZENBENCH_AFFINITY_TEST_RUNNER=/usr/bin/env ZENBENCH_NO_SAVE=1 ZENBENCH_NO_CALIBRATE=1 cargo test --test cpu_policy
+
+cpu-policy-arm-check:
+    ZENBENCH_CPU_POLICY=unrestricted cross test --target armv7-unknown-linux-gnueabihf --no-default-features --features cli --test cpu_policy
