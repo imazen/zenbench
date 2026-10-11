@@ -748,8 +748,12 @@ pub fn parse_pass_args() -> Option<(usize, Aggregation)> {
 #[doc(hidden)]
 pub fn parse_process_args() -> Option<(usize, Aggregation)> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        print!("{}", include_str!("bench-help.txt"));
+        std::process::exit(0);
+    }
     plan::validate_harness_args(&args).unwrap_or_else(|e| {
-        eprintln!("[zenbench] {e}");
+        eprintln!("[zenbench] {e}; use --help for benchmark options and workflows");
         std::process::exit(2);
     });
     // Recursion guard: children spawned by run_processes set this.

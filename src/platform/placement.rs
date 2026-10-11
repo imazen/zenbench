@@ -702,7 +702,7 @@ fn resolve(
         });
     }
     let class = topology.class_for(&effective).ok_or_else(|| format!(
-        "CPU placement refused: {:?} topology; the process is not confined to one known class. Classes: {}. Launch with `zenbench exec --cpu-policy performance PROGRAM -- ARGS`, or supply an enabled cpuset/process mask and --cpu-set=IDs. A group affinity mask and ZENBENCH_PIN are insufficient. Explicit opt-out: --cpu-policy=unrestricted (results marked UNVERIFIED_UNRESTRICTED).",
+        "CPU placement refused: {:?} topology; the process is not confined to one known class. Classes: {}. Launch with `zenbench exec --cpu-policy performance PROGRAM -- ARGS`, or supply an enabled cpuset/process mask and --cpu-set=IDs. A group affinity mask and ZENBENCH_PIN are insufficient. Inspect `zenbench cpu-info` and `zenbench exec --help`. Exploratory opt-out: --cpu-policy=unrestricted (UNVERIFIED_UNRESTRICTED; cannot confirm or promote baselines).",
         topology.kind, format_args!("{}; process boundary {effective:?}; {}", topology.classes.iter().map(|c| format!("{}={:?}", c.name, c.cpus)).collect::<Vec<_>>().join("; "), boundary_error.unwrap_or_default())))?;
     if let Some(cpus) = requested {
         if effective != cpus {

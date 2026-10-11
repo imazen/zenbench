@@ -414,3 +414,12 @@ review-check *test_args="--lib":
     ZENBENCH_CPU_POLICY=unrestricted ZENBENCH_NO_SAVE=1 cargo test --all-features {{test_args}}
     cargo clippy --all-targets --all-features -- -D warnings
     just api-doc
+
+# Both main! forms must display help before touching invalid plan/CPU settings.
+workflow-check:
+    cargo fmt -p zenbench -- --check
+    cargo test --test cli_evidence
+    ZENBENCH_MODE=invalid ZENBENCH_CPU_POLICY=invalid cargo test --bench sorting -- --help
+    ZENBENCH_MODE=invalid ZENBENCH_CPU_POLICY=invalid cargo test --bench standalone_only -- -h
+    cargo clippy --all-targets --all-features -- -D warnings
+    just api-doc-check

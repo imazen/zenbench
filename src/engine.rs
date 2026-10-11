@@ -91,7 +91,7 @@ impl Engine {
     /// Run all benchmarks and return results.
     pub fn run(mut self) -> SuiteResult {
         let plan = self.suite.plan.clone().resolve().unwrap_or_else(|e| {
-            eprintln!("[zenbench] invalid benchmark plan: {e}");
+            eprintln!("[zenbench] invalid benchmark plan: {e}; use --help or zenbench guide");
             std::process::exit(2);
         });
         let dry_run = std::env::args().any(|a| a == "--dry-run");

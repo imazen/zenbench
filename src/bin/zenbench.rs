@@ -5,7 +5,16 @@ use std::path::{Path, PathBuf};
 use zenbench::daemon;
 
 #[derive(Parser)]
-#[command(name = "zenbench", about = "Interleaved microbenchmarking harness")]
+#[command(
+    name = "zenbench",
+    about = "Interleaved microbenchmarking harness",
+    after_help = "Start here: zenbench guide
+Quick edit loop: cargo bench --bench NAME -- --group=GROUP
+Before accepting a change: freeze inputs, then use --mode=confirm --workload-id=ID.
+Inspect asymmetric CPUs: zenbench cpu-info; choose a verified boundary with exec.
+Benchmark-binary options: cargo bench --bench NAME -- --help
+Iterate exit 0 means execution succeeded, not a confirmed performance result."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -13,6 +22,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Show workflows, CPU setup, exit meanings, provenance and profiling limits.
+    Guide,
     /// Read saved JSON, gzip JSON, or an evidence reference without running benchmarks.
     Read {
         input: PathBuf,
@@ -20,6 +31,14 @@ enum Commands {
         format: String,
     },
     /// Launch in a verified process CPU boundary. Child processes inherit it.
+    #[command(
+        after_help = "First run zenbench cpu-info. IDs must belong to one detected core/cache class.
+Linux needs a delegated cpuset controller or an existing matching hard cpuset.
+Windows uses an inherited Job boundary on supported topology. macOS class binding
+and Windows ARM/multiple-group classification are unsupported. Thread hints are
+insufficient for existing Rayon pools. Unrestricted permits exploration only.
+Example: zenbench exec --cpu-policy performance cargo -- bench --bench kernels -- --mode=iterate"
+    )]
     Exec {
         #[arg(long, default_value = "performance")]
         cpu_policy: zenbench::platform::CpuPolicy,
@@ -37,6 +56,12 @@ enum Commands {
         args: Vec<std::ffi::OsString>,
     },
     /// Show detected classes and the current process placement check as JSON.
+    #[command(
+        after_help = "Choose a class before launching libraries or external pools; see zenbench exec --help.
+For unequal cache capacities, choose explicit IDs from this output; do not assume
+which cache class is faster. Run classes separately and keep results separate.
+--probe measures newly created workers; it does not certify existing pools or clocks."
+    )]
     CpuInfo {
         /// Exercise new diagnostic workers; this does not certify CPU placement.
         #[arg(long)]
@@ -49,6 +74,13 @@ enum Commands {
     ///
     /// Spawns `cargo bench --bench <name>` in the background and tracks it.
     /// Use --wait to block until the benchmark completes.
+    #[command(
+        after_help = "For an exploratory background run: zenbench run kernels --cargo-args=\"-- --group=filter\"
+Track it with list/status/results. Use direct cargo bench or a retained executable
+for confirmation exit codes. This wrapper does not preserve the 0/1/2 decision
+contract; --wait's timeout does not bound the initial Cargo child wait.
+See zenbench guide for confirmation and evidence storage."
+    )]
     Run {
         /// Benchmark target name (as in `cargo bench --bench <name>`).
         bench: String,
@@ -169,7 +201,14 @@ enum Commands {
         output: PathBuf,
     },
 
-    /// Compare two result files.
+    /// Compare retained baseline and candidate evidence (does not execute code).
+    #[command(
+        after_help = "Inputs: JSON, gzip JSON, or evidence references; CSV snapshots are summaries only.
+Exit 0: every case confirms non-inferiority; 1: confirmed regression; 2: invalid
+or inconclusive (including exploratory results). Read exploratory data with read.
+Freeze workload, case inventory, sampling plan and CPU placement before measuring.
+Use zenbench guide for source-edit and retained-binary workflows."
+    )]
     Compare {
         /// Baseline result file.
         baseline: PathBuf,
@@ -178,11 +217,18 @@ enum Commands {
         candidate: PathBuf,
     },
 
-    /// Compare current code against a previous git version.
+    /// Explore a source edit against a Git ref (builds and runs both versions).
     ///
     /// Builds and runs the specified benchmark at both the old and current
-    /// commits, then prints a comparison. Requires the benchmark to use
+    /// ref and current working tree, including local edits. Requires the benchmark to use
     /// zenbench::main!() so results can be captured via ZENBENCH_RESULT_PATH.
+    #[command(
+        after_help = r#"Example: zenbench self-compare --bench kernels --ref HEAD~1 --cargo-args="-- --group=filter"
+The candidate includes uncommitted changes. Runtime Git HEAD is not build identity.
+Runs the baseline then candidate; no randomized two-binary A/B scheduling.
+Default exploratory results return 2 from comparison, never a confirmed pass.
+Retained executables can be run separately and their packets compared: zenbench guide."#
+    )]
     SelfCompare {
         /// Benchmark target name (as in `cargo bench --bench <name>`).
         #[arg(long)]
@@ -238,6 +284,7 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Guide => print!("{}", include_str!("../workflow-help.txt")),
         Commands::Exec {
             cpu_policy,
             cpu_set,
@@ -391,7 +438,9 @@ fn main() {
             BaselineAction::List => {
                 let names = zenbench::baseline::list_baselines();
                 if names.is_empty() {
-                    println!("No baselines saved. Use: cargo bench -- --save-baseline=<name>");
+                    println!(
+                        "No baselines saved. Choose verified CPU placement, then use: cargo bench --bench NAME -- --mode=confirm --workload-id=ID --save-baseline=NAME\nRun zenbench guide for the complete workflow."
+                    );
                 } else {
                     for name in &names {
                         let path = format!(".zenbench/baselines/{name}.json");
@@ -879,6 +928,12 @@ fn cmd_self_compare(bench_name: &str, git_ref: Option<&str>, cargo_args: Option<
         std::process::exit(1);
     }
 
+    eprintln!(
+        "[zenbench] exploratory source comparison: baseline runs before candidate; no randomized A/B schedule"
+    );
+    eprintln!(
+        "[zenbench] candidate uses the current working tree, including local edits; runtime Git HEAD is not build provenance"
+    );
     let current_hash = zenbench::platform::git_short_hash().unwrap_or_else(|| "HEAD".to_string());
     eprintln!("[zenbench] self-compare: {reference} (baseline) vs {current_hash} (candidate)");
 

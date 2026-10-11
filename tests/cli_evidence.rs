@@ -13,6 +13,58 @@ fn cli() -> Command {
 }
 
 #[test]
+fn first_use_help_explains_workflows_without_requiring_a_valid_machine_plan() {
+    for (args, required) in [
+        (
+            vec!["run", "--help"],
+            vec!["does not preserve", "initial Cargo child wait"],
+        ),
+        (vec!["--help"], vec!["zenbench guide", "Iterate exit 0"]),
+        (
+            vec!["guide"],
+            vec![
+                "KEEP TWO BUILDS",
+                "clean/dirty",
+                "PROFILE WHY",
+                "INCONCLUSIVE",
+            ],
+        ),
+        (
+            vec!["exec", "--help"],
+            vec!["cpuset", "Rayon", "exploration only"],
+        ),
+        (
+            vec!["cpu-info", "--help"],
+            vec!["cache", "does not certify"],
+        ),
+        (
+            vec!["compare", "--help"],
+            vec!["Exit 0", "exploratory", "CSV"],
+        ),
+        (
+            vec!["self-compare", "--help"],
+            vec!["uncommitted", "return 2", "A/B"],
+        ),
+    ] {
+        let output = cli()
+            .args(&args)
+            .env("ZENBENCH_MODE", "deliberately-invalid")
+            .env("ZENBENCH_CPU_POLICY", "deliberately-invalid")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{args:?}: {output:?}");
+        let text = std::str::from_utf8(&output.stdout).unwrap();
+        for guidance in required {
+            assert!(
+                text.contains(guidance),
+                "{args:?} missing {guidance:?}: {text}"
+            );
+        }
+        assert!(output.stderr.is_empty(), "{output:?}");
+    }
+}
+
+#[test]
 fn missing_comparison_artifacts_cannot_report_success() {
     let missing = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("target")
