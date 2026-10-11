@@ -13,6 +13,7 @@
      Add items here as you discover them. Do NOT ship these piecemeal — batch them. -->
 
 ### Added
+- Native Windows fresh-process repeatability controls for integer/cache/Rayon workloads, identical work, known work increments, independent QPC batches, and resource-limit readback (fc757037).
 - Native Windows process-mask oracle with preexisting managed thread/pool negative controls, verified worker/process restoration, and separate real hybrid P/E observations.
 - Repeatable SSH transport for the native Windows topology oracle using existing credentials, optional relay/jump hosts, and trusted host pins.
 - Read-only PowerShell native Windows core/cache/group topology oracle, executed by Windows x64/ARM CI; it does not change affinity or supply the Rust backend's missing ARM topology.
@@ -31,6 +32,7 @@
 ## [0.1.10] - 2026-10-06
 
 ### Fixed
+- Measurement schedules now receive independent seeds across groups and fresh processes; recorded round orders preserve the realized schedule (b40ac4a3).
 
 - Preserve global CPU-load checks when no worker PID inventory is supplied.
 

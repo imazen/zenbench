@@ -107,10 +107,22 @@ def main():
     parser.add_argument('log', type=Path)
     parser.add_argument('output', type=Path)
     parser.add_argument('--topology', type=Path, help='Independent native Windows SDK inventory')
+    parser.add_argument('--independent-orders', action='store_true',
+                        help='Require a distinct schedule for every successful process/group')
     args = parser.parse_args()
     packet = next(json.loads(line) for line in args.log.read_text().splitlines()
                   if line.startswith('{'))
     result = analyze(packet)
+    if args.independent_orders:
+        schedules = {}
+        for run in packet['runs']:
+            if run['exit_code'] != 0:
+                continue
+            for comparison in run['evidence']['result']['comparisons']:
+                order = tuple(tuple(r['execution_order']) for r in comparison['samples'])
+                schedules.setdefault(comparison['group_name'], []).append(order)
+        for workload, orders in schedules.items():
+            assert len(orders) == len(set(orders)), f'Repeated execution schedule: {workload}'
     if args.topology:
         topology = json.loads(args.topology.read_text())
         core_records = topology['core_records']

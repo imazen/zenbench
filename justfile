@@ -287,3 +287,6 @@ windows-repeatability-analyze log output *options:
 
 execution-order-check:
     cargo test --test cpu_policy fresh_processes_use_independent_execution_orders -- --exact --nocapture
+
+windows-repeatability-archive log label commit *options:
+    python3 -B examples/archive_windows_repeatability.py {{log}} {{label}} {{commit}} {{options}}
