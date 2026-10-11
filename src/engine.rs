@@ -156,8 +156,8 @@ impl Engine {
         };
         let start = Instant::now();
 
-        // Auto-save: write results under the target dir so LLMs/tools can re-read
-        // without re-running. Opt out with ZENBENCH_NO_SAVE=1.
+        // Durable compressed checkpoints are ignored by Git. Explicit snapshots
+        // are the small, selected version-control export.
         let save_path = if std::env::var("ZENBENCH_NO_SAVE").is_ok() {
             None
         } else {
@@ -165,11 +165,14 @@ impl Engine {
         };
         if let Some(path) = &save_path {
             eprintln!("[zenbench] results → {}", path.display());
-            // Write incomplete marker so killed runs are detectable
-            let _ = std::fs::write(
-                path,
-                "# zenbench results (INCOMPLETE — benchmark still running)\n",
-            );
+            let pending = SuiteResult {
+                run_id: run_id.clone(),
+                incomplete: true,
+                ..Default::default()
+            };
+            pending
+                .save(path)
+                .unwrap_or_else(|e| panic!("cannot retain benchmark attempt: {e}"));
         }
 
         // Acquire cross-process exclusive lock if configured. The lock
@@ -299,7 +302,7 @@ impl Engine {
                 }
             }
 
-            // Stream: append completed group's LLM lines to the save file
+            // Checkpoint completed groups, including all raw rounds.
             if let Some(path) = &save_path {
                 let partial = SuiteResult {
                     run_id: run_id.clone(),
@@ -307,6 +310,7 @@ impl Engine {
                     git_hash: git_hash.clone(),
                     ci_environment: ci.clone(),
                     comparisons: comparisons.clone(),
+                    incomplete: true,
                     total_time: start.elapsed(),
                     unreliable: any_unreliable,
                     gate_waits: total_gate_waits,
@@ -318,11 +322,9 @@ impl Engine {
                     cpu_placement: Some(cpu_session.placement.clone()),
                     ..Default::default()
                 };
-                let n_groups = comparisons.len();
-                let mut content =
-                    format!("# zenbench results (INCOMPLETE — {n_groups} groups done so far)\n",);
-                content.push_str(&partial.to_llm());
-                let _ = std::fs::write(path, &content);
+                partial
+                    .save(path)
+                    .unwrap_or_else(|e| panic!("cannot checkpoint benchmark attempt: {e}"));
             }
         }
 
@@ -348,25 +350,12 @@ impl Engine {
             ..Default::default()
         };
 
-        // Write final complete results
+        // Publish the immutable packet before removing our transient checkpoint.
         if let Some(path) = &save_path {
-            let mut content = String::new();
-            content.push_str("# zenbench results (complete)\n");
-            content.push_str(&format!(
-                "# git: {}\n",
-                result.git_hash.as_deref().unwrap_or("unknown")
-            ));
-            content.push_str(&format!("# {}\n", result.timestamp));
-            content.push_str("#\n");
-            content.push_str("# Re-read this file instead of re-running the benchmark.\n");
-            content.push_str("# Formats:  cargo bench -- --format=llm|csv|md|json\n");
-            content.push_str("# Env var:  ZENBENCH_FORMAT=llm cargo bench\n");
-            content.push_str("# Disable:  ZENBENCH_NO_SAVE=1 cargo bench\n");
-            content.push_str("#\n");
-            content.push_str("# Fields: group | benchmark | vs_base comparison | min mean median mad | throughput | n cv rounds calls\n");
-            content.push_str("#\n");
-            content.push_str(&result.to_llm());
-            let _ = std::fs::write(path, &content);
+            let reference = crate::storage::persist(&result)
+                .unwrap_or_else(|e| panic!("cannot persist benchmark evidence: {e}"));
+            eprintln!("[zenbench] evidence → {}", reference.display());
+            std::fs::remove_file(path).unwrap_or_else(|e| panic!("cannot retire checkpoint: {e}"));
         }
 
         // Print footer (groups were already printed as they completed)
@@ -922,12 +911,13 @@ fn run_comparison_group(
 }
 
 /// Path for auto-saving results: `<target>/zenbench/results/zenbench-<run_id>.txt`
-/// (see [`crate::paths::target_zenbench_dir`]). The run_id carries PID + time,
-/// so names are unique without filesystem round-trips.
+/// Checkpoints stay outside disposable Cargo build output.
 fn auto_save_path(run_id: &RunId) -> std::path::PathBuf {
-    let dir = crate::paths::target_zenbench_dir().join("results");
-    let _ = std::fs::create_dir_all(&dir);
-    dir.join(format!("zenbench-{}.txt", run_id))
+    let dir = crate::storage::prepare_dir()
+        .expect("cannot prepare benchmark data directory")
+        .join("attempts");
+    std::fs::create_dir_all(&dir).expect("cannot create benchmark attempts directory");
+    dir.join(format!("{run_id}.json.gz"))
 }
 
 /// Compute streaming mean and stddev of per-iteration times.

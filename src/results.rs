@@ -11,13 +11,15 @@ pub struct RunId(pub String);
 
 impl RunId {
     pub fn generate() -> Self {
-        // Timestamp-based ID with random suffix
+        use std::hash::{BuildHasher, Hasher};
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default();
-        // Use process ID for uniqueness within the same second
         let pid = std::process::id();
-        RunId(format!("{}-{:x}", now.as_secs(), pid))
+        let random = std::collections::hash_map::RandomState::new()
+            .build_hasher()
+            .finish();
+        RunId(format!("{:x}-{pid:x}-{random:016x}", now.as_nanos()))
     }
 }
 
@@ -198,6 +200,9 @@ pub struct SuiteResult {
     #[serde(with = "duration_serde")]
     pub gate_wait_time: Duration,
     pub unreliable: bool,
+    /// A checkpoint from an interrupted/running attempt, never completed evidence.
+    #[serde(default)]
+    pub incomplete: bool,
     /// Timer resolution in nanoseconds (measured at startup).
     #[serde(default)]
     pub timer_resolution_ns: u64,
@@ -232,6 +237,7 @@ impl Default for SuiteResult {
             gate_waits: 0,
             gate_wait_time: Duration::ZERO,
             unreliable: false,
+            incomplete: false,
             timer_resolution_ns: 0,
             loop_overhead_ns: 0.0,
             testbed: None,
@@ -281,16 +287,64 @@ impl SuiteResult {
             .map(|placement| placement.llm())
             .unwrap_or_else(|| "cpu_placement=LEGACY_UNKNOWN cpu_class_uniform=unknown cpu_enforcement=unknown pool_thread_count=unknown".into())
     }
-    /// Save results to a JSON file.
+    /// Atomically save compact JSON, compressed when the filename ends in `.gz`.
     pub fn save(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
-        let json = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
-        std::fs::write(path, json)
+        crate::storage::save(self, path.as_ref())
     }
 
-    /// Load results from a JSON file.
+    /// Load JSON, gzip JSON, or an immutable evidence reference.
     pub fn load(path: impl AsRef<Path>) -> std::io::Result<Self> {
-        let json = std::fs::read_to_string(path)?;
-        serde_json::from_str(&json).map_err(std::io::Error::other)
+        crate::storage::load(path.as_ref())
+    }
+
+    /// Stable CSV summary for an explicitly selected version-control snapshot.
+    /// Raw rounds and replicate packets are retained in evidence storage instead.
+    /// Values are descriptive; this export does not establish confirmation.
+    pub fn to_snapshot(&self) -> String {
+        let mut rows = self
+            .comparisons
+            .iter()
+            .flat_map(|group| group.benchmarks.iter().map(move |bench| (group, bench)))
+            .collect::<Vec<_>>();
+        rows.sort_by(|(ga, ba), (gb, bb)| {
+            (&ga.group_name, &ba.name).cmp(&(&gb.group_name, &bb.name))
+        });
+        let mut out = String::from("group,benchmark,mean_ns,mad_ns,n,scope,unreliable\n");
+        for (group, bench) in rows {
+            use std::fmt::Write;
+            let scope = if self.replicates.is_empty() {
+                "within_process"
+            } else {
+                "aggregate"
+            };
+            let _ = writeln!(
+                out,
+                "{},{},{},{},{},{},{}",
+                csv_escape(&group.group_name),
+                csv_escape(&bench.name),
+                bench.summary.mean,
+                bench.summary.mad,
+                bench.summary.n,
+                scope,
+                self.unreliable
+            );
+        }
+        out
+    }
+
+    /// Export a selected snapshot with an evidence hash, retaining its raw packet
+    /// in the ignored data directory first. Incomplete attempts are refused.
+    pub fn save_snapshot(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
+        if self.incomplete {
+            return Err(std::io::Error::other("cannot export an incomplete attempt"));
+        }
+        crate::storage::persist(self)?;
+        let hash = crate::storage::evidence_digest(self)?;
+        let text = format!(
+            "# zenbench-snapshot-v1 evidence_sha256={hash}\n{}",
+            self.to_snapshot()
+        );
+        crate::storage::atomic_write(path.as_ref(), text.as_bytes())
     }
 
     /// Print a human-readable report to stderr (with ANSI colors).

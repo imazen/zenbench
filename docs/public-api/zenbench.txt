@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenbench.txt 679 lines (supported surface) | zenbench.features.txt 94 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,precise-timing,wasm) | zenbench.internal.txt 26 lines (26 hidden + 0 excluded-feature)
+# files: zenbench.txt 685 lines (supported surface) | zenbench.features.txt 94 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,precise-timing,wasm) | zenbench.internal.txt 26 lines (26 hidden + 0 excluded-feature)
 
 ## summary
 #
@@ -15,25 +15,25 @@
 #   pub consts/statics                          2
 #   pub macros                                  1
 #   free functions                             44
-#   inherent methods                          185
-#   struct fields                             298
+#   inherent methods                          189
+#   struct fields                             300
 #   enum variants                              37
 #   trait roster entries (type × trait)       188
 #   auto-trait-complete types                  41
 #   auto-trait exceptions                       8
 #
 # per-module pub lines:
-#   (root)                          326
+#   (root)                          331
 #   baseline                         23
 #   calibration                       5
 #   daemon                           30
 #   exclusive                        32
 #   mcp                               1
 #   platform                        106
-#   prelude                          83
+#   prelude                          84
 #   quickchart                       30
 
-## items (624 lines)
+## items (630 lines)
 
 pub mod zenbench
 pub mod baseline
@@ -352,6 +352,7 @@ pub prelude::SuiteResult::cpu_placement: core::option::Option<platform::CpuPlace
 pub prelude::SuiteResult::gate_wait_time: core::time::Duration
 pub prelude::SuiteResult::gate_waits: usize
 pub prelude::SuiteResult::git_hash: core::option::Option<alloc::string::String>
+pub prelude::SuiteResult::incomplete: bool
 pub prelude::SuiteResult::loop_overhead_ns: f64
 pub prelude::SuiteResult::replicates: alloc::vec::Vec<SuiteResult>
 pub prelude::SuiteResult::run_id: RunId
@@ -367,10 +368,12 @@ pub fn SuiteResult::load(impl core::convert::AsRef<std::path::Path>) -> core::io
 pub fn SuiteResult::print_report(&self)
 pub fn SuiteResult::save(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
 pub fn SuiteResult::save_charts(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
+pub fn SuiteResult::save_snapshot(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
 pub fn SuiteResult::to_csv(&self) -> alloc::string::String
 pub fn SuiteResult::to_html(&self) -> alloc::string::String
 pub fn SuiteResult::to_llm(&self) -> alloc::string::String
 pub fn SuiteResult::to_markdown(&self) -> alloc::string::String
+pub fn SuiteResult::to_snapshot(&self) -> alloc::string::String
 pub fn SuiteResult::to_quickchart_markdown(&self, &quickchart::QuickChartConfig) -> alloc::string::String
 pub fn SuiteResult::to_quickchart_urls(&self, &quickchart::QuickChartConfig) -> alloc::vec::Vec<quickchart::QuickChartUrl>
 pub prelude::Summary::mad: f64
@@ -610,6 +613,7 @@ pub SuiteResult::cpu_placement: core::option::Option<platform::CpuPlacement>
 pub SuiteResult::gate_wait_time: core::time::Duration
 pub SuiteResult::gate_waits: usize
 pub SuiteResult::git_hash: core::option::Option<alloc::string::String>
+pub SuiteResult::incomplete: bool
 pub SuiteResult::loop_overhead_ns: f64
 pub SuiteResult::replicates: alloc::vec::Vec<SuiteResult>
 pub SuiteResult::run_id: RunId
@@ -625,10 +629,12 @@ pub fn SuiteResult::load(impl core::convert::AsRef<std::path::Path>) -> core::io
 pub fn SuiteResult::print_report(&self)
 pub fn SuiteResult::save(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
 pub fn SuiteResult::save_charts(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
+pub fn SuiteResult::save_snapshot(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
 pub fn SuiteResult::to_csv(&self) -> alloc::string::String
 pub fn SuiteResult::to_html(&self) -> alloc::string::String
 pub fn SuiteResult::to_llm(&self) -> alloc::string::String
 pub fn SuiteResult::to_markdown(&self) -> alloc::string::String
+pub fn SuiteResult::to_snapshot(&self) -> alloc::string::String
 pub fn SuiteResult::to_quickchart_markdown(&self, &quickchart::QuickChartConfig) -> alloc::string::String
 pub fn SuiteResult::to_quickchart_urls(&self, &quickchart::QuickChartConfig) -> alloc::vec::Vec<quickchart::QuickChartUrl>
 #[non_exhaustive] pub struct Summary [also: prelude]

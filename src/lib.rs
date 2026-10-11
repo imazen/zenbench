@@ -43,6 +43,7 @@ pub mod quickchart;
 mod report;
 mod results;
 mod stats;
+mod storage;
 #[cfg(feature = "precise-timing")]
 mod timing;
 #[cfg(feature = "wasm")]
@@ -143,6 +144,7 @@ pub fn postprocess_result(result: &SuiteResult) {
     if let Some(path) = daemon::result_path_from_env() {
         if let Err(e) = result.save(&path) {
             eprintln!("[zenbench] error saving results: {e}");
+            std::process::exit(2);
         }
     }
 }
@@ -797,10 +799,13 @@ pub fn run_processes(processes: usize, policy: Aggregation) -> SuiteResult {
     };
 
     // Exchange files live under <target>/zenbench/proc, not the temp dir.
-    let proc_dir = paths::target_zenbench_dir().join("proc");
-    let _ = std::fs::create_dir_all(&proc_dir);
+    let proc_dir = storage::prepare_dir()
+        .expect("cannot prepare process evidence")
+        .join("processes")
+        .join(&run_id);
+    std::fs::create_dir_all(&proc_dir).expect("cannot create process evidence directory");
     let temp_paths: Vec<std::path::PathBuf> = (0..processes)
-        .map(|i| proc_dir.join(format!("zenbench-proc-{run_id}-{i}.json")))
+        .map(|i| proc_dir.join(format!("{i}.json.gz")))
         .collect();
 
     let mut results: Vec<SuiteResult> = Vec::with_capacity(processes);
@@ -820,12 +825,10 @@ pub fn run_processes(processes: usize, policy: Aggregation) -> SuiteResult {
             Ok(s) if s.success() => {}
             Ok(s) => {
                 eprintln!("[zenbench] process {} exited with {s}", i + 1);
-                cleanup_temp(&temp_paths);
                 std::process::exit(1);
             }
             Err(e) => {
                 eprintln!("[zenbench] failed to spawn process {}: {e}", i + 1);
-                cleanup_temp(&temp_paths);
                 std::process::exit(1);
             }
         }
@@ -834,15 +837,14 @@ pub fn run_processes(processes: usize, policy: Aggregation) -> SuiteResult {
             Ok(r) => results.push(r),
             Err(e) => {
                 eprintln!("[zenbench] process {} produced no results: {e}", i + 1);
-                cleanup_temp(&temp_paths);
                 std::process::exit(1);
             }
         }
     }
 
-    cleanup_temp(&temp_paths);
-
     let aggregated = aggregate_results(results, policy);
+    let reference = storage::persist(&aggregated).expect("cannot persist aggregate evidence");
+    eprintln!("[zenbench] aggregate evidence → {}", reference.display());
 
     // Print the aggregated report.
     report::print_header(
@@ -867,12 +869,6 @@ pub fn run_processes(processes: usize, policy: Aggregation) -> SuiteResult {
     );
 
     aggregated
-}
-
-fn cleanup_temp(paths: &[std::path::PathBuf]) {
-    for p in paths {
-        let _ = std::fs::remove_file(p);
-    }
 }
 
 #[macro_export]
