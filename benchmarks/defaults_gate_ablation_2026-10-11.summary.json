@@ -1,0 +1,170 @@
+{
+  "kind": "measured_harness_cost_not_a_new_mode",
+  "cases": [
+    {
+      "case": "fixed30_gate_on_a",
+      "invocations": 1,
+      "child_processes": 0,
+      "wall_total_seconds": 6.987316556973383,
+      "wall_median_seconds": 6.987316556973383,
+      "wall_min_seconds": 6.987316556973383,
+      "wall_max_seconds": 6.987316556973383,
+      "reported_total_millis": [
+        6846
+      ],
+      "completed_rounds": [
+        [
+          30
+        ]
+      ],
+      "child_rounds": [],
+      "timed_batch_seconds": 0.100052083,
+      "json_bytes": 15623,
+      "json_gzip_bytes": 2576,
+      "child_json_bytes": 0,
+      "child_json_gzip_bytes": 0,
+      "llm_report_bytes": 1404,
+      "gate_clean": {
+        "True": 30,
+        "False": 0,
+        "None": 0
+      },
+      "mean_ns_by_execution_position": {
+        "0": 772.1362369836743,
+        "1": 474.79034778679227
+      }
+    },
+    {
+      "case": "fixed30_gate_off_a",
+      "invocations": 1,
+      "child_processes": 0,
+      "wall_total_seconds": 1.1651564720086753,
+      "wall_median_seconds": 1.1651564720086753,
+      "wall_min_seconds": 1.1651564720086753,
+      "wall_max_seconds": 1.1651564720086753,
+      "reported_total_millis": [
+        1068
+      ],
+      "completed_rounds": [
+        [
+          30
+        ]
+      ],
+      "child_rounds": [],
+      "timed_batch_seconds": 0.061627955,
+      "json_bytes": 15614,
+      "json_gzip_bytes": 2649,
+      "child_json_bytes": 0,
+      "child_json_gzip_bytes": 0,
+      "llm_report_bytes": 1396,
+      "gate_clean": {
+        "True": 0,
+        "False": 0,
+        "None": 30
+      },
+      "mean_ns_by_execution_position": {
+        "0": 371.8836453904574,
+        "1": 370.94888044431326
+      }
+    },
+    {
+      "case": "fixed30_gate_on_b",
+      "invocations": 1,
+      "child_processes": 0,
+      "wall_total_seconds": 6.986080259026494,
+      "wall_median_seconds": 6.986080259026494,
+      "wall_min_seconds": 6.986080259026494,
+      "wall_max_seconds": 6.986080259026494,
+      "reported_total_millis": [
+        6842
+      ],
+      "completed_rounds": [
+        [
+          30
+        ]
+      ],
+      "child_rounds": [],
+      "timed_batch_seconds": 0.100081962,
+      "json_bytes": 15626,
+      "json_gzip_bytes": 2577,
+      "child_json_bytes": 0,
+      "child_json_gzip_bytes": 0,
+      "llm_report_bytes": 1405,
+      "gate_clean": {
+        "True": 30,
+        "False": 0,
+        "None": 0
+      },
+      "mean_ns_by_execution_position": {
+        "0": 776.624373077079,
+        "1": 444.42410893433606
+      }
+    },
+    {
+      "case": "fixed30_gate_off_b",
+      "invocations": 1,
+      "child_processes": 0,
+      "wall_total_seconds": 1.1656730239628814,
+      "wall_median_seconds": 1.1656730239628814,
+      "wall_min_seconds": 1.1656730239628814,
+      "wall_max_seconds": 1.1656730239628814,
+      "reported_total_millis": [
+        1066
+      ],
+      "completed_rounds": [
+        [
+          30
+        ]
+      ],
+      "child_rounds": [],
+      "timed_batch_seconds": 0.059389518,
+      "json_bytes": 15596,
+      "json_gzip_bytes": 2643,
+      "child_json_bytes": 0,
+      "child_json_gzip_bytes": 0,
+      "llm_report_bytes": 1397,
+      "gate_clean": {
+        "True": 0,
+        "False": 0,
+        "None": 30
+      },
+      "mean_ns_by_execution_position": {
+        "0": 372.55091225098704,
+        "1": 370.64804528179343
+      }
+    },
+    {
+      "case": "fixed200_gate_off",
+      "invocations": 1,
+      "child_processes": 0,
+      "wall_total_seconds": 1.5654843110241927,
+      "wall_median_seconds": 1.5654843110241927,
+      "wall_min_seconds": 1.5654843110241927,
+      "wall_max_seconds": 1.5654843110241927,
+      "reported_total_millis": [
+        1410
+      ],
+      "completed_rounds": [
+        [
+          200
+        ]
+      ],
+      "child_rounds": [],
+      "timed_batch_seconds": 0.385717419,
+      "json_bytes": 69091,
+      "json_gzip_bytes": 6429,
+      "child_json_bytes": 0,
+      "child_json_gzip_bytes": 0,
+      "llm_report_bytes": 1425,
+      "gate_clean": {
+        "True": 0,
+        "False": 0,
+        "None": 200
+      },
+      "mean_ns_by_execution_position": {
+        "0": 371.6535360613183,
+        "1": 371.04076772860134
+      }
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "cpu": {
+    "scaling_driver": "intel_pstate",
+    "scaling_governor": "powersave",
+    "energy_performance_preference": "balance_performance",
+    "scaling_min_freq": "800000",
+    "scaling_max_freq": "5500000"
+  },
+  "kernel": "Linux 7.0.0-38-generic",
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)\nbinary: rustc\ncommit-hash: b940084d7eb6a299eb4bfeb8e34901bc051e7ac4\ncommit-date: 2026-09-28\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.0\nLLVM version: 23.1.1\n",
+  "binary_sha256": "392c8c4b389e53b5e089742965a5f97a66198152014d790fef59aecb7f7937c3",
+  "full_plan_source_commit": "98100750257a6fb3e5dc2c440cd143ae4281d7f9",
+  "date": "2026-10-11",
+  "host_cpu_label": "i265",
+  "cpu_set": [
+    0
+  ],
+  "container_memory_limit_bytes": 2147483648,
+  "priority": "nice 19",
+  "cargo_profile": "release",
+  "features": "default",
+  "rustflags": [],
+  "workload": "two identical wrapping-add/rotate fold arms over 1024 u64 words unless case overrides",
+  "full_image_id": "sha256:c17fc1563de8abe6a7b3027f1b2288b19a0ae360863121f286bb1515b017e47c",
+  "ablation_image_id": "sha256:acf6c22abe7584d5e43aca6f178c4804cd911a4ee849678f949e241d45e7e4b7",
+  "full_command": "just defaults-audit-run /work/.git/defaults-audit-full full 0",
+  "ablation_command": "just defaults-audit-run /work/.git/defaults-audit-ablation ablation 0",
+  "full_run_heavy": "run-heavy: done rc=0 2972s | peak-RSS 0.03GiB | min-avail 26737MiB | peak-load 0.75",
+  "ablation_run_heavy": "run-heavy: done rc=0 18s | peak-RSS 0.03GiB | min-avail 26833MiB | peak-load 0.43",
+  "rss_scope": "run-heavy RSS covers the Docker client, not payload RSS; the payload had a separate 2 GiB hard memory cap",
+  "source_sha256": {
+    "src/engine.rs": "41a32d6a16852d24170bd33e7dedd01ae69eb265d3a12935013c655764c8436e",
+    "src/gate.rs": "6028a41541d476b17b1eec7f761c3b0fe1d4f53663b8cfd238360dd90a2883f6",
+    "src/platform.rs": "3bc905df1d9d8538140a43c6dec375d9178746e187e546505b44ab1e09ecbb77",
+    "src/results.rs": "77edfb78d16cd57731c8f1dfa9a9680efaa76d95ff2134f5c0e51a40052334fc",
+    "src/lib.rs": "03787902d85428fcfe1e6b4773114dd01f485ccebbe4fa54e9c2ef3ea28d2cb6",
+    "src/stats.rs": "45475ab42ba5a42df124dc7a0f0cf7fbee3e0f871088d658c46c666a9d59282d",
+    "Cargo.lock": "8633f119c25be010747553c45cd37c9cfa747cf2de3103c1e8fc4837fdb2acc3",
+    "examples/defaults_audit.rs": "df641dded05548bee13f1b2e32e8a7b05e6eeb51c89c77513c4c0d154adf4516",
+    "examples/audit_defaults.py": "1a8a69d92ebebdd169c7abcdc51c820a0753307565f966615b18b3b04d35a882"
+  },
+  "ablation_driver_sha256": "94f9ba4d670ea32e1f9f67b2f0f909196ac958d9b0de30026225310d21b573c6"
+}
