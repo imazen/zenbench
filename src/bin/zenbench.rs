@@ -13,6 +13,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Read saved JSON, gzip JSON, or an evidence reference without running benchmarks.
+    Read {
+        input: PathBuf,
+        #[arg(long, default_value = "llm", value_parser = ["llm", "json", "csv", "md"])]
+        format: String,
+    },
     /// Launch in a verified process CPU boundary. Child processes inherit it.
     Exec {
         #[arg(long, default_value = "performance")]
@@ -320,6 +326,19 @@ fn main() {
                 save_charts.as_deref(),
                 pub_config,
             )
+        }
+        Commands::Read { input, format } => {
+            let result = zenbench::SuiteResult::load(input).unwrap_or_else(|e| {
+                eprintln!("cannot read evidence: {e}");
+                std::process::exit(2);
+            });
+            let text = match format.as_str() {
+                "json" => serde_json::to_string_pretty(&result).expect("loaded JSON result"),
+                "csv" => result.to_csv(),
+                "md" => result.to_markdown(),
+                _ => result.to_llm(),
+            };
+            println!("{text}");
         }
         Commands::Archive { input, output } => {
             if output.extension().is_none_or(|e| e != "gz") {

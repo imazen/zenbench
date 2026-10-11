@@ -460,6 +460,10 @@ impl SuiteResult {
         }
         crate::storage::persist(self)?;
         let hash = crate::storage::evidence_digest(self)?;
+        let object = crate::storage::data_dir()
+            .join("objects")
+            .join(format!("{hash}.json.gz"));
+        let usage = crate::storage::usage(&object);
         let context = serde_json::json!({
             "testbed": self.testbed,
             "cpu_class": self.cpu_placement.as_ref().and_then(|p| p.core_class.as_deref()),
@@ -471,7 +475,7 @@ impl SuiteResult {
             })),
         });
         let text = format!(
-            "# zenbench-snapshot-v1 evidence_sha256={hash}\n# context={context}\n{}",
+            "# zenbench-snapshot-v1 evidence_sha256={hash}\n# usage={usage}\n# context={context}\n{}",
             self.to_snapshot()
         );
         crate::storage::atomic_write(path.as_ref(), text.as_bytes())
@@ -613,7 +617,11 @@ impl SuiteResult {
                     format!("n={}", s.n),
                     format!("cv={:.1}%", s.cv() * 100.0),
                     format!("rounds={}", comp.completed_rounds),
-                    format!("calls={}", comp.iterations_per_sample),
+                    if self.replicates.is_empty() {
+                        format!("calls={}", comp.iterations_per_sample)
+                    } else {
+                        "calls=per_process".into()
+                    },
                 ];
                 if let Some(ci) = &bench.mean_ci {
                     meta.push(format!(
@@ -628,7 +636,9 @@ impl SuiteResult {
                         crate::format::format_ns(bench.cold_start_ns),
                     ));
                 }
-                if bench.timer_ticks_per_sample < 50.0 {
+                if !self.replicates.is_empty() {
+                    meta.push("timer_ticks=per_process".into());
+                } else if bench.timer_ticks_per_sample < 50.0 {
                     meta.push(format!(
                         "timer_ticks={:.0} (resolution-limited)",
                         bench.timer_ticks_per_sample,
@@ -1310,6 +1320,22 @@ mod tests {
     }
 
     // --- to_llm() ---
+
+    #[test]
+    fn llm_aggregate_does_not_present_unavailable_metadata_as_zero() {
+        let mut child = make_suite_result_with_analyses();
+        for bench in &mut child.comparisons[0].benchmarks {
+            bench.timer_ticks_per_sample = 120.0;
+        }
+        let aggregate =
+            crate::aggregate_results(vec![child.clone(), child], crate::Aggregation::Mean);
+        let text = aggregate.to_llm();
+        assert!(text.contains("calls=per_process"));
+        assert!(text.contains("timer_ticks=per_process"));
+        assert!(!text.contains("calls=0"));
+        assert!(!text.contains("timer_ticks=0"));
+        assert!(!text.contains("resolution-limited"));
+    }
 
     #[test]
     fn llm_output_baseline_has_vs_base_eq_baseline() {

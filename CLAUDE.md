@@ -2,6 +2,16 @@
 
 ### Known bugs: defaults audit (2026-10-11)
 
+LLM output for retained multi-process aggregates labels call counts and timer
+ticks as `per_process`. The aggregate's zero placeholders are not measured
+zero calls or evidence of limited timer resolution; inspect retained children
+for those values. A two-process regression covers the labels.
+
+Evidence command metadata uses an explicit `<INPUT>` placeholder for filesystem
+paths that cannot be represented in UTF-8, avoiding serialization panics. The
+Windows readability fixture uses native joins for each path component; its
+exact command-path assertion remains unchanged.
+
 Executable hashing made debug tests under ARMv7 emulation expensive. The SHA-256
 dependency now uses optimization level 3 in the development/test profile, leaving
 the test and benchmark code unoptimized. A prebuilt dry-run command measured
