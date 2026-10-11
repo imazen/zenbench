@@ -14,9 +14,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("binary", type=Path)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--plan", choices=["smoke", "full"], default="full")
+    parser.add_argument("--plan", choices=["smoke", "full", "ablation"], default="full")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
+    if "TMPDIR" in os.environ:
+        Path(os.environ["TMPDIR"]).mkdir(parents=True, exist_ok=True)
     base = os.environ.copy()
     for key in list(base):
         if key.startswith(("AUDIT_", "ZENBENCH_")):
@@ -38,6 +40,16 @@ def main():
     ]
     if args.plan == "smoke":
         plans = [("empty", 1, {"AUDIT_GROUPS": "0"}, [])]
+    elif args.plan == "ablation":
+        # Alternate equal-round controls; do not conflate convergence with
+        # the cost of the resource sampling interval.
+        plans = [
+            ("fixed30_gate_on_a", 1, {"AUDIT_ROUNDS": "30"}, []),
+            ("fixed30_gate_off_a", 1, {"AUDIT_ROUNDS": "30", "ZENBENCH_NO_BUSY_GATE": "1"}, []),
+            ("fixed30_gate_on_b", 1, {"AUDIT_ROUNDS": "30"}, []),
+            ("fixed30_gate_off_b", 1, {"AUDIT_ROUNDS": "30", "ZENBENCH_NO_BUSY_GATE": "1"}, []),
+            ("fixed200_gate_off", 1, {"AUDIT_ROUNDS": "200", "ZENBENCH_NO_BUSY_GATE": "1"}, []),
+        ]
     records = []
     for name, repeats, overrides, flags in plans:
         for repeat in range(repeats):

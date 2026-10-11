@@ -7,10 +7,19 @@ defaults-audit-build:
     cargo build --release --example defaults_audit
 
 defaults-audit-run output plan="full" cpus="0":
-    docker run --rm --user $(id -u):$(id -g) --memory=2g --memory-swap=2g --cpuset-cpus={{cpus}} --mount type=bind,src={{justfile_directory()}},dst=/work --workdir /work --env HOME=/work/.git/defaults-audit-home --entrypoint /usr/bin/nice zenbench-audit -n19 python3 -B examples/audit_defaults.py /work/target/release/examples/defaults_audit {{output}} --plan {{plan}}
+    docker run --rm --user $(id -u):$(id -g) --memory=2g --memory-swap=2g --cpuset-cpus={{cpus}} --mount type=bind,src={{justfile_directory()}},dst=/work --workdir /work --env HOME=/work/.git/defaults-audit-home --env TMPDIR=/work/.git/defaults-audit-home/tmp --entrypoint /usr/bin/nice zenbench-audit -n19 python3 -B examples/audit_defaults.py /work/target/release/examples/defaults_audit {{output}} --plan {{plan}}
 
 defaults-audit-image:
-    docker build -t zenbench-audit -f tools/defaults-audit.Dockerfile tools
+    docker build --memory=2g --memory-swap=2g --cpu-shares=256 -t zenbench-audit -f tools/defaults-audit.Dockerfile tools
+
+defaults-audit-summary directory output:
+    python3 -B examples/summarize_defaults_audit.py {{directory}} {{output}}
+
+defaults-audit-fixture:
+    target/release/examples/defaults_audit --fixture
+
+defaults-audit-archive manifest host date *directories:
+    python3 -B examples/archive_defaults_audit.py {{manifest}} target/release/examples/defaults_audit {{directories}} --archive-host {{host}} --date {{date}}
 
 wasm_target := "wasm32-wasip1"
 wasm_simd_flags := "-C target-feature=+simd128"
