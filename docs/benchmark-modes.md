@@ -75,7 +75,8 @@ an entire multi-host study. Timer resolution supplies a minimum interval width.
 These intervals assume independent, approximately normal process log values.
 Fresh execution does not guarantee independence, remove code-layout bias or
 eliminate persistent clock/cache interference. Freeze the workload/candidate
-before confirmation. Historical baselines are not randomized contemporaneous
+before confirmation. Baseline/candidate comparisons refuse overlapping child run IDs: reusing a saved
+measurement is not a fresh confirmation population. Historical baselines are not randomized contemporaneous
 A/B blocks. A release claim needing those blocks must arrange them separately.
 
 Against a declared margin, the entire interval determines the decision:

@@ -279,3 +279,11 @@ Extreme confidence/family settings can make a process interval unrepresentable.
 Confirmation validates that every required interval was produced; missing numerical
 results cannot become a successful exit or baseline promotion. A deterministic
 large-dynamic-range control exercises that refusal.
+
+Baseline/candidate comparisons must use disjoint child run identities. Reusing the
+same saved measurement on both sides cannot establish an independent confirmation.
+
+The CLI evidence integration test must honor `ZENBENCH_AFFINITY_TEST_RUNNER`
+like the existing CPU-policy subprocess tests. Directly launching its ARMv7
+executable under cross returned a launcher error rather than exercising the CLI.
+The expected CLI status and diagnostic remain unchanged.
