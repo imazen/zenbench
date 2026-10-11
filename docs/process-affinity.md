@@ -112,6 +112,35 @@ Multiple processor groups and Windows ARM class discovery are unsupported and
 fail closed by default. Start a fresh process to change classes; unavailable
 classes cannot be selected from a previously narrowed mask.
 
+`examples/windows_topology_probe.ps1` is a separate read-only native API oracle:
+it reports `GetLogicalProcessorInformationEx(RelationAll)` core efficiency
+classes, processor groups, and cache sizes/sharing masks. It does not change
+affinity, certify placement, or supply topology to the Rust backend. Run it in
+64-bit PowerShell; it reports its process architecture so emulation is visible.
+The Windows x64/ARM CI jobs execute the oracle before Rust tests. These
+[core](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-processor_relationship)
+and [cache](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-cache_relationship)
+records are the OS-level inputs needed to extend Windows discovery.
+
+For repeatable remote observations, `just windows-topology-remote WINDOWS_ALIAS`
+runs the script through existing SSH credentials. Optional `--relay HOST`,
+`--network-jump HOST`, and `--known-hosts FILE` separate the credential host,
+connection route, and an already trusted host pin. Host verification remains
+enabled; private keys stay on the credential host. The helper sends a compressed
+PowerShell command without writing remote files. An earlier stdin transport
+using `Console.ReadToEnd` timed out; the command transport completed on native
+Windows. This is a diagnostic transport, not a benchmark launcher.
+
+`examples/windows_process_mask_probe.ps1` independently checks the process-mask
+primitive with an already-created managed thread and managed pool worker. It
+requires one processor group, checks rejected attempts to widen worker masks,
+and restores the original process and worker masks before returning. Run it
+with `--script examples/windows_process_mask_probe.ps1 --cpu-id ID` through the
+same SSH helper; choose IDs from a fresh native topology query. The Windows CI
+steps choose the first available CPU and require an outside CPU for the
+negative control. This is an OS primitive oracle, not compiled zenbench/Rayon
+execution or a benchmark workload.
+
 macOS detects `hw.nperflevels` and performance-level counts. Its
 [Mach affinity policy](https://developer.apple.com/library/archive/releasenotes/Performance/RN-AffinityAPI/)
 is advisory and cannot bind P/E classes. Therefore an asymmetric macOS machine

@@ -162,3 +162,97 @@ Criterion compatibility also exercise the coordinator for 100 ms before
 calibration. Opaque external pools must warm their actual workers separately.
 All CPU evidence rows retain `cpu_frequency_verified=false`; these exercises
 do not establish maximum frequency or replace fail-closed admission.
+
+## Native asymmetric-cache inventory
+
+A read-only sysfs query on an AMD Ryzen 9 9950X3D on 2026-10-11 reported online
+CPUs `0-31` and the following last-level-cache domains:
+
+| Reported L3 size | Shared logical CPU IDs |
+|---|---|
+| `32768K` (32 MiB) | `8-15,24-31` |
+| `98304K` (96 MiB) | `0-7,16-23` |
+
+These CPU assignments are observations on that installation. Resolve them
+again before selecting CPUs; numbering is not a portable CCD identifier. The
+query read `level`, `size`, and `shared_cpu_list` under
+`/sys/devices/system/cpu/cpu*/cache/index*/` through an existing trusted SSH
+connection, without a benchmark workload or compiled Rust execution.
+
+The Linux Rust discovery path already distinguishes L3 `size` classes. Its
+equal-core-capacity 96M/32M fixture verifies that a mixed process boundary is
+refused, named performance selection cannot choose between equal-ranked cache
+classes, and a confined explicit CPU set is admitted. This native inventory
+confirms the hardware exposes unequal sizes; it does not measure confinement
+or performance on the 9950X3D. `shared_cpu_list` was observed by the inventory,
+but cache-domain identities are not currently separate Rust metadata fields.
+
+Select each detected cache class in a fresh process and retain its CPU set and
+cache-class label in results. Do not combine classes or infer the faster CCD
+from cache capacity. Equal-size caches with different sharing/placement remain
+a separate discovery limitation.
+
+## Native hybrid Windows topology inventory
+
+On 2026-10-11 the read-only PowerShell oracle ran on an Intel Core Ultra 7
+270K Plus, Windows 11 Pro `10.0.26200`, with a native X64 process. It reported
+24 physical cores, 24 logical processors, and one processor group. The Windows
+core records exposed two efficiency classes with the following group-0 IDs:
+
+| Efficiency class | Interpretation | Logical CPU IDs |
+|---|---|---|
+| 1 | Higher intrinsic performance | `0,1,10,11,12,13,22,23` |
+| 0 | Lower intrinsic performance | `2-9,14-21` |
+
+These are observations on this installation. CPU numbering does not identify
+core class; resolve the map again rather than assuming contiguous P/E ranges.
+The oracle reported one 36 MiB L3 cache shared by all 24 logical CPUs. Full
+L1/L2 records and their sharing masks are retained alongside the core records.
+
+[Raw native records](../benchmarks/windows_topology_2026-10-11.json) and
+[source, command shape, and resource scope](../benchmarks/windows_topology_2026-10-11.meta.json)
+preserve the query. `just windows-topology-remote <trusted-windows-alias>` runs
+the oracle, with optional relay/jump/trusted-pin arguments for the existing SSH
+configuration. The local wrapper reported:
+`run-heavy: done rc=0 2s | peak-RSS 0.02GiB | min-avail 26796MiB | peak-load 0.32`.
+This resource record covers the local launcher only.
+
+The query changed no affinity and performed no benchmark workload. It is not
+compiled Rust execution or a P/E process/Rayon confinement experiment. The
+Rust backend still uses per-CPU CPUID on supported Windows x86/x64; ARM class
+discovery and multiple-group placement remain unsupported. Separately, the
+PowerShell oracle passed native Windows x64 and ARM64 CI at `4e393caa`, along
+with the rest of that revision's CI suite.
+
+## Native Windows process-mask controls
+
+The native primitive oracle ran in separate diagnostic processes on the same
+Core Ultra 7 270K Plus, selecting CPU 0 from class 1 and CPU 2 from class 0.
+Each process created an ordinary managed thread and a managed pool worker
+before restriction. Both workers initially had mask `0xFFFFFF`.
+
+| Selected CPU | Process/worker restricted mask | Worker observed CPUs | Widening result |
+|---|---|---|---|
+| 0 (class 1) | `0x1` | `0,0` | Both rejected with error 87 |
+| 2 (class 0) | `0x4` | `2,2` | Both rejected with error 87 |
+
+`SetThreadAffinityMask` rejected each attempt to restore the full original mask
+while the process was restricted. `GetProcessAffinityMask` and the scoped
+thread-mask query matched the selected set. The oracle then restored the
+process mask and both workers' original masks, verifying every readback before
+returning. No expectations were reduced and no benchmark workload ran.
+
+[Native observations](../benchmarks/windows_process_mask_2026-10-11.json) and
+[source and command record](../benchmarks/windows_process_mask_2026-10-11.meta.json)
+preserve both runs. Local launcher summaries were:
+
+```text
+run-heavy: done rc=0 2s | peak-RSS 0.02GiB | min-avail 26786MiB | peak-load 0.29
+run-heavy: done rc=0 1s | peak-RSS 0.02GiB | min-avail 26790MiB | peak-load 0.48
+```
+
+These verify the Windows process/thread affinity primitives on a real hybrid
+CPU with preexisting managed workers. They are not native compiled Rust/Rayon
+execution; the Windows Rust backend uses the corresponding safe `affinity`
+wrapper, whose crate tests run separately in CI. This experiment does not
+establish cross-group placement or Windows ARM class discovery.

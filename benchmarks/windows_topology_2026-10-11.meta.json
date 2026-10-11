@@ -1,0 +1,8 @@
+{
+  "command": "just windows-topology-remote <trusted-windows-alias> [--relay <credential-host> --network-jump <network-host> --known-hosts <trusted-pin-file>]",
+  "oracle_source": "examples/windows_topology_probe.ps1 at 4e393caa0d743bfec3f4f604a597a43aec482239; examples/windows_remote_probe.py in this commit",
+  "measured_date": "2026-10-11",
+  "measurement": "Read-only GetLogicalProcessorInformationEx core/cache/group records; not a compiled Rust crate execution, affinity confinement experiment, or benchmark",
+  "local_run_heavy_summary": "run-heavy: done rc=0 2s | peak-RSS 0.02GiB | min-avail 26796MiB | peak-load 0.32",
+  "resource_scope": "The wrapper capped the local Python/SSH launcher only. Remote query is read-only and bounded by a 16MiB native topology-buffer check; no native hard process-memory cap is claimed."
+}
