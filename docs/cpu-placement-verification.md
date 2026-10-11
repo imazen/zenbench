@@ -191,3 +191,35 @@ Select each detected cache class in a fresh process and retain its CPU set and
 cache-class label in results. Do not combine classes or infer the faster CCD
 from cache capacity. Equal-size caches with different sharing/placement remain
 a separate discovery limitation.
+
+## Native hybrid Windows topology inventory
+
+On 2026-10-11 the read-only PowerShell oracle ran on an Intel Core Ultra 7
+270K Plus, Windows 11 Pro `10.0.26200`, with a native X64 process. It reported
+24 physical cores, 24 logical processors, and one processor group. The Windows
+core records exposed two efficiency classes with the following group-0 IDs:
+
+| Efficiency class | Interpretation | Logical CPU IDs |
+|---|---|---|
+| 1 | Higher intrinsic performance | `0,1,10,11,12,13,22,23` |
+| 0 | Lower intrinsic performance | `2-9,14-21` |
+
+These are observations on this installation. CPU numbering does not identify
+core class; resolve the map again rather than assuming contiguous P/E ranges.
+The oracle reported one 36 MiB L3 cache shared by all 24 logical CPUs. Full
+L1/L2 records and their sharing masks are retained alongside the core records.
+
+[Raw native records](../benchmarks/windows_topology_2026-10-11.json) and
+[source, command shape, and resource scope](../benchmarks/windows_topology_2026-10-11.meta.json)
+preserve the query. `just windows-topology-remote <trusted-windows-alias>` runs
+the oracle, with optional relay/jump/trusted-pin arguments for the existing SSH
+configuration. The local wrapper reported:
+`run-heavy: done rc=0 2s | peak-RSS 0.02GiB | min-avail 26796MiB | peak-load 0.32`.
+This resource record covers the local launcher only.
+
+The query changed no affinity and performed no benchmark workload. It is not
+compiled Rust execution or a P/E process/Rayon confinement experiment. The
+Rust backend still uses per-CPU CPUID on supported Windows x86/x64; ARM class
+discovery and multiple-group placement remain unsupported. Separately, the
+PowerShell oracle passed native Windows x64 and ARM64 CI at `4e393caa`, along
+with the rest of that revision's CI suite.
