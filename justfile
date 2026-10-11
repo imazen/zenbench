@@ -362,6 +362,9 @@ ancestor-check:
     cargo test --lib gate::tests::collect_ancestors
     cargo clippy --all-targets --all-features -- -D warnings
 
+protocol-cross-plan cross="cross":
+    CROSS_CONTAINER_OPTS="--memory=6g --memory-swap=6g --cpus=2" ZENBENCH_CPU_POLICY=unrestricted {{cross}} run --target armv7-unknown-linux-gnueabihf --example protocol_fixture -- --dry-run
+
 protocol-build:
     cargo fmt -p zenbench
     cargo clippy --all-targets -- -D warnings

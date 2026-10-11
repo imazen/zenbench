@@ -47,6 +47,7 @@ for name, flags, extra, expected in cases:
     assert run.returncode == expected, f'{name}: see retained stderr'
     if name == 'dryrun':
         data = json.loads(stem.with_suffix('.json').read_bytes())
+        assert data['binary_sha256'] == hashlib.sha256(a.binary.read_bytes()).hexdigest()
         assert data['plan']['processes'] == 5
         assert len(data['groups']) == 1
         assert data['runtime_estimate'] is None

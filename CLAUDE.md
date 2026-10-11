@@ -2,6 +2,13 @@
 
 ### Known bugs: defaults audit (2026-10-11)
 
+Executable hashing made debug tests under ARMv7 emulation expensive. The SHA-256
+dependency now uses optimization level 3 in the development/test profile, leaving
+the test and benchmark code unoptimized. A prebuilt dry-run command measured
+7 seconds before and 1 second after; both executable hashes matched Python's
+independent SHA-256. See `benchmarks/armv7_hash_2026-10-11.json`; these are emulated
+debug startup observations, not release benchmark timings.
+
 Windows x64 CI exposed an ancestor walk that could append its starting PID
 when the observed parent links formed a cycle. The walk now stops before that
 append, even when its output was initially empty. Deterministic self-cycle and
