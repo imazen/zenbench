@@ -171,3 +171,31 @@ fn enabled_clean_gate_is_distinct_from_absent_historical_check() {
             .all(|s| s.gate_clean.is_none())
     );
 }
+
+#[test]
+fn parallel_groups_keep_fresh_resource_observations() {
+    let mut gate = GateConfig::strict();
+    gate.min_available_ram_bytes = 0;
+    gate.max_cpu_load = 1.0;
+    gate.max_cpu_temp_c = None;
+    gate.max_heavy_processes = usize::MAX;
+    let result = run_gated(gate, |suite| {
+        suite.compare("parallel_observation", |group| {
+            group
+                .config()
+                .max_rounds(3)
+                .min_rounds(3)
+                .auto_rounds(false)
+                .warmup_time(Duration::ZERO);
+            group.config().min_iterations = 1;
+            group.config().max_iterations = 1;
+            group.bench_parallel("two_workers", 2, |b, id| b.iter(|| black_box(id)));
+        });
+    });
+    assert_eq!(result.comparisons[0].samples.len(), 3);
+    assert!(result.gate_wait_time >= Duration::from_millis(200));
+    for sample in &result.comparisons[0].samples {
+        assert_eq!(sample.gate_clean, Some(true));
+        assert!(sample.gate_observation_age_ns.is_some());
+    }
+}

@@ -1,0 +1,17 @@
+{
+  "source_commit": "a6179274d20420354c6f20571ddb9107feb5d023",
+  "command": "just defaults-audit-run /work/.git/defaults-monitor-fixed monitor 0",
+  "binary_sha256": "288e8f214342e3d53709f89066221be3296fd80da6417e1e77ccc0f9549f3af3",
+  "host_cpu_label": "i265",
+  "cpuset": [
+    0
+  ],
+  "container_memory_limit_bytes": 2147483648,
+  "priority": "nice 19",
+  "features": "default",
+  "profile": "release",
+  "rustflags": [],
+  "run_heavy": "run-heavy: done rc=0 10s | peak-RSS 0.03GiB | min-avail 26797MiB | peak-load 0.36",
+  "rss_scope": "Docker client only; benchmark payload separately capped at 2 GiB",
+  "driver_sha256": "11c34b04e6b045b0ada8635417f27fd263ed41a9dc0268a8597196f10ecdebe8"
+}

@@ -369,3 +369,25 @@ hook, because the existing process runner deletes exchange JSON.
 5. Integrate the manifest/attempt contract with the existing fleet runner. Keep
    orchestration outside individual benchmark crates and do not introduce a
    second distributed job system here.
+
+## Implemented monitor correction (2026-10-11)
+
+At `a6179274`, the engine collects resource observations on a background sampler,
+primes the first valid CPU delta before warmup, and retains observation age for
+each round. Threaded groups keep the owner-aware monitor enabled. Missing/stale
+observations, rival admission timeout and failed exclusive locking flag results.
+Host-average observations still do not prove selected-core exclusivity.
+
+The same fixed-200-round fixture, on the same CPU and cpuset, took a median
+1.967 seconds with monitoring (three invocations), compared with 41.229 seconds
+in the original enabled control. New disabled controls took a median 1.566
+seconds. All 600 enabled rounds retained fresh clean observations; these are
+resource samples, not continuous quietness certification. This measurement
+precedes the mode changes and retains the original 500 ms per-arm warmup.
+
+[Summary](../benchmarks/monitor_fixed_2026-10-11.summary.json),
+[manifest](../benchmarks/monitor_fixed_2026-10-11.meta.json), and
+[raw evidence/executable](../benchmarks/monitor_fixed_2026-10-11.pointer.md).
+Resource log: `run-heavy: done rc=0 10s | peak-RSS 0.03GiB |
+min-avail 26797MiB | peak-load 0.36`. RSS covers the Docker client; the payload
+had a separate 2 GiB hard cap.

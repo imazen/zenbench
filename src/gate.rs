@@ -139,6 +139,9 @@ pub struct ResourceGate {
     monitor: SystemMonitor,
     total_waits: usize,
     total_wait_time: Duration,
+    background: Option<crate::monitor::Monitor>,
+    observation_age_ns: Option<u64>,
+    missing_observations: bool,
 }
 
 impl ResourceGate {
@@ -148,7 +151,22 @@ impl ResourceGate {
             config,
             total_waits: 0,
             total_wait_time: Duration::ZERO,
+            background: None,
+            observation_age_ns: None,
+            missing_observations: false,
         }
+    }
+
+    pub(crate) fn start_monitoring(&mut self) {
+        if self.config.enabled && self.background.is_none() {
+            let start = Instant::now();
+            self.background = Some(crate::monitor::Monitor::start());
+            self.total_wait_time += start.elapsed();
+        }
+    }
+
+    pub(crate) fn observation_age_ns(&self) -> Option<u64> {
+        self.observation_age_ns
     }
 
     /// Set thread allowance for the current benchmark group.
@@ -322,7 +340,8 @@ impl ResourceGate {
 
             if start.elapsed() >= max_wait {
                 crate::report::clear_status();
-                return; // give up waiting, measure anyway
+                self.missing_observations = true; // admission failed; result cannot certify quietness
+                return;
             }
 
             if !warned {
@@ -349,7 +368,20 @@ impl ResourceGate {
         if !self.config.enabled {
             return None;
         }
-        let state = self.monitor.snapshot();
+        let state = if let Some(background) = &self.background {
+            let Some((age, state)) = background.latest() else {
+                self.observation_age_ns = None;
+                self.missing_observations = true;
+                return None;
+            };
+            self.observation_age_ns = Some(age.as_nanos().min(u64::MAX as u128) as u64);
+            state
+        } else {
+            let start = Instant::now();
+            let state = self.monitor.snapshot();
+            self.total_wait_time += start.elapsed();
+            state
+        };
         let reason = self.check_state(&state);
         let clean = reason.is_none();
         if std::env::var_os("ZENBENCH_GATE_TRACE").is_some() {
@@ -405,7 +437,8 @@ impl ResourceGate {
     /// excessive waiting (indicates a noisy system).
     #[allow(dead_code)] // May be used by bin targets
     pub fn is_unreliable(&self) -> bool {
-        self.config.strict && self.total_waits > self.config.max_wait_count
+        self.missing_observations
+            || (self.config.strict && self.total_waits > self.config.max_wait_count)
     }
 
     /// Total number of times we had to wait.

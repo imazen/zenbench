@@ -343,6 +343,13 @@ windows-gate-test-remote host binary *options:
     python3 -B examples/windows_remote_probe.py {{host}} --upload-file {{binary}} {{options}}
     python3 -B examples/windows_remote_probe.py {{host}} --script examples/windows_repeatability.ps1 --script-arg `sha256sum {{binary}} | cut -d' ' -f1` --script-arg default --script-arg 1 --script-arg gate-test {{options}}
 
+monitor-check:
+    cargo fmt -p zenbench
+    ZENBENCH_CPU_POLICY=unrestricted cargo test --lib monitor::
+    ZENBENCH_CPU_POLICY=unrestricted cargo test --test round_samples
+    cargo clippy --all-targets -- -D warnings
+    just api-doc
+
 # Validate each review-stack boundary; run through run-heavy.
 review-check *test_args="--lib":
     cargo fmt -p zenbench -- --check

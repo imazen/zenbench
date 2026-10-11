@@ -37,6 +37,7 @@ mod format;
 mod gate;
 mod html;
 pub mod mcp;
+mod monitor;
 mod paths;
 pub mod platform;
 pub mod quickchart;

@@ -45,6 +45,7 @@ pub struct SystemMonitor {
     /// When the CPU counters were last refreshed. CPU usage is a DELTA between
     /// two refreshes; reading it too soon after the previous one yields 0.0.
     last_cpu_refresh: Mutex<Instant>,
+    exclude_benchmark_owner: bool,
 }
 
 impl SystemMonitor {
@@ -53,6 +54,14 @@ impl SystemMonitor {
         Self {
             sys: Mutex::new(sys),
             last_cpu_refresh: Mutex::new(Instant::now()),
+            exclude_benchmark_owner: false,
+        }
+    }
+
+    pub(crate) fn for_benchmark() -> Self {
+        Self {
+            exclude_benchmark_owner: true,
+            ..Self::new()
         }
     }
 
@@ -122,7 +131,7 @@ impl SystemMonitor {
             .unwrap_or_default();
         // A standalone monitor retains its global-load contract. Only a
         // launcher that explicitly registers workers admits its own CPU work.
-        if !owned.is_empty() {
+        if self.exclude_benchmark_owner || !owned.is_empty() {
             if let Ok(pid) = sysinfo::get_current_pid() {
                 owned.push(pid);
             }

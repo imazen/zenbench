@@ -14,7 +14,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("binary", type=Path)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--plan", choices=["smoke", "full", "ablation"], default="full")
+    parser.add_argument("--plan", choices=["smoke", "full", "ablation", "monitor"], default="full")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     if "TMPDIR" in os.environ:
@@ -50,6 +50,11 @@ def main():
             ("fixed30_gate_off_b", 1, {"AUDIT_ROUNDS": "30", "ZENBENCH_NO_BUSY_GATE": "1"}, []),
             ("fixed200_gate_off", 1, {"AUDIT_ROUNDS": "200", "ZENBENCH_NO_BUSY_GATE": "1"}, []),
         ]
+    elif args.plan == "monitor":
+        plans = [
+            ("fixed200_gate_on", 3, {"AUDIT_ROUNDS": "200"}, []),
+            ("fixed200_gate_off", 3, {"AUDIT_ROUNDS": "200", "ZENBENCH_NO_BUSY_GATE": "1"}, []),
+        ]
     records = []
     for name, repeats, overrides, flags in plans:
         for repeat in range(repeats):
@@ -57,6 +62,7 @@ def main():
             command = [str(args.binary), "--format=json", *flags]
             stem = args.output / f"{name}-{repeat}"
             env["CARGO_TARGET_DIR"] = str(stem.resolve()) + ".target"
+            env["ZENBENCH_DATA_DIR"] = str(stem.resolve()) + ".data"
             env["AUDIT_CHILD_ARCHIVE"] = str(stem.resolve()) + ".children"
             start = time.perf_counter()
             with stem.with_suffix(".json").open("wb") as stdout, stem.with_suffix(".log").open("wb") as stderr:

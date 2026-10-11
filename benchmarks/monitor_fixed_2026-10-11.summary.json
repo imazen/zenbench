@@ -1,0 +1,87 @@
+{
+  "kind": "measured_harness_cost_not_a_new_mode",
+  "cases": [
+    {
+      "case": "fixed200_gate_on",
+      "invocations": 3,
+      "child_processes": 0,
+      "wall_total_seconds": 5.701782926975284,
+      "wall_median_seconds": 1.9672608299879357,
+      "wall_min_seconds": 1.766871694009751,
+      "wall_max_seconds": 1.967650402977597,
+      "reported_total_millis": [
+        1609,
+        1815,
+        1815
+      ],
+      "completed_rounds": [
+        [
+          200
+        ],
+        [
+          200
+        ],
+        [
+          200
+        ]
+      ],
+      "child_rounds": [],
+      "timed_batch_seconds": 1.142308745,
+      "json_bytes": 235768,
+      "json_gzip_bytes": 23510,
+      "child_json_bytes": 0,
+      "child_json_gzip_bytes": 0,
+      "llm_report_bytes": 0,
+      "gate_clean": {
+        "True": 600,
+        "False": 0,
+        "None": 0
+      },
+      "mean_ns_by_execution_position": {
+        "0": 373.17169111841827,
+        "1": 372.19219463646516
+      }
+    },
+    {
+      "case": "fixed200_gate_off",
+      "invocations": 3,
+      "child_processes": 0,
+      "wall_total_seconds": 4.697779776994139,
+      "wall_median_seconds": 1.5661213009734638,
+      "wall_min_seconds": 1.5654775960138068,
+      "wall_max_seconds": 1.5661808800068684,
+      "reported_total_millis": [
+        1417,
+        1424,
+        1434
+      ],
+      "completed_rounds": [
+        [
+          200
+        ],
+        [
+          200
+        ],
+        [
+          200
+        ]
+      ],
+      "child_rounds": [],
+      "timed_batch_seconds": 1.184889528,
+      "json_bytes": 207537,
+      "json_gzip_bytes": 19241,
+      "child_json_bytes": 0,
+      "child_json_gzip_bytes": 0,
+      "llm_report_bytes": 0,
+      "gate_clean": {
+        "True": 0,
+        "False": 0,
+        "None": 600
+      },
+      "mean_ns_by_execution_position": {
+        "0": 371.8828701699357,
+        "1": 371.22406782480573
+      }
+    }
+  ]
+}

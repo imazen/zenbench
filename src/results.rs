@@ -114,6 +114,10 @@ pub struct RoundSample {
     /// or absent in historical evidence. This does not monitor the timed body.
     #[serde(default)]
     pub gate_clean: Option<bool>,
+    /// Age of the background observation used for the pre-round check.
+    /// None means no fresh background observation; not continuous quietness proof.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_observation_age_ns: Option<u64>,
     /// Actual iteration count shared by all benchmarks in this round.
     pub iterations: usize,
     /// Benchmark indices in their randomized execution order.
