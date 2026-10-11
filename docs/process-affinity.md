@@ -294,3 +294,8 @@ round evidence, and warm actual pool workers separately for 100 ms. They do
 not establish a quiet machine, maximum frequency, or accuracy for arbitrary
 workloads. Per-run confidence intervals are not uncertainty intervals for
 changes in hardware, process layout, or machine state between fresh runs.
+
+Measurement-order shuffles receive an independent seed per group and process.
+The retained execution-order vectors describe the realized schedule. Bootstrap
+resampling keeps a deterministic seed so analyzing the same observations remains
+repeatable.

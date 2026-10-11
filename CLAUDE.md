@@ -203,3 +203,11 @@ The development Windows runner initially used the unhandled-exception flag where
 it intended a per-process memory limit. Its total job memory cap remained active.
 Native limit readback caught the missing per-process cap. The runner now sets the
 SDK per-process flag as well and verifies all limits before starting children.
+
+### Repeated execution schedules (2026-10-11)
+
+Twenty native Windows processes repeated the same 200-round permutation sequence
+in each group because the engine used a constant shuffle seed. A fresh-process
+regression failed with that seed and passed after each group received an
+independent RandomState seed. Bootstrap resampling stays deterministic; actual
+round permutations remain in results for inspection and replay.

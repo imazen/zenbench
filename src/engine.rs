@@ -502,7 +502,13 @@ fn run_comparison_group(
     #[cfg(feature = "alloc-profiling")]
     let mut alloc_totals: Vec<(u64, u64, u64, u64, u64, u64)> =
         vec![(0, 0, 0, 0, 0, 0); n_benchmarks]; // (allocs, deallocs, reallocs, bytes_alloc, bytes_dealloc, iterations)
-    let mut rng = Xoshiro256SS::seed(0xBE0C_0BAD_0000_0001);
+    // Independent group/process schedules avoid repeating the same phase
+    // relationship with periodic system activity. Retained rounds preserve
+    // every realized permutation; bootstrap resampling stays deterministic.
+    use std::hash::BuildHasher;
+    let seed =
+        std::collections::hash_map::RandomState::new().hash_one((std::process::id(), &group.name));
+    let mut rng = Xoshiro256SS::seed(seed);
 
     // Cache firewall buffer
     let firewall = if config.cache_firewall {

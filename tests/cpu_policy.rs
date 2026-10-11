@@ -19,6 +19,72 @@ fn child_command(executable: impl AsRef<std::ffi::OsStr>) -> Command {
 }
 
 #[test]
+fn fresh_processes_use_independent_execution_orders() {
+    if std::env::var_os("ZENBENCH_ORDER_TEST_CHILD").is_some() {
+        let result = run_gated(GateConfig::disabled(), |suite| {
+            suite.cpu_policy(CpuPolicy::Unrestricted);
+            suite.group("execution-order", |group| {
+                group
+                    .config()
+                    .max_rounds(64)
+                    .auto_rounds(false)
+                    .warmup_time(Duration::ZERO)
+                    .sample_target_ns(10_000)
+                    .min_sample_ns(0);
+                for id in 0..3 {
+                    group.bench(format!("work-{id}"), move |b| {
+                        b.iter(|| std::hint::black_box(id));
+                    });
+                }
+            });
+        });
+        let orders: Vec<_> = result.comparisons[0]
+            .samples
+            .iter()
+            .map(|r| &r.execution_order)
+            .collect();
+        assert_eq!(orders.len(), 64);
+        println!("\nORDER={}", serde_json::to_string(&orders).unwrap());
+        return;
+    }
+    let mut schedules = Vec::new();
+    for _ in 0..3 {
+        let output = child_command(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "fresh_processes_use_independent_execution_orders",
+                "--nocapture",
+            ])
+            .env("ZENBENCH_ORDER_TEST_CHILD", "1")
+            .env("ZENBENCH_CPU_POLICY", "unrestricted")
+            .env("ZENBENCH_NO_SAVE", "1")
+            .env("ZENBENCH_NO_CALIBRATE", "1")
+            .env_remove("ZENBENCH_CPU_SET")
+            .env_remove("ZENBENCH_PIN")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "child failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        schedules.push(
+            stdout
+                .lines()
+                .find_map(|l| l.strip_prefix("ORDER="))
+                .unwrap()
+                .to_owned(),
+        );
+    }
+    // Matching all 64 permutations of three items is vanishingly unlikely.
+    // The previous constant seed reproduces this failure on every run.
+    assert_ne!(schedules[0], schedules[1]);
+    assert_ne!(schedules[0], schedules[2]);
+    assert_ne!(schedules[1], schedules[2]);
+}
+
+#[test]
 fn process_policy() {
     if let Ok(mode) = std::env::var("ZENBENCH_CPU_TEST_MODE") {
         let visited = Arc::new(AtomicUsize::new(0));

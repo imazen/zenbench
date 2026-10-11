@@ -284,3 +284,6 @@ windows-repeatability-upload host *options:
 
 windows-repeatability-analyze log output *options:
     python3 -B examples/analyze_windows_repeatability.py {{log}} {{output}} {{options}}
+
+execution-order-check:
+    cargo test --test cpu_policy fresh_processes_use_independent_execution_orders -- --exact --nocapture
