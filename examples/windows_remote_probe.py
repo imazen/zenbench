@@ -1,12 +1,15 @@
-"""Run a read-only PowerShell oracle through existing SSH credentials.
+"""Run a PowerShell diagnostic through existing SSH credentials.
 
 Optional relay separates the credential host from the network jump. Host keys
 remain checked; an explicitly supplied known-hosts file must already be trusted.
-No remote files are written and no private keys are copied.
+The topology/mask oracles are read-only. The optional repeatability diagnostic
+receives a bounded executable and writes it beneath the remote user scratch
+directory. No private keys are copied.
 """
 import argparse
 import base64
 import gzip
+import hashlib
 from pathlib import Path
 import shlex
 import subprocess
@@ -23,6 +26,9 @@ def main():
                         help='Optional 0..63 argument for the process-mask oracle')
     parser.add_argument('--script', type=Path,
                         default=Path(__file__).with_name('windows_topology_probe.ps1'))
+    parser.add_argument('--upload-file', type=Path, help='Upload a hash-named executable through SFTP')
+    parser.add_argument('--script-arg', action='append', default=[], help='Positional script argument')
+    parser.add_argument('--timeout', type=int, default=90)
     args = parser.parse_args()
     if args.cpu_id is not None and not 0 <= args.cpu_id < 64:
         parser.error('--cpu-id must be in 0..63')
@@ -49,6 +55,25 @@ def main():
     if args.network_jump:
         jump = base + ['-W', '%h:%p', '--', args.network_jump]
         command += ['-o', f'ProxyCommand={shlex.join(jump)}']
+    if args.upload_file:
+        if not 0 < args.upload_file.stat().st_size <= 64 * 1024 * 1024:
+            parser.error('Executable uploads must be in 1..64 MiB')
+        data = args.upload_file.read_bytes()
+        digest = hashlib.sha256(data).hexdigest()
+        filename = f'zenbench-native-{digest}.exe'
+        source = str(args.upload_file.resolve())
+        if args.relay:
+            # Unix stdin is reliable for staging on the credential relay; the
+            # Windows leg uses the SFTP subsystem rather than Console input.
+            stage = f'mkdir -p "$HOME/tmp/zenbench-transfer" && cat > "$HOME/tmp/zenbench-transfer/{filename}"'
+            subprocess.run(base + ['--', args.relay, stage], input=data, check=True, timeout=90)
+            source = f'tmp/zenbench-transfer/{filename}'
+        transfer = ['scp'] + command[1:] + ['--', source, f'{args.host}:tmp/{filename}']
+        if args.relay:
+            transfer = base + ['--', args.relay, shlex.join(transfer)]
+        subprocess.run(transfer, check=True, timeout=90)
+        print(f'Uploaded sha256={digest} bytes={len(data)}')
+        return
     # The stdin/Console.ReadToEnd transport timed out on the native test host.
     # Compress the bounded script into an ASCII command instead; no remote files
     # or interactive parsing. Reject scripts beyond cmd.exe's command-line limit.
@@ -60,6 +85,8 @@ def main():
         "$r=[IO.StreamReader]::new($z);"
         "try { & ([ScriptBlock]::Create($r.ReadToEnd())) "
         + (str(args.cpu_id) if args.cpu_id is not None else '')
+        + ''.join(" ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('"
+                  + base64.b64encode(a.encode()).decode('ascii') + "')))" for a in args.script_arg)
         + " } finally { $r.Dispose();$z.Dispose();$m.Dispose() }"
     )
     powershell = 'powershell.exe -NoProfile -Command "' + decoder + '"'
@@ -69,9 +96,8 @@ def main():
     if args.relay:
         command = base + ['--', args.relay, shlex.join(command)]
     result = subprocess.run(command, input=b'', stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE, timeout=90)
+                            timeout=args.timeout)
     sys.stdout.buffer.write(result.stdout)
-    sys.stderr.buffer.write(result.stderr)
     raise SystemExit(result.returncode)
 
 

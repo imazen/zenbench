@@ -196,3 +196,10 @@ CPU-policy immediate-mode comparisons must attach the coordinator mask before
 checking compatibility with prior samples. Comparing a completed placement
 record against a process-only record incorrectly rejected the second benchmark
 in a Criterion-compatible group; the existing integration test caught it.
+
+### Native repeatability runner regression (2026-10-11)
+
+The development Windows runner initially used the unhandled-exception flag where
+it intended a per-process memory limit. Its total job memory cap remained active.
+Native limit readback caught the missing per-process cap. The runner now sets the
+SDK per-process flag as well and verifies all limits before starting children.

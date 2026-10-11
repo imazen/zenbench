@@ -258,3 +258,29 @@ windows-topology-compile image="mcr.microsoft.com/powershell:latest" script="win
 # Additional arguments select existing relays, network jumps, and trusted pins.
 windows-topology-remote host *options:
     python3 -B examples/windows_remote_probe.py {{host}} {{options}}
+
+# Local cross-linker container; no Windows compiler installation is required.
+windows-build-image:
+    docker build -t zenbench-windows-build -f tools/windows-build.Dockerfile tools
+
+windows-cargo *options:
+    docker run --rm --memory=12g --memory-swap=12g --cpus=8 --mount type=bind,src={{justfile_directory()}},dst={{justfile_directory()}} --mount type=bind,src={{env("HOME")}}/.cargo,dst={{env("HOME")}}/.cargo --mount type=bind,src={{env("HOME")}}/.rustup,dst={{env("HOME")}}/.rustup,readonly --mount type=bind,src={{env("HOME")}}/tmp,dst={{env("HOME")}}/tmp --env HOME={{env("HOME")}} --env TMPDIR={{env("HOME")}}/tmp --env CARGO_BUILD_JOBS=8 --env CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc-posix --workdir {{justfile_directory()}} --entrypoint /usr/bin/nice zenbench-windows-build -n19 {{env("HOME")}}/.cargo/bin/cargo {{options}}
+
+windows-build-example example *options:
+    just windows-cargo build --release --target x86_64-pc-windows-gnu --example {{example}} {{options}}
+
+windows-repeatability-check:
+    cargo fmt --check
+    cargo clippy --all-targets --features criterion-compat -- -D warnings
+    just windows-cargo clippy --target x86_64-pc-windows-gnu --example windows_repeatability -- -D warnings
+    just windows-topology-compile mcr.microsoft.com/powershell:latest windows_repeatability.ps1
+
+# Binary transfer is hash checked; each child inherits a native 2 GiB memory cap.
+windows-repeatability-remote host sets="0;2" repeats="2" *options:
+    python3 -B examples/windows_remote_probe.py {{host}} --script examples/windows_repeatability.ps1 --script-arg `sha256sum target/x86_64-pc-windows-gnu/release/examples/windows_repeatability.exe | cut -d' ' -f1` --script-arg '{{sets}}' --script-arg {{repeats}} --timeout 1200 {{options}}
+
+windows-repeatability-upload host *options:
+    python3 -B examples/windows_remote_probe.py {{host}} --upload-file target/x86_64-pc-windows-gnu/release/examples/windows_repeatability.exe {{options}}
+
+windows-repeatability-analyze log output *options:
+    python3 -B examples/analyze_windows_repeatability.py {{log}} {{output}} {{options}}
