@@ -268,7 +268,23 @@ impl Default for SuiteResult {
 impl SuiteResult {
     /// Reasons this packet cannot support confirmation or baseline promotion.
     pub fn confirmation_issues(&self) -> Vec<String> {
-        crate::inference::issues(self)
+        let mut issues = crate::inference::issues(self);
+        if issues.is_empty() {
+            let expected = self
+                .replicates
+                .first()
+                .map(|r| {
+                    r.comparisons
+                        .iter()
+                        .map(|g| g.analyses.len())
+                        .sum::<usize>()
+                })
+                .unwrap_or(0);
+            if crate::inference::confirm(self).len() != expected {
+                issues.push("one or more process intervals are numerically unresolved".into());
+            }
+        }
+        issues
     }
 
     /// Process-level inference rendered from the same decisions used by CI/JSON.

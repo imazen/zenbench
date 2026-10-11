@@ -274,3 +274,8 @@ refused a verdict. Cached observation diagnostics are now retained with rounds
 so future refusals include the resource values/reason. Never weaken admission to
 make a known-work control pass. Approved deterministic shuffle tests replace the
 old probabilistic requirement to change order within ten random two-arm rounds.
+
+Extreme confidence/family settings can make a process interval unrepresentable.
+Confirmation validates that every required interval was produced; missing numerical
+results cannot become a successful exit or baseline promotion. A deterministic
+large-dynamic-range control exercises that refusal.

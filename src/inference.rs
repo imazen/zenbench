@@ -217,8 +217,8 @@ pub(crate) fn workload_signature(result: &SuiteResult) -> String {
 }
 
 pub(crate) fn compatibility_issues(base: &SuiteResult, candidate: &SuiteResult) -> Vec<String> {
-    let mut problems = issues(base);
-    problems.extend(issues(candidate));
+    let mut problems = base.confirmation_issues();
+    problems.extend(candidate.confirmation_issues());
     if base.testbed != candidate.testbed || base.check_cpu_compatibility(candidate).is_err() {
         problems.push("machine or CPU placement differs".into());
     }
@@ -264,6 +264,15 @@ fn interval(
     let critical = StudentsT::new(0.0, 1.0, df)
         .ok()?
         .inverse_cdf(1.0 - alpha / 2.0);
+    if !critical.is_finite()
+        || !mean.is_finite()
+        || !se.is_finite()
+        || se < 0.0
+        || !floor.is_finite()
+        || floor < 0.0
+    {
+        return None;
+    }
     let width = (critical * se).max(floor);
     let values = (
         100.0 * mean.exp_m1(),
@@ -577,6 +586,46 @@ mod tests {
             assert!(!diff.promotable, "mutation {change}");
             assert!(diff.confirmed.is_empty(), "mutation {change}");
         }
+    }
+
+    #[test]
+    fn unrepresentable_intervals_cannot_be_mistaken_for_complete_confirmation() {
+        assert!(paired(&[1.0; 5], &[1.0; 5], 1.0 - f64::EPSILON, 1000, 0.0).is_none());
+        let mut source = synthetic_population(&[100_000; 5]);
+        for (i, r) in source.replicates.iter_mut().enumerate() {
+            r.execution.as_mut().unwrap().plan.confidence = 0.99999999999999;
+            let g = &mut r.comparisons[0];
+            let value = if i % 2 == 0 {
+                1
+            } else {
+                1_000_000_000_000_000_000
+            };
+            g.benchmarks.push(crate::BenchmarkResult {
+                name: "variant".into(),
+                summary: Summary::from_slice(&[value as f64; 2]),
+                ..Default::default()
+            });
+            for s in &mut g.samples {
+                s.elapsed_ns.push(value);
+                s.compensated_ns.push(value);
+                s.execution_order.push(1);
+            }
+            let analysis =
+                crate::PairedAnalysis::compute(&[100_000.0; 2], &[value as f64; 2], &[1; 2])
+                    .unwrap();
+            g.analyses.push(("work".into(), "variant".into(), analysis));
+        }
+        let mut result = crate::aggregate_results(source.replicates, crate::Aggregation::Mean);
+        result.execution.as_mut().unwrap().independent_processes = true;
+        assert!(issues(&result).is_empty(), "{:?}", issues(&result));
+        assert!(confirm(&result).is_empty());
+        assert!(
+            result
+                .confirmation_issues()
+                .iter()
+                .any(|s| s.contains("numerically unresolved"))
+        );
+        assert!(!crate::baseline::compare_against_baseline(&result, &result, 1.0).promotable);
     }
 
     #[test]
