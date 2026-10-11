@@ -223,3 +223,36 @@ Rust backend still uses per-CPU CPUID on supported Windows x86/x64; ARM class
 discovery and multiple-group placement remain unsupported. Separately, the
 PowerShell oracle passed native Windows x64 and ARM64 CI at `4e393caa`, along
 with the rest of that revision's CI suite.
+
+## Native Windows process-mask controls
+
+The native primitive oracle ran in separate diagnostic processes on the same
+Core Ultra 7 270K Plus, selecting CPU 0 from class 1 and CPU 2 from class 0.
+Each process created an ordinary managed thread and a managed pool worker
+before restriction. Both workers initially had mask `0xFFFFFF`.
+
+| Selected CPU | Process/worker restricted mask | Worker observed CPUs | Widening result |
+|---|---|---|---|
+| 0 (class 1) | `0x1` | `0,0` | Both rejected with error 87 |
+| 2 (class 0) | `0x4` | `2,2` | Both rejected with error 87 |
+
+`SetThreadAffinityMask` rejected each attempt to restore the full original mask
+while the process was restricted. `GetProcessAffinityMask` and the scoped
+thread-mask query matched the selected set. The oracle then restored the
+process mask and both workers' original masks, verifying every readback before
+returning. No expectations were reduced and no benchmark workload ran.
+
+[Native observations](../benchmarks/windows_process_mask_2026-10-11.json) and
+[source and command record](../benchmarks/windows_process_mask_2026-10-11.meta.json)
+preserve both runs. Local launcher summaries were:
+
+```text
+run-heavy: done rc=0 2s | peak-RSS 0.02GiB | min-avail 26786MiB | peak-load 0.29
+run-heavy: done rc=0 1s | peak-RSS 0.02GiB | min-avail 26790MiB | peak-load 0.48
+```
+
+These verify the Windows process/thread affinity primitives on a real hybrid
+CPU with preexisting managed workers. They are not native compiled Rust/Rayon
+execution; the Windows Rust backend uses the corresponding safe `affinity`
+wrapper, whose crate tests run separately in CI. This experiment does not
+establish cross-group placement or Windows ARM class discovery.

@@ -1,0 +1,77 @@
+{
+  "cpu": "Intel Core Ultra 7 270K Plus",
+  "os": "Windows 11 Pro 10.0.26200",
+  "topology_source": "windows_topology_2026-10-11.json at 35bbe0ef459a9eaddd2f8770e2ac064b0921ddec",
+  "observations": [
+    {
+      "class_from_topology": "performance",
+      "native": {
+        "source": "GetProcessAffinityMask/SetProcessAffinityMask/SetThreadAffinityMask",
+        "scope": "Native primitive oracle; existing managed thread and managed pool worker, not Rayon or compiled zenbench",
+        "result": {
+          "CpuId": 0,
+          "Before": "0x0000000000FFFFFF",
+          "Restricted": "0x0000000000000001",
+          "Restored": "0x0000000000FFFFFF",
+          "Workers": [
+            {
+              "Kind": "existing_managed_thread",
+              "Before": "0x0000000000FFFFFF",
+              "After": "0x0000000000000001",
+              "Restored": "0x0000000000FFFFFF",
+              "ObservedCpu": 0,
+              "WidenRejected": true,
+              "WidenError": 87
+            },
+            {
+              "Kind": "existing_managed_pool_worker",
+              "Before": "0x0000000000FFFFFF",
+              "After": "0x0000000000000001",
+              "Restored": "0x0000000000FFFFFF",
+              "ObservedCpu": 0,
+              "WidenRejected": true,
+              "WidenError": 87
+            }
+          ]
+        },
+        "contains_benchmark_workload": false
+      },
+      "local_resource_summary": "run-heavy: done rc=0 2s | peak-RSS 0.02GiB | min-avail 26786MiB | peak-load 0.29"
+    },
+    {
+      "class_from_topology": "efficiency",
+      "native": {
+        "source": "GetProcessAffinityMask/SetProcessAffinityMask/SetThreadAffinityMask",
+        "scope": "Native primitive oracle; existing managed thread and managed pool worker, not Rayon or compiled zenbench",
+        "result": {
+          "CpuId": 2,
+          "Before": "0x0000000000FFFFFF",
+          "Restricted": "0x0000000000000004",
+          "Restored": "0x0000000000FFFFFF",
+          "Workers": [
+            {
+              "Kind": "existing_managed_thread",
+              "Before": "0x0000000000FFFFFF",
+              "After": "0x0000000000000004",
+              "Restored": "0x0000000000FFFFFF",
+              "ObservedCpu": 2,
+              "WidenRejected": true,
+              "WidenError": 87
+            },
+            {
+              "Kind": "existing_managed_pool_worker",
+              "Before": "0x0000000000FFFFFF",
+              "After": "0x0000000000000004",
+              "Restored": "0x0000000000FFFFFF",
+              "ObservedCpu": 2,
+              "WidenRejected": true,
+              "WidenError": 87
+            }
+          ]
+        },
+        "contains_benchmark_workload": false
+      },
+      "local_resource_summary": "run-heavy: done rc=0 1s | peak-RSS 0.02GiB | min-avail 26790MiB | peak-load 0.48"
+    }
+  ]
+}
