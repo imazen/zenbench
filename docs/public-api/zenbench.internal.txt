@@ -10,17 +10,17 @@
 ## summary
 #
 #   free functions                              4
-#   inherent methods                            5
-#   trait roster entries (type × trait)         3
+#   inherent methods                           11
+#   trait roster entries (type × trait)         6
 #
 # per-module pub lines:
 #   (root)                            5
 #   charts                            1
 #   criterion_compat                  1
 #   daemon                            1
-#   platform                          1
+#   platform                          7
 
-## items (9 lines)
+## items (15 lines)
 
 pub fn RoundSample::assert_fields_are_eq(&self)
 pub fn charts::ChartOrientation::assert_fields_are_eq(&self)
@@ -30,10 +30,19 @@ pub fn engine_new(Suite) -> engine::Engine
 pub fn parse_pass_args() -> core::option::Option<(usize, Aggregation)>
 pub fn parse_process_args() -> core::option::Option<(usize, Aggregation)>
 pub fn platform::AffinityError::assert_fields_are_eq(&self)
+pub fn platform::CoreClass::assert_fields_are_eq(&self)
+pub fn platform::CpuPlacement::assert_fields_are_eq(&self)
+pub fn platform::CpuPolicy::assert_fields_are_eq(&self)
+pub fn platform::CpuTopology::assert_fields_are_eq(&self)
+pub fn platform::PlacementStatus::assert_fields_are_eq(&self)
+pub fn platform::TopologyKind::assert_fields_are_eq(&self)
 pub fn postprocess_result(&SuiteResult)
 
-## trait impls (3 types)
+## trait impls (6 types)
 
 Aggregation: TrivialClone
 charts::ChartOrientation: TrivialClone
 criterion_compat::BatchSize: TrivialClone
+platform::CpuPolicy: TrivialClone
+platform::PlacementStatus: TrivialClone
+platform::TopologyKind: TrivialClone

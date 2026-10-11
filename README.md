@@ -111,7 +111,22 @@ fn bench_sort(suite: &mut Suite) {
 zenbench::main!(bench_sort);
 ```
 
-## CPU affinity
+## CPU placement and affinity
+
+By default, detected asymmetric or unknown CPU topology requires a verified
+process boundary within one CPU class. Otherwise zenbench aborts before
+calibration or timed work. Inspect `zenbench cpu-info`, then launch a benchmark
+with `zenbench exec --cpu-policy performance ./my-benchmark` (or `efficiency`).
+Linux requires an enabled cpuset controller; Windows x86/x64 uses a process mask.
+These restrictions cover private Rayon pools and ordinary threads. macOS hints
+cannot certify P/E placement.
+
+Use `ZENBENCH_CPU_POLICY=unrestricted` only to opt out explicitly; every result
+row records `UNVERIFIED_UNRESTRICTED`. Configure crate-wide policy with
+`Suite::cpu_policy` / `Suite::cpu_set`, and scoped defaults with `Suite::affinity`.
+See [verified process placement](docs/process-affinity.md) for CLI/environment
+precedence, platform limits, and separate P/E runs.
+
 
 Pin a comparison group to logical CPU IDs with `g.affinity(&[2, 3])`. The scope
 covers warmup, iteration estimation, every measured round, and zenbench-created
@@ -128,9 +143,6 @@ around `thread.run()` in a
 An existing pool is unaffected by group pinning; a global pool initialized during
 one group keeps its worker configuration for subsequent groups.
 
-For pools outside the harness's control, see the
-[process-level placement design](docs/process-affinity.md). Its launcher policy
-is proposed; the current API provides group and thread scopes.
 
 For a whole harness, set `ZENBENCH_PIN=2-7` or `ZENBENCH_PIN=0,2-4,7` before
 launching it. Ranges are inclusive, IDs are zero based, and the environment is
