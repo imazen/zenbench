@@ -123,6 +123,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          targets: x86_64-pc-windows-gnu
       - uses: Swatinem/rust-cache@v2
       - name: Check MSRV compiles (default features)
         run: cargo check
@@ -132,5 +134,7 @@ jobs:
       # in the README features table; all targets covers tests and benches.
       - name: Check MSRV compiles (all 1.85 features, all targets)
         run: cargo check --all-targets --features async,cpu-time,criterion-compat
+      - name: Check Windows MSRV compiles (all 1.85 features, all targets)
+        run: cargo check --locked --target x86_64-pc-windows-gnu --all-targets --features async,cpu-time,criterion-compat
       - name: Test on MSRV
         run: cargo test --lib

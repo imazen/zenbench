@@ -26,11 +26,8 @@ fn engine_retains_paired_batches_and_round_trips_evidence() {
     assert_eq!(cmp.completed_rounds, 10);
     assert_eq!(cmp.samples.len(), cmp.completed_rounds);
     assert_ne!(cmp.samples[0].iterations, cmp.samples[9].iterations);
-    assert!(
-        cmp.samples
-            .windows(2)
-            .any(|pair| pair[0].execution_order != pair[1].execution_order)
-    );
+    // A random ten-round schedule can legitimately repeat one order.
+    // Deterministic sequence coverage lives beside random_permutation.
     for sample in &cmp.samples {
         assert!(sample.iterations > 0);
         let mut order = sample.execution_order.clone();

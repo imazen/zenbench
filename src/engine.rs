@@ -502,7 +502,13 @@ fn run_comparison_group(
     #[cfg(feature = "alloc-profiling")]
     let mut alloc_totals: Vec<(u64, u64, u64, u64, u64, u64)> =
         vec![(0, 0, 0, 0, 0, 0); n_benchmarks]; // (allocs, deallocs, reallocs, bytes_alloc, bytes_dealloc, iterations)
-    let mut rng = Xoshiro256SS::seed(0xBE0C_0BAD_0000_0001);
+    // Independent group/process schedules avoid repeating the same phase
+    // relationship with periodic system activity. Retained rounds preserve
+    // every realized permutation; bootstrap resampling stays deterministic.
+    use std::hash::BuildHasher;
+    let seed =
+        std::collections::hash_map::RandomState::new().hash_one((std::process::id(), &group.name));
+    let mut rng = Xoshiro256SS::seed(seed);
 
     // Cache firewall buffer
     let firewall = if config.cache_firewall {
@@ -1082,6 +1088,34 @@ fn random_permutation(n: usize, rng: &mut Xoshiro256SS) -> Vec<usize> {
         perm.swap(i, j);
     }
     perm
+}
+
+#[cfg(test)]
+mod shuffle_tests {
+    use super::*;
+
+    #[test]
+    fn seeded_schedules_are_permutations_and_consume_fresh_randomness() {
+        for n in [2, 3, 8] {
+            let schedule = || {
+                let mut rng = Xoshiro256SS::seed(42);
+                (0..64)
+                    .map(|_| random_permutation(n, &mut rng))
+                    .collect::<Vec<_>>()
+            };
+            let orders = schedule();
+            assert_eq!(
+                orders,
+                schedule(),
+                "the fixed-seed control must be reproducible"
+            );
+            assert!(orders.windows(2).any(|pair| pair[0] != pair[1]));
+            for mut order in orders {
+                order.sort_unstable();
+                assert_eq!(order, (0..n).collect::<Vec<_>>());
+            }
+        }
+    }
 }
 
 /// Cache firewall: reads a buffer to spoil CPU cache lines.

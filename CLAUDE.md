@@ -196,3 +196,27 @@ CPU-policy immediate-mode comparisons must attach the coordinator mask before
 checking compatibility with prior samples. Comparing a completed placement
 record against a process-only record incorrectly rejected the second benchmark
 in a Criterion-compatible group; the existing integration test caught it.
+
+### Native repeatability runner regression (2026-10-11)
+
+The development Windows runner initially used the unhandled-exception flag where
+it intended a per-process memory limit. Its total job memory cap remained active.
+Native limit readback caught the missing per-process cap. The runner now sets the
+SDK per-process flag as well and verifies all limits before starting children.
+
+### Repeated execution schedules (2026-10-11)
+
+Twenty native Windows processes repeated the same 200-round permutation sequence
+in each group because the engine used a constant shuffle seed. A fresh-process
+regression failed with that seed and passed after each group received an
+independent RandomState seed. Bootstrap resampling stays deterministic; actual
+round permutations remain in results for inspection and replay.
+
+### Windows process-mask mutation (2026-10-11)
+
+A process-mask boundary can be widened by code that calls SetProcessAffinityMask;
+the native restoration controls exercise that behavior. Strict Windows admission
+now holds an affinity-limited Job Object for the process lifetime. The native Rust
+fixture checked existing Rayon/ordinary workers and an inherited child process.
+Windows can return success for a widen request while preserving the job mask;
+an unchanged actual mask is the confinement evidence.

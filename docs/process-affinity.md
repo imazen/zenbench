@@ -257,9 +257,72 @@ Repeat probes between measurement windows to observe later scheduling changes.
 The current diagnostic reports observations and does not set an automatic
 timing threshold or infer a performance/efficiency class from timings.
 
+### Native Windows repeatability controls
+
+`examples/windows_repeatability.rs` executes integer, dependent-cache, and
+private Rayon workloads in fresh processes. The pool exists before admission;
+workers attempt to widen their masks after admission and record the resulting
+masks. Each group includes two identical workloads, 10% additional work, and
+twice the work. Work count is the controlled input; elapsed time need not scale
+linearly, especially with thread-pool overhead or cache effects.
+
+Build with `just windows-build-image` followed by
+`just windows-build-example windows_repeatability`. These recipes use a local
+container with a Windows GNU cross-linker. Invoke through the host's heavy-work
+wrapper. No native CPU compiler flags are used.
+
+`just windows-repeatability-upload <trusted-alias> [SSH options]` stages the
+hash-named executable using SFTP. `just windows-repeatability-remote
+<trusted-alias> 'default;0,2;performance;efficiency;0,1;2,3' 5 [SSH options]`
+then verifies its SHA-256 before execution. Replace CPU IDs using your topology
+inventory. The default and mixed-set entries are refusal controls on the
+verified hybrid test machine; they are not portable CPU IDs. Each repetition
+alternates configuration order. There is no shared-process aggregation across
+classes.
+
+The native PowerShell runner assigns itself to a Windows
+[Job Object](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
+before launching children, with a 2 GiB process/job committed-memory cap, idle
+priority, and termination when its last job handle closes. Each child has a
+90-second deadline. Peak RSS comes from
+[GetProcessMemoryInfo](https://learn.microsoft.com/en-us/windows/win32/api/psapi/nf-psapi-getprocessmemoryinfo);
+peak job committed memory is a separate measurement. The local Linux wrapper's
+RSS describes the SSH launcher rather than the native Windows workload.
+
+`just windows-repeatability-analyze <capture.log> <summary.json>
+--topology benchmarks/windows_topology_2026-10-11.json` checks placement,
+worker masks, complete rounds, randomized order, known slower controls, and
+class selection against an independent Windows SDK inventory. The inventory
+must describe the actual test machine. It reports process-to-process spread
+and identical-work comparisons without deleting noisy runs. Engine outlier
+counts remain visible.
+
+These experiments explicitly disable resource admission, retain that fact in
+round evidence, and warm actual pool workers separately for 100 ms. They do
+not establish a quiet machine, maximum frequency, or accuracy for arbitrary
+workloads. Per-run confidence intervals are not uncertainty intervals for
+changes in hardware, process layout, or machine state between fresh runs.
+
+Measurement-order shuffles receive an independent seed per group and process.
+The retained execution-order vectors describe the realized schedule. Bootstrap
+resampling keeps a deterministic seed so analyzing the same observations remains
+repeatable.
+
 The `windows_job_boundary` integration fixture runs in isolated native Windows
 processes, including Windows ARM CI. It creates its Rayon and ordinary workers
 before installing the affinity job, attempts process/thread escape, and checks
 an inherited descendant process. This tests the OS boundary independently of
 CPU class discovery; Windows ARM P/E discovery remains unsupported and default
 benchmark admission still fails closed there.
+
+The unchanged `gate_sees_load` regression can also run natively with
+`just windows-gate-test-build` and `just windows-gate-test-remote HOST BINARY`.
+It exercises the CPU monitor's first snapshot and the resource gate while
+workers generate load, then drops those workers. The remote runner requires
+the named test to execute and retains its status, native peak RSS, and job cap.
+This is separate from the explicitly ungated repeatability protocol above.
+
+`just windows-msrv-check` type-checks all Windows targets and the features that
+claim Rust 1.85 support using that toolchain. CI also performs this Windows
+check on Rust 1.85.0; the Linux MSRV check alone does not compile Windows-only
+dependencies or backend code.
