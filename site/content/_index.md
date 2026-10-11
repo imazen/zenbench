@@ -21,7 +21,7 @@ description = "Add to your project, create a bench file, run `cargo bench`."
 tabs = [
     { name = "Install", command = "cargo add zenbench --dev" },
     { name = "Run", command = "cargo bench" },
-    { name = "Compare", command = "cargo bench -- --baseline=main" },
+    { name = "Compare", command = "cargo bench -- --mode=confirm --workload-id=inputs-v3 --baseline=main" },
 ]
 
 [[extra.features]]
@@ -31,7 +31,7 @@ icon = "fa-solid fa-shuffle"
 
 [[extra.features]]
 title = "CI Regression Testing"
-desc = "`--save-baseline=main` and `--baseline=main` with exit codes. Auto-update on pass. Block PRs on performance regressions."
+desc = "Explicit confirmation uses fresh processes and retained evidence. Baselines update only after every required case establishes non-inferiority."
 icon = "fa-solid fa-shield"
 
 [[extra.features]]

@@ -54,23 +54,11 @@ Generated with `cargo bench --bench sorting -- --format=html`. Self-contained, n
   └─────────────────┴───────┴───────┴────────────────────────┴─────────┘
 ```
 
-## Baseline comparison output
+## Baseline decisions
 
-```text
-  Baseline comparison
-  ───────────────────
-  ⚠ git hash differs: baseline=abc12345 current=def67890
-
-  compress::level_1     16.2µs →   16.4µs    +1.2%    unchanged
-  compress::level_6     15.1µs →   15.3µs    +1.3%    unchanged
-  compress::level_9     15.0µs →   15.6µs    +4.0%    unchanged
-  compress::mixed      401.0µs →  412.3µs    +2.8%    unchanged
-  decompress::zenflate  91.5µs →   92.7µs    +1.3%    unchanged
-
-  Summary: 0 regressions, 0 improvements, 5 unchanged
-
-[zenbench] PASS: no regressions exceed 5% threshold
-```
+Confirmation reports process-level intervals and explicit improvement, regression,
+equivalence, non-inferiority or inconclusive verdicts. Descriptive percentage
+changes alone cannot pass CI. See [CI regression testing](../ci-regression/).
 
 ## Thread scaling output
 
