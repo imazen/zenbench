@@ -70,9 +70,42 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
 }
 
 fn encoded(result: &SuiteResult) -> io::Result<Vec<u8>> {
-    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-    serde_json::to_writer(&mut encoder, result).map_err(io::Error::other)?;
-    encoder.finish()
+    encode_limited(result, MAX_PACKET_BYTES)
+}
+
+fn encode_limited(result: &SuiteResult, limit: u64) -> io::Result<Vec<u8>> {
+    // Never publish a packet that our own bounded reader cannot reopen.
+    struct Limited<W> {
+        writer: W,
+        remaining: u64,
+    }
+    impl<W: Write> Write for Limited<W> {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if bytes.len() as u64 > self.remaining {
+                return Err(io::Error::other(
+                    "benchmark packet exceeds storage limit; split the suite",
+                ));
+            }
+            let count = self.writer.write(bytes)?;
+            self.remaining -= count as u64;
+            Ok(count)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            self.writer.flush()
+        }
+    }
+    let mut limited = Limited {
+        writer: GzEncoder::new(Vec::new(), Compression::default()),
+        remaining: limit,
+    };
+    serde_json::to_writer(&mut limited, result).map_err(io::Error::other)?;
+    let bytes = limited.writer.finish()?;
+    if bytes.len() as u64 > limit {
+        return Err(io::Error::other(
+            "compressed benchmark packet exceeds storage limit",
+        ));
+    }
+    Ok(bytes)
 }
 
 pub(crate) fn save(result: &SuiteResult, path: &Path) -> io::Result<()> {
@@ -81,6 +114,11 @@ pub(crate) fn save(result: &SuiteResult, path: &Path) -> io::Result<()> {
     } else {
         serde_json::to_vec(result).map_err(io::Error::other)?
     };
+    if bytes.len() as u64 > MAX_PACKET_BYTES {
+        return Err(io::Error::other(
+            "benchmark packet exceeds storage limit; split the suite",
+        ));
+    }
     atomic_write(path, &bytes)
 }
 
@@ -221,6 +259,17 @@ pub(crate) fn save_reference(result: &SuiteResult, path: &Path) -> io::Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oversized_packets_are_refused_before_publication() {
+        let result = SuiteResult::default();
+        assert!(encode_limited(&result, 32).is_err());
+        let encoded = encode_limited(&result, 4096).unwrap();
+        assert_eq!(
+            serde_json::to_value(decode(&encoded).unwrap()).unwrap(),
+            serde_json::to_value(result).unwrap()
+        );
+    }
 
     #[test]
     fn historical_float_values_keep_every_bit_when_archived() {
