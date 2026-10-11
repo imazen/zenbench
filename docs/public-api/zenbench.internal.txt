@@ -11,7 +11,7 @@
 #
 #   free functions                              4
 #   inherent methods                           11
-#   trait roster entries (type × trait)         6
+#   trait roster entries (type × trait)         7
 #
 # per-module pub lines:
 #   (root)                            5
@@ -38,11 +38,12 @@ pub fn platform::PlacementStatus::assert_fields_are_eq(&self)
 pub fn platform::TopologyKind::assert_fields_are_eq(&self)
 pub fn postprocess_result(&SuiteResult)
 
-## trait impls (6 types)
+## trait impls (7 types)
 
 Aggregation: TrivialClone
 charts::ChartOrientation: TrivialClone
 criterion_compat::BatchSize: TrivialClone
 platform::CpuPolicy: TrivialClone
+platform::CpuProbeConfig: TrivialClone
 platform::PlacementStatus: TrivialClone
 platform::TopologyKind: TrivialClone
