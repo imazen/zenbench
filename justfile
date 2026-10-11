@@ -136,3 +136,43 @@ paired-rounds-check:
     cargo test --lib --no-default-features
     cargo test --example paired_rounds --no-default-features
     cargo clippy --lib --example paired_rounds --no-default-features -- -D warnings
+
+# Scoped-affinity verification (invoke through run-heavy on shared hosts).
+affinity-check:
+    cargo fmt -- --check
+    cargo clippy --all-targets -- -D warnings
+    cargo clippy --lib --tests --examples --no-default-features -- -D warnings
+    cargo test
+
+# Print the calling thread's OS mask before, during, and after a tiny benchmark.
+affinity-example:
+    ZENBENCH_NO_SAVE=1 ZENBENCH_NO_CALIBRATE=1 cargo run --example pinned
+
+# Type-check native backends and the unsupported-target fallback, without linking.
+affinity-platform-check:
+    cargo check --lib --tests --no-default-features --target x86_64-apple-darwin
+    cargo check --lib --tests --no-default-features --target aarch64-apple-darwin
+    cargo check --lib --tests --no-default-features --target x86_64-pc-windows-gnu
+    cargo check --lib --no-default-features --target wasm32-unknown-unknown
+
+# Update API snapshots and verify platform test compilation plus the example.
+affinity-review-check: affinity-platform-check api-doc affinity-example
+
+# Exercise native and explicitly wrapped launches without changing assertions.
+affinity-subprocess-check:
+    cargo fmt -- --check
+    cargo clippy --test affinity_env -- -D warnings
+    cargo test --test affinity_env
+    ZENBENCH_AFFINITY_TEST_RUNNER=/usr/bin/env cargo test --test affinity_env
+
+# Cross.toml supplies qemu-arm to children on this emulated target.
+affinity-arm-check:
+    cross test --target armv7-unknown-linux-gnueabihf --all-features --test affinity_env
+    cross test --target armv7-unknown-linux-gnueabihf --no-default-features --test affinity_env
+
+# Validate each review-stack boundary; run through run-heavy.
+review-check *test_args="--lib":
+    cargo fmt -p zenbench -- --check
+    ZENBENCH_CPU_POLICY=unrestricted ZENBENCH_NO_SAVE=1 cargo test --all-features {{test_args}}
+    cargo clippy --all-targets --all-features -- -D warnings
+    just api-doc

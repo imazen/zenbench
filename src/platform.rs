@@ -2,6 +2,10 @@ use std::sync::Mutex;
 use std::time::Instant;
 use sysinfo::System;
 
+mod affinity;
+pub use affinity::{AffinityError, AffinityGuard, current_thread_affinity, pin_current_thread};
+pub(crate) use affinity::{GroupAffinityGuard, benchmark_affinity, configured_affinity};
+
 /// Cross-platform system state snapshot.
 #[derive(Debug, Clone)]
 pub struct SystemState {
