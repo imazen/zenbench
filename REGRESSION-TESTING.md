@@ -1,5 +1,8 @@
 # Regression testing with zenbench
 
+Start offline with `zenbench guide`. For source edits, retained executables and
+build provenance, see the [workflow guide](docs/benchmark-workflows.md).
+
 Use Iterate for local edits and Confirm for a frozen candidate. A successful
 exploratory run cannot update a CI baseline. Start with registered native `Suite`
 groups; immediate-mode criterion compatibility results cannot confirm.

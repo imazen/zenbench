@@ -18,6 +18,7 @@
 - Strict Windows CPU placement now holds an inherited affinity-limited Job Object, preventing process-mask widening by benchmark code; actual-mask controls cover preexisting Rayon/ordinary threads and child processes (585b0f8d, 95e4042c).
 
 ### Added
+- Offline `zenbench guide`, workflow-oriented command help, and benchmark `--help` before registration; source-revision, retained-binary, provenance and profiling guidance.
 - Iterate/Confirm/Evidence plans, dry-run inspection, fixed-process paired/Welch inference, separate versioned reanalysis, and retained experiment/attempt manifests. CLI/environment override suite defaults. Independent SciPy controls and fail-closed promotion tests cover the decision contract (dfc72892, c60b7b62, 0acfd44a).
 - Background owner-aware resource observations remove per-round CPU-refresh sleeps; threaded groups retain checks and rounds record observation age.
 - Ignored durable gzip evidence, compact JSON saves, hash-verified references, and explicit `snapshot`/`archive` CLI commands for small version-control exports.

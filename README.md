@@ -81,6 +81,10 @@ intervals and fail-closed evidence checks.
 
 ## Quick start
 
+For the edit → confirm workflow, run `zenbench guide` or
+`cargo bench --bench my_bench -- --help`. The [workflow guide](docs/benchmark-workflows.md)
+covers source revisions, retained executables, CPU/Rayon setup, profiling and small Git exports.
+
 ```toml
 # Cargo.toml
 [dev-dependencies]

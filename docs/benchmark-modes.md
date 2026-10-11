@@ -1,5 +1,9 @@
 # Iteration, confirmation and evidence
 
+Choose a task in the [workflow guide](benchmark-workflows.md), or run
+`zenbench guide` without opening a browser. Benchmark flags are available with
+`cargo bench --bench NAME -- --help`.
+
 The default is **Iterate**: one process, 30 maximum rounds per group and 100 ms
 warmup per arm. Explicit group settings still apply. Results are exploratory;
 within-process intervals do not authorize CI acceptance or baseline promotion.

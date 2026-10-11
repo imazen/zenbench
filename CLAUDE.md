@@ -2,6 +2,15 @@
 
 ### Known bugs: defaults audit (2026-10-11)
 
+Workflow audit: macro benchmark binaries rejected `--help` before registration;
+help now returns before plan/topology validation. CLI baseline-list guidance now
+includes required confirmation/workload flags. `zenbench run --wait` still waits
+for its initial Cargo child before applying the metadata-wait timeout and does
+not preserve confirmation's 0/1/2 exit meanings; direct foreground invocation is
+the documented confirmation path. Runtime Git HEAD is retained, but clean/dirty
+state and a source-to-binary build manifest are not automatically captured.
+
+
 LLM output for retained multi-process aggregates labels call counts and timer
 ticks as `per_process`. The aggregate's zero placeholders are not measured
 zero calls or evidence of limited timer resolution; inspect retained children
