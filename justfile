@@ -264,7 +264,7 @@ windows-build-image:
     docker build -t zenbench-windows-build -f tools/windows-build.Dockerfile tools
 
 windows-cargo *options:
-    docker run --rm --memory=12g --memory-swap=12g --cpus=8 --mount type=bind,src={{justfile_directory()}},dst={{justfile_directory()}} --mount type=bind,src={{env("HOME")}}/.cargo,dst={{env("HOME")}}/.cargo --mount type=bind,src={{env("HOME")}}/.rustup,dst={{env("HOME")}}/.rustup,readonly --mount type=bind,src={{env("HOME")}}/tmp,dst={{env("HOME")}}/tmp --env HOME={{env("HOME")}} --env TMPDIR={{env("HOME")}}/tmp --env CARGO_BUILD_JOBS=8 --env CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc-posix --workdir {{justfile_directory()}} --entrypoint /usr/bin/nice zenbench-windows-build -n19 {{env("HOME")}}/.cargo/bin/cargo {{options}}
+    docker run --rm --user $(id -u):$(id -g) --memory=12g --memory-swap=12g --cpus=8 --mount type=bind,src={{justfile_directory()}},dst={{justfile_directory()}} --mount type=bind,src={{env("HOME")}}/.cargo,dst={{env("HOME")}}/.cargo --mount type=bind,src={{env("HOME")}}/.rustup,dst={{env("HOME")}}/.rustup,readonly --mount type=bind,src={{env("HOME")}}/tmp,dst={{env("HOME")}}/tmp --env HOME={{env("HOME")}} --env TMPDIR={{env("HOME")}}/tmp --env CARGO_BUILD_JOBS=8 --env CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc-posix --workdir {{justfile_directory()}} --entrypoint /usr/bin/nice zenbench-windows-build -n19 {{env("HOME")}}/.cargo/bin/cargo {{options}}
 
 windows-build-example example *options:
     just windows-cargo build --release --target x86_64-pc-windows-gnu --example {{example}} {{options}}
@@ -290,3 +290,10 @@ execution-order-check:
 
 windows-repeatability-archive log label commit *options:
     python3 -B examples/archive_windows_repeatability.py {{log}} {{label}} {{commit}} {{options}}
+
+windows-job-test-build:
+    just windows-cargo test --release --target x86_64-pc-windows-gnu --test windows_job_boundary --no-run
+
+windows-job-test-remote host binary *options:
+    python3 -B examples/windows_remote_probe.py {{host}} --upload-file {{binary}} {{options}}
+    python3 -B examples/windows_remote_probe.py {{host}} --script examples/windows_repeatability.ps1 --script-arg `sha256sum {{binary}} | cut -d' ' -f1` --script-arg default --script-arg 1 --script-arg job-test {{options}}

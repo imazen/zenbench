@@ -33,6 +33,12 @@ def analyze(packet):
         placement = result['cpu_placement']
         assert placement['effective_cpus'] == selected
         assert placement['status'] == 'enforced_uniform'
+        if 'process_widen_attempts' in evidence:
+            assert placement['enforcement'] == 'job_affinity'
+            attempts = evidence['process_widen_attempts']
+            assert len(attempts) == 12
+            assert all(a['actual_cpus'] == selected
+                       and set(a['requested_cpus']) > set(selected) for a in attempts)
         if cpus in ['performance', 'efficiency']:
             assert placement['policy'] == cpus
             classes = placement['topology']['classes']

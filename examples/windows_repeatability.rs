@@ -53,6 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .collect(),
     );
     let proof = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let process_proof = Arc::new(std::sync::Mutex::new(Vec::new()));
     let reference = Arc::new(std::sync::Mutex::new(Vec::new()));
     let result = zenbench::run_gated(zenbench::GateConfig::disabled(), |suite| {
         suite.cpu_policy(policy);
@@ -76,6 +77,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let data = data.clone();
                     let cpus = cpus.clone();
                     let proof = proof.clone();
+                    let process_proof = process_proof.clone();
                     let reference = reference.clone();
                     let initial_process = initial_process.clone();
                     let mut initialized = false;
@@ -84,6 +86,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let expected = cpus
                                 .clone()
                                 .unwrap_or_else(|| affinity::get_process_affinity().unwrap());
+                            let mutation = affinity::set_process_affinity(&initial_process);
+                            let actual = affinity::get_process_affinity().unwrap();
+                            assert_eq!(
+                                actual, expected,
+                                "benchmark code widened the process CPU boundary"
+                            );
+                            process_proof.lock().unwrap().push(serde_json::json!({
+                                "requested_cpus": initial_process,
+                                "request_result": mutation.map_err(|e| e.to_string()),
+                                "actual_cpus": actual,
+                            }));
                             let masks = pool.broadcast(|_| {
                                 // Deliberately try widening after process restriction.
                                 let _ = affinity::set_thread_affinity(&initial_process);
@@ -145,6 +158,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "reference_integer_qpc_ns": *reference.lock().unwrap(),
             "initial_workers": initial_workers,
             "worker_masks": *proof.lock().unwrap(),
+            "process_widen_attempts": *process_proof.lock().unwrap(),
             "process_after": process_after,
             "result": result,
         })
