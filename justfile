@@ -230,8 +230,8 @@ cpu-probe-check:
     ZENBENCH_AFFINITY_TEST_RUNNER=/usr/bin/env cargo test --test cpu_probe
     cargo build --bin zenbench --example cpu_probe
 
-cpu-probe-example:
-    cargo run --example cpu_probe
+cpu-probe-example *cpus:
+    cargo run --release --example cpu_probe -- {{cpus}}
 
 cpu-probe-info:
     cargo run --bin zenbench -- cpu-info --probe --workers 2

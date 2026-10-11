@@ -163,6 +163,12 @@ Tested via WSL→PowerShell bridge (Windows cargo 1.92 nightly):
 
 ### Known Bugs (SPEEDQ)
 
+2026-10-11: macOS ARM CI at fdb4a0f4 failed the unchanged no-default-feature
+`iter_deferred_drop_runs` timing assertion: deferred mean 656937 ns versus
+regular mean 170814 ns. The test excludes deferred deallocation but retains
+all allocated outputs during its batch, unlike regular iteration. The cause
+of this particular failure has not been established; assertions remain unchanged.
+
 The affinity environment regression test originally relaunched its ARMv7
 executable directly under cross's QEMU user-mode runner. QEMU does not intercept
 the guest's execve, so the child failed with an executable-format shell error.

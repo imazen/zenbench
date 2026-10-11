@@ -76,3 +76,30 @@ capacities, requiring an explicit set rather than guessing the faster class.
 macOS Intel/ARM, Windows x64, and unsupported WASM fallback compile checks
 passed; these are compile checks, not runtime affinity measurements. Platform
 runtime validation is recorded by the PR's CI jobs.
+
+## Fixed-work worker observations
+
+Sampler implementation `7d15cacf`; CLI `914111a9`. An optimized two-worker
+private Rayon probe ran on the detected P/E IDs using:
+
+```sh
+just cpu-probe-example 0 8
+```
+
+Each worker retained its scoped mask `[0]` or `[8]`; every recorded Linux CPU
+observation matched that worker's ID. Twelve equal-work samples per workload
+produced different worker medians, plus a slow cache batch within the P worker.
+This is a single diagnostic observation, without a confidence interval or an
+attribution of the slow batch. It does not establish class identity from timing.
+
+[Raw observations](../benchmarks/cpu_probe_2026-10-11.json) and
+[source, compiler, command, and resource record](../benchmarks/cpu_probe_2026-10-11.meta.json)
+preserve the measurement. The wrapper reported:
+`run-heavy: done rc=0 9s | peak-RSS 0.51GiB | min-avail 23584MiB | peak-load 4.32`.
+
+The separate `just cpu-probe-info` command measured two new diagnostic workers
+while retaining the failed default admission for the mixed 0–19 process set.
+Both APIs reported `certifies_cpu_class=false`. Fixture tests separately
+distinguished persistent speed differences from isolated slow samples and
+rejected mismatched work, duplicate worker IDs, and invalid times. The actual
+Rayon integration test preserved masks and measured both pool workers.

@@ -167,7 +167,17 @@ let report = CpuProbeReport::from_workers(workers).unwrap();
 println!("{}", serde_json::to_string_pretty(&report).unwrap());
 ```
 
-`examples/cpu_probe.rs` runs that example. The sampler retains the caller's
+`examples/cpu_probe.rs` runs that example. Optional positional CPU IDs let it
+apply a separate scoped mask/hint to each worker; inspect `cpu-info` to choose
+IDs. Build diagnostics with optimization to reduce debug overhead:
+
+```sh
+cargo run --release --example cpu_probe
+# Two specific IDs selected from cpu-info:
+cargo run --release --example cpu_probe -- 0 8
+```
+
+The sampler retains the caller's
 affinity and QoS; apply any hints before invoking it. Configuration bounds
 sample counts and work per batch, and every combined worker must use identical
 configuration. Callers control simultaneity and which workers participate;

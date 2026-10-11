@@ -1,0 +1,221 @@
+{
+  "certifies_cpu_class": false,
+  "workers": [
+    {
+      "config": {
+        "samples": 12,
+        "iterations": 32768
+      },
+      "thread_id": "ThreadId(2)",
+      "affinity_before": {
+        "Ok": [
+          0
+        ]
+      },
+      "affinity_after": {
+        "Ok": [
+          0
+        ]
+      },
+      "samples": [
+        {
+          "integer_ns_per_iteration": 0.966888427734375,
+          "cache_ns_per_iteration": 0.99285888671875,
+          "cpu_before": 0,
+          "cpu_after": 0
+        },
+        {
+          "integer_ns_per_iteration": 0.97222900390625,
+          "cache_ns_per_iteration": 1.91912841796875,
+          "cpu_before": 0,
+          "cpu_after": 0
+        },
+        {
+          "integer_ns_per_iteration": 0.969146728515625,
+          "cache_ns_per_iteration": 0.987548828125,
+          "cpu_before": 0,
+          "cpu_after": 0
+        },
+        {
+          "integer_ns_per_iteration": 0.969696044921875,
+          "cache_ns_per_iteration": 0.989044189453125,
+          "cpu_before": 0,
+          "cpu_after": 0
+        },
+        {
+          "integer_ns_per_iteration": 1.005218505859375,
+          "cache_ns_per_iteration": 1.0736083984375,
+          "cpu_before": 0,
+          "cpu_after": 0
+        },
+        {
+          "integer_ns_per_iteration": 1.048614501953125,
+          "cache_ns_per_iteration": 1.072601318359375,
+          "cpu_before": 0,
+          "cpu_after": 0
+        },
+        {
+          "integer_ns_per_iteration": 1.0498046875,
+          "cache_ns_per_iteration": 1.061370849609375,
+          "cpu_before": 0,
+          "cpu_after": 0
+        },
+        {
+          "integer_ns_per_iteration": 1.0523681640625,
+          "cache_ns_per_iteration": 1.06195068359375,
+          "cpu_before": 0,
+          "cpu_after": 0
+        },
+        {
+          "integer_ns_per_iteration": 1.04888916015625,
+          "cache_ns_per_iteration": 1.070404052734375,
+          "cpu_before": 0,
+          "cpu_after": 0
+        },
+        {
+          "integer_ns_per_iteration": 1.059661865234375,
+          "cache_ns_per_iteration": 1.075531005859375,
+          "cpu_before": 0,
+          "cpu_after": 0
+        },
+        {
+          "integer_ns_per_iteration": 1.04669189453125,
+          "cache_ns_per_iteration": 0.974639892578125,
+          "cpu_before": 0,
+          "cpu_after": 0
+        },
+        {
+          "integer_ns_per_iteration": 1.076385498046875,
+          "cache_ns_per_iteration": 0.990753173828125,
+          "cpu_before": 0,
+          "cpu_after": 0
+        }
+      ]
+    },
+    {
+      "config": {
+        "samples": 12,
+        "iterations": 32768
+      },
+      "thread_id": "ThreadId(3)",
+      "affinity_before": {
+        "Ok": [
+          8
+        ]
+      },
+      "affinity_after": {
+        "Ok": [
+          8
+        ]
+      },
+      "samples": [
+        {
+          "integer_ns_per_iteration": 1.35015869140625,
+          "cache_ns_per_iteration": 1.3245849609375,
+          "cpu_before": 8,
+          "cpu_after": 8
+        },
+        {
+          "integer_ns_per_iteration": 1.349945068359375,
+          "cache_ns_per_iteration": 1.31597900390625,
+          "cpu_before": 8,
+          "cpu_after": 8
+        },
+        {
+          "integer_ns_per_iteration": 1.349273681640625,
+          "cache_ns_per_iteration": 1.319305419921875,
+          "cpu_before": 8,
+          "cpu_after": 8
+        },
+        {
+          "integer_ns_per_iteration": 1.34857177734375,
+          "cache_ns_per_iteration": 1.31317138671875,
+          "cpu_before": 8,
+          "cpu_after": 8
+        },
+        {
+          "integer_ns_per_iteration": 1.34918212890625,
+          "cache_ns_per_iteration": 1.360687255859375,
+          "cpu_before": 8,
+          "cpu_after": 8
+        },
+        {
+          "integer_ns_per_iteration": 1.349395751953125,
+          "cache_ns_per_iteration": 1.313446044921875,
+          "cpu_before": 8,
+          "cpu_after": 8
+        },
+        {
+          "integer_ns_per_iteration": 1.3494873046875,
+          "cache_ns_per_iteration": 1.423858642578125,
+          "cpu_before": 8,
+          "cpu_after": 8
+        },
+        {
+          "integer_ns_per_iteration": 1.55029296875,
+          "cache_ns_per_iteration": 1.310943603515625,
+          "cpu_before": 8,
+          "cpu_after": 8
+        },
+        {
+          "integer_ns_per_iteration": 1.349578857421875,
+          "cache_ns_per_iteration": 1.310791015625,
+          "cpu_before": 8,
+          "cpu_after": 8
+        },
+        {
+          "integer_ns_per_iteration": 1.353607177734375,
+          "cache_ns_per_iteration": 1.308929443359375,
+          "cpu_before": 8,
+          "cpu_after": 8
+        },
+        {
+          "integer_ns_per_iteration": 1.354766845703125,
+          "cache_ns_per_iteration": 1.315399169921875,
+          "cpu_before": 8,
+          "cpu_after": 8
+        },
+        {
+          "integer_ns_per_iteration": 1.349334716796875,
+          "cache_ns_per_iteration": 1.314605712890625,
+          "cpu_before": 8,
+          "cpu_after": 8
+        }
+      ]
+    }
+  ],
+  "integer": [
+    {
+      "min_ns": 0.966888427734375,
+      "median_ns": 1.0476531982421875,
+      "max_ns": 1.076385498046875,
+      "mad_ns": 0.030201278686523437,
+      "slowest_over_fastest": 1.1132468516238994
+    },
+    {
+      "min_ns": 1.34857177734375,
+      "median_ns": 1.3495330810546875,
+      "max_ns": 1.55029296875,
+      "mad_ns": 0.0005655670166015625,
+      "slowest_over_fastest": 1.1495813532473411
+    }
+  ],
+  "cache": [
+    {
+      "min_ns": 0.974639892578125,
+      "median_ns": 1.0616607666015625,
+      "max_ns": 1.91912841796875,
+      "mad_ns": 0.06128484191894531,
+      "slowest_over_fastest": 1.969064094936907
+    },
+    {
+      "min_ns": 1.308929443359375,
+      "median_ns": 1.31500244140625,
+      "max_ns": 1.423858642578125,
+      "mad_ns": 0.006130746459960937,
+      "slowest_over_fastest": 1.0878039681984566
+    }
+  ],
+  "integer_slowest_over_fastest_median": 1.288148676794011,
+  "cache_slowest_over_fastest_median": 1.2386277074320537
+}
