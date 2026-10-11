@@ -140,6 +140,22 @@ enum Commands {
         vertical: bool,
     },
 
+    /// Losslessly compact a result packet into gzip JSON, including all rounds.
+    Archive {
+        input: PathBuf,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+
+    /// Export one selected result as a small, stable CSV snapshot for Git.
+    Snapshot {
+        /// JSON, gzip JSON, or an evidence reference from a completed run.
+        input: PathBuf,
+        /// Destination CSV. Full raw data remains in evidence storage.
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+
     /// Compare two result files.
     Compare {
         /// Baseline result file.
@@ -297,6 +313,32 @@ fn main() {
                 save_charts.as_deref(),
                 pub_config,
             )
+        }
+        Commands::Archive { input, output } => {
+            if output.extension().is_none_or(|e| e != "gz") {
+                eprintln!("archive output must end in .gz");
+                std::process::exit(2);
+            }
+            zenbench::SuiteResult::load(input)
+                .and_then(|r| r.save(output))
+                .unwrap_or_else(|e| {
+                    eprintln!("cannot archive results: {e}");
+                    std::process::exit(2);
+                });
+        }
+        Commands::Snapshot { input, output } => {
+            let result = zenbench::SuiteResult::load(&input).unwrap_or_else(|e| {
+                eprintln!("cannot load snapshot input: {e}");
+                std::process::exit(2);
+            });
+            if result.incomplete {
+                eprintln!("cannot export an incomplete attempt as a snapshot");
+                std::process::exit(2);
+            }
+            result.save_snapshot(&output).unwrap_or_else(|e| {
+                eprintln!("cannot write snapshot: {e}");
+                std::process::exit(2);
+            });
         }
         Commands::Compare {
             baseline,
