@@ -571,12 +571,11 @@ fn environment(name: &str) -> Result<Option<String>, String> {
     }
 }
 
-fn configuration() -> Result<(CpuPolicy, Option<Vec<usize>>), String> {
+fn configuration() -> Result<(Option<CpuPolicy>, Option<Vec<usize>>), String> {
     let policy = cli_value("--cpu-policy")?
         .or(environment("ZENBENCH_CPU_POLICY")?)
         .map(|v| CpuPolicy::parse(&v))
-        .transpose()?
-        .unwrap_or_default();
+        .transpose()?;
     let cpus = cli_value("--cpu-set")?
         .or(environment("ZENBENCH_CPU_SET")?)
         .map(|v| super::affinity::parse_cpu_list(&v).map_err(|e| e.to_string()))
@@ -749,8 +748,8 @@ pub(crate) struct CpuSession {
 impl CpuSession {
     pub(crate) fn start(policy: Option<CpuPolicy>, cpus: Option<&[usize]>) -> Result<Self, String> {
         let (configured, configured_cpus) = configuration()?;
-        let policy = policy.unwrap_or(configured);
-        let cpus = cpus.or(configured_cpus.as_deref());
+        let policy = configured.or(policy).unwrap_or_default();
+        let cpus = configured_cpus.as_deref().or(cpus);
         #[cfg(target_os = "windows")]
         static PROCESS_CPUS: std::sync::Mutex<Option<Vec<usize>>> = std::sync::Mutex::new(None);
         #[cfg(target_os = "windows")]
