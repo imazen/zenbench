@@ -247,3 +247,14 @@ New automatic evidence lives under ignored `.zenbench/data/`, configurable with
 Partial checkpoints and failed process outputs remain available. See
 `docs/result-storage.md`. Exact JSON float parsing prevents the one-bit drift
 found by the independent gzip/Python round-trip check.
+
+### Background resource observations (2026-10-11)
+
+The engine now starts an owner-aware resource sampler before group warmup. Its
+first valid CPU delta is accounted as gate wait; subsequent rounds only read a
+cached observation and retain its age. Observations older than one second are
+unknown and flag the run. Thread-tagged groups keep monitoring enabled. Rival
+benchmark admission is checked before warmup; a timeout flags the result, and
+exclusive-lock failure also flags it. The public standalone SystemMonitor keeps
+its blocking first-snapshot/global-load contract. Monitoring still observes host
+CPU averages, not exclusive use of a selected CPU/cache domain.

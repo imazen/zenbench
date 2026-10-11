@@ -17,6 +17,7 @@
 - Strict Windows CPU placement now holds an inherited affinity-limited Job Object, preventing process-mask widening by benchmark code; actual-mask controls cover preexisting Rayon/ordinary threads and child processes (585b0f8d, 95e4042c).
 
 ### Added
+- Background owner-aware resource observations remove per-round CPU-refresh sleeps; threaded groups retain checks and rounds record observation age.
 - Ignored durable gzip evidence, compact JSON saves, hash-verified references, and explicit `snapshot`/`archive` CLI commands for small version-control exports.
 - Multi-run results retain complete replicates; descriptive aggregates clear stale paired analyses and sum elapsed/resource accounting.
 - Reproducible defaults runtime/storage audit, aggregation counterexample, and proposed evidence/diff contract (98100750, e8921074).
