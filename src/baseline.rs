@@ -150,7 +150,25 @@ pub fn compare_against_baseline(
     current: &SuiteResult,
     max_regression_pct: f64,
 ) -> BaselineComparison {
+    baseline
+        .check_cpu_compatibility(current)
+        .unwrap_or_else(|e| panic!("{e}"));
     let mut warnings = Vec::new();
+    if current
+        .cpu_placement
+        .as_ref()
+        .is_none_or(|p| p.status == crate::platform::PlacementStatus::Unrestricted)
+        || current.comparisons.iter().any(|c| {
+            c.cpu_placement
+                .as_ref()
+                .is_none_or(|p| p.status == crate::platform::PlacementStatus::Unrestricted)
+        })
+    {
+        warnings.push(
+            "CPU placement is unverified; this comparison does not certify CPU-class consistency"
+                .into(),
+        );
+    }
 
     // Staleness checks
     if let (Some(base_hash), Some(curr_hash)) = (&baseline.git_hash, &current.git_hash) {

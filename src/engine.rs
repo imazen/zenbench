@@ -92,6 +92,10 @@ impl Engine {
     pub fn run(mut self) -> SuiteResult {
         // Parse the environment once per process, before any benchmark can run.
         platform::configured_affinity().unwrap_or_else(|e| panic!("benchmark affinity: {e}"));
+        let cpu_session =
+            platform::CpuSession::start(self.suite.cpu_policy, self.suite.cpu_set.as_deref())
+                .unwrap_or_else(|e| panic!("{e}"));
+        eprintln!("[zenbench] {}", cpu_session.placement.llm());
         let run_id = RunId::generate();
         let ci = platform::detect_ci().map(String::from);
         let git_hash = platform::git_commit_hash();
@@ -185,10 +189,18 @@ impl Engine {
             }
         });
 
-        let mut comparisons = Vec::new();
+        let mut comparisons: Vec<ComparisonResult> = Vec::new();
         // Include pre-computed results from criterion-compat immediate mode
         #[cfg(feature = "criterion-compat")]
         comparisons.extend(std::mem::take(&mut self.suite.precomputed_comparisons));
+        for comparison in &comparisons {
+            if let Some(placement) = &comparison.cpu_placement {
+                assert!(
+                    placement.process_compatible(&cpu_session.placement),
+                    "precomputed comparison has different CPU placement"
+                );
+            }
+        }
         let mut total_gate_waits = 0usize;
         let mut total_gate_wait_time = std::time::Duration::ZERO;
 
@@ -248,6 +260,8 @@ impl Engine {
                 loop_overhead_ns,
                 tsc_ticks_per_ns,
                 timer_res,
+                &cpu_session,
+                self.suite.affinity_cores.as_deref(),
             );
             any_unreliable |= gate.is_unreliable();
             total_gate_waits += gate.total_waits();
@@ -291,6 +305,7 @@ impl Engine {
                     loop_overhead_ns,
                     testbed: testbed.clone(),
                     calibration: calibration.clone(),
+                    cpu_placement: Some(cpu_session.placement.clone()),
                     ..Default::default()
                 };
                 let n_groups = comparisons.len();
@@ -302,6 +317,8 @@ impl Engine {
         }
 
         let total_time = start.elapsed();
+
+        cpu_session.verify().unwrap_or_else(|e| panic!("{e}"));
 
         let result = SuiteResult {
             run_id,
@@ -317,6 +334,7 @@ impl Engine {
             loop_overhead_ns,
             testbed,
             calibration,
+            cpu_placement: Some(cpu_session.placement.clone()),
             ..Default::default()
         };
 
@@ -363,12 +381,45 @@ fn run_comparison_group(
     loop_overhead_ns: f64,
     tsc_ticks_per_ns: Option<f64>,
     timer_resolution_ns: u64,
+    cpu_session: &platform::CpuSession,
+    suite_affinity: Option<&[usize]>,
 ) -> ComparisonResult {
     let environment =
         platform::configured_affinity().unwrap_or_else(|e| panic!("benchmark affinity: {e}"));
-    let cores = group.affinity_cores.as_deref().or(environment.as_deref());
+    let cores = group
+        .affinity_cores
+        .as_deref()
+        .or(suite_affinity)
+        .or(environment.as_deref());
+    if let Some(cores) = cores {
+        if cpu_session.placement.status == platform::PlacementStatus::EnforcedUniform
+            && !cores
+                .iter()
+                .all(|cpu| cpu_session.placement.effective_cpus.contains(cpu))
+        {
+            panic!(
+                "group '{}' affinity is outside the verified process CPU set",
+                group.name
+            );
+        }
+    }
+    cpu_session.verify().unwrap_or_else(|e| panic!("{e}"));
     let _affinity = platform::GroupAffinityGuard::enter(cores)
         .unwrap_or_else(|e| panic!("benchmark group '{}' affinity: {e}", group.name));
+    let mut group_placement = cpu_session.placement.clone();
+    group_placement.thread_affinity_requested = cores.map(|cores| {
+        let mut cores = cores.to_vec();
+        cores.sort_unstable();
+        cores.dedup();
+        cores
+    });
+    group_placement.thread_affinity_effective = platform::current_thread_affinity().ok();
+    let verify = || {
+        cpu_session.verify().unwrap_or_else(|e| panic!("{e}"));
+        group_placement
+            .verify_thread()
+            .unwrap_or_else(|e| panic!("{e}"));
+    };
     let config = &group.config;
     let n_benchmarks = group.benchmarks.len();
     let group_start = Instant::now();
@@ -483,6 +534,7 @@ fn run_comparison_group(
 
         // Wait for other benchmark processes to finish (they'd corrupt our data).
         gate.wait_for_no_benchmarks();
+        verify();
 
         // Record whether system is noisy (advisory, doesn't block).
         let gate_clean = gate.check_and_record_status();
@@ -576,6 +628,7 @@ fn run_comparison_group(
         }
 
         measurement_time += round_start.elapsed();
+        verify();
         retained_samples.push(retained);
         completed_rounds += 1;
 
@@ -834,6 +887,7 @@ fn run_comparison_group(
     }
 
     ComparisonResult {
+        cpu_placement: Some(group_placement),
         group_name: group.name.clone(),
         benchmarks: individual_results,
         analyses,

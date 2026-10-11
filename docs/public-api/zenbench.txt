@@ -6,34 +6,34 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenbench.txt 574 lines (supported surface) | zenbench.features.txt 94 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,precise-timing,wasm) | zenbench.internal.txt 12 lines (12 hidden + 0 excluded-feature)
+# files: zenbench.txt 627 lines (supported surface) | zenbench.features.txt 94 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,precise-timing,wasm) | zenbench.internal.txt 21 lines (21 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 9
-#   pub types (struct/enum/trait/alias)        46
+#   pub types (struct/enum/trait/alias)        52
 #   pub consts/statics                          2
 #   pub macros                                  1
-#   free functions                             39
-#   inherent methods                          175
-#   struct fields                             249
-#   enum variants                              25
-#   trait roster entries (type × trait)       108
-#   auto-trait-complete types                  28
+#   free functions                             41
+#   inherent methods                          184
+#   struct fields                             269
+#   enum variants                              35
+#   trait roster entries (type × trait)       150
+#   auto-trait-complete types                  34
 #   auto-trait exceptions                       7
 #
 # per-module pub lines:
-#   (root)                          315
+#   (root)                          325
 #   baseline                         23
 #   calibration                       5
 #   daemon                           30
 #   exclusive                        32
 #   mcp                               1
-#   platform                         29
-#   prelude                          81
+#   platform                         65
+#   prelude                          82
 #   quickchart                       30
 
-## items (534 lines)
+## items (581 lines)
 
 pub mod zenbench
 pub mod baseline
@@ -139,7 +139,41 @@ pub platform::AffinityError::InvalidCore(usize)
 pub platform::AffinityError::InvalidSpecification(alloc::string::String)
 pub platform::AffinityError::Os(alloc::string::String)
 pub platform::AffinityError::Unsupported
+#[non_exhaustive] pub enum platform::CpuPolicy
+pub platform::CpuPolicy::Auto
+pub platform::CpuPolicy::Efficiency
+pub platform::CpuPolicy::Performance
+pub platform::CpuPolicy::Unrestricted
+#[non_exhaustive] pub enum platform::PlacementStatus
+pub platform::PlacementStatus::EnforcedUniform
+pub platform::PlacementStatus::UniformHardware
+pub platform::PlacementStatus::Unrestricted
+#[non_exhaustive] pub enum platform::TopologyKind
+pub platform::TopologyKind::Asymmetric
+pub platform::TopologyKind::Homogeneous
+pub platform::TopologyKind::Unknown
 pub struct platform::AffinityGuard
+#[non_exhaustive] pub struct platform::CoreClass
+pub platform::CoreClass::cpus: alloc::vec::Vec<usize>
+pub platform::CoreClass::logical_cpu_count: usize
+pub platform::CoreClass::name: alloc::string::String
+pub platform::CoreClass::performance_rank: core::option::Option<u32>
+#[non_exhaustive] pub struct platform::CpuPlacement
+pub platform::CpuPlacement::core_class: core::option::Option<alloc::string::String>
+pub platform::CpuPlacement::effective_cpus: alloc::vec::Vec<usize>
+pub platform::CpuPlacement::enforcement: alloc::string::String
+pub platform::CpuPlacement::policy: platform::CpuPolicy
+pub platform::CpuPlacement::requested_cpus: core::option::Option<alloc::vec::Vec<usize>>
+pub platform::CpuPlacement::status: platform::PlacementStatus
+pub platform::CpuPlacement::thread_affinity_effective: core::option::Option<alloc::vec::Vec<usize>>
+pub platform::CpuPlacement::thread_affinity_requested: core::option::Option<alloc::vec::Vec<usize>>
+pub platform::CpuPlacement::topology: platform::CpuTopology
+#[non_exhaustive] pub struct platform::CpuTopology
+pub platform::CpuTopology::classes: alloc::vec::Vec<platform::CoreClass>
+pub platform::CpuTopology::diagnostic: core::option::Option<alloc::string::String>
+pub platform::CpuTopology::kind: platform::TopologyKind
+pub platform::CpuTopology::source: alloc::string::String
+pub fn platform::CpuTopology::select(&self, platform::CpuPolicy) -> core::result::Result<alloc::vec::Vec<usize>, alloc::string::String>
 pub struct platform::SystemMonitor
 pub fn platform::SystemMonitor::new() -> Self
 pub fn platform::SystemMonitor::snapshot(&self) -> platform::SystemState
@@ -154,8 +188,10 @@ pub platform::Testbed::cpu_model: alloc::string::String
 pub platform::Testbed::logical_cores: usize
 pub platform::Testbed::os: alloc::string::String
 pub platform::Testbed::physical_cores: usize
+pub fn platform::check_cpu_placement() -> core::result::Result<platform::CpuPlacement, alloc::string::String>
 pub fn platform::current_thread_affinity() -> core::result::Result<alloc::vec::Vec<usize>, platform::AffinityError>
 pub fn platform::detect_ci() -> core::option::Option<&'static str>
+pub fn platform::detect_cpu_topology() -> platform::CpuTopology
 pub fn platform::detect_testbed() -> platform::Testbed
 pub fn platform::git_commit_hash() -> core::option::Option<alloc::string::String>
 pub fn platform::git_short_hash() -> core::option::Option<alloc::string::String>
@@ -257,9 +293,12 @@ pub prelude::PairedAnalysis::pct_change: f64
 pub prelude::PairedAnalysis::resolution_limited: bool
 pub prelude::PairedAnalysis::significant: bool
 pub prelude::PairedAnalysis::wilcoxon_p: f64
+pub fn Suite::affinity(&mut self, &[usize]) -> &mut Self
 pub fn Suite::bench<F>(&mut self, impl core::convert::Into<alloc::string::String>, F) where F: core::ops::function::FnMut(&mut Bencher) + core::marker::Send + 'static
 pub fn Suite::bench_fn<O: 'static, F>(&mut self, impl core::convert::Into<alloc::string::String>, F) where F: core::ops::function::FnMut() -> O + core::marker::Send + 'static
 pub fn Suite::compare<F: core::ops::function::FnOnce(&mut BenchGroup)>(&mut self, impl core::convert::Into<alloc::string::String>, F)
+pub fn Suite::cpu_policy(&mut self, platform::CpuPolicy) -> &mut Self
+pub fn Suite::cpu_set(&mut self, &[usize]) -> &mut Self
 pub fn Suite::group<F: core::ops::function::FnOnce(&mut BenchGroup)>(&mut self, impl core::convert::Into<alloc::string::String>, F)
 pub fn Suite::merge(&mut self, Suite)
 pub fn Suite::new() -> Self
@@ -268,6 +307,7 @@ pub fn Suite::set_group_filter(&mut self, alloc::string::String)
 pub prelude::SuiteResult::calibration: core::option::Option<calibration::Calibration>
 pub prelude::SuiteResult::ci_environment: core::option::Option<alloc::string::String>
 pub prelude::SuiteResult::comparisons: alloc::vec::Vec<ComparisonResult>
+pub prelude::SuiteResult::cpu_placement: core::option::Option<platform::CpuPlacement>
 pub prelude::SuiteResult::gate_wait_time: core::time::Duration
 pub prelude::SuiteResult::gate_waits: usize
 pub prelude::SuiteResult::git_hash: core::option::Option<alloc::string::String>
@@ -279,6 +319,7 @@ pub prelude::SuiteResult::timer_resolution_ns: u64
 pub prelude::SuiteResult::timestamp: alloc::string::String
 pub prelude::SuiteResult::total_time: core::time::Duration
 pub prelude::SuiteResult::unreliable: bool
+pub fn SuiteResult::check_cpu_compatibility(&self, &Self) -> core::result::Result<(), alloc::string::String>
 pub fn SuiteResult::group_by_tag(&self, &str) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::vec::Vec<(&str, &BenchmarkResult)>>
 pub fn SuiteResult::load(impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<Self>
 pub fn SuiteResult::print_report(&self)
@@ -401,6 +442,7 @@ pub ComparisonResult::cache_firewall: bool
 pub ComparisonResult::cache_firewall_bytes: usize
 pub ComparisonResult::cold_start: bool
 pub ComparisonResult::completed_rounds: usize
+pub ComparisonResult::cpu_placement: core::option::Option<platform::CpuPlacement>
 pub ComparisonResult::expect_sub_ns: bool
 pub ComparisonResult::group_name: alloc::string::String
 pub ComparisonResult::iterations_per_sample: usize
@@ -507,9 +549,12 @@ pub RoundSample::iterations: usize
 pub struct RunId(pub alloc::string::String)
 pub fn RunId::generate() -> Self
 pub struct Suite [also: prelude]
+pub fn Suite::affinity(&mut self, &[usize]) -> &mut Self
 pub fn Suite::bench<F>(&mut self, impl core::convert::Into<alloc::string::String>, F) where F: core::ops::function::FnMut(&mut Bencher) + core::marker::Send + 'static
 pub fn Suite::bench_fn<O: 'static, F>(&mut self, impl core::convert::Into<alloc::string::String>, F) where F: core::ops::function::FnMut() -> O + core::marker::Send + 'static
 pub fn Suite::compare<F: core::ops::function::FnOnce(&mut BenchGroup)>(&mut self, impl core::convert::Into<alloc::string::String>, F)
+pub fn Suite::cpu_policy(&mut self, platform::CpuPolicy) -> &mut Self
+pub fn Suite::cpu_set(&mut self, &[usize]) -> &mut Self
 pub fn Suite::group<F: core::ops::function::FnOnce(&mut BenchGroup)>(&mut self, impl core::convert::Into<alloc::string::String>, F)
 pub fn Suite::merge(&mut self, Suite)
 pub fn Suite::new() -> Self
@@ -519,6 +564,7 @@ pub fn Suite::set_group_filter(&mut self, alloc::string::String)
 pub SuiteResult::calibration: core::option::Option<calibration::Calibration>
 pub SuiteResult::ci_environment: core::option::Option<alloc::string::String>
 pub SuiteResult::comparisons: alloc::vec::Vec<ComparisonResult>
+pub SuiteResult::cpu_placement: core::option::Option<platform::CpuPlacement>
 pub SuiteResult::gate_wait_time: core::time::Duration
 pub SuiteResult::gate_waits: usize
 pub SuiteResult::git_hash: core::option::Option<alloc::string::String>
@@ -530,6 +576,7 @@ pub SuiteResult::timer_resolution_ns: u64
 pub SuiteResult::timestamp: alloc::string::String
 pub SuiteResult::total_time: core::time::Duration
 pub SuiteResult::unreliable: bool
+pub fn SuiteResult::check_cpu_compatibility(&self, &Self) -> core::result::Result<(), alloc::string::String>
 pub fn SuiteResult::group_by_tag(&self, &str) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::vec::Vec<(&str, &BenchmarkResult)>>
 pub fn SuiteResult::load(impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<Self>
 pub fn SuiteResult::print_report(&self)
@@ -570,7 +617,7 @@ pub fn run_gated<F: core::ops::function::FnOnce(&mut Suite)>(GateConfig, F) -> S
 pub fn run_passes<F: core::ops::function::FnMut(&mut Suite)>(usize, Aggregation, F) -> SuiteResult
 pub fn run_processes(usize, Aggregation) -> SuiteResult
 
-## trait impls (32 types)
+## trait impls (38 types)
 
 Aggregation: Clone, Copy, Debug
 AllocProfiler<A>: GlobalAlloc
@@ -598,16 +645,22 @@ exclusive::HolderInfo: Clone, Debug
 exclusive::Lock: Drop
 platform::AffinityError: Clone, Debug, Display, Eq, Error, PartialEq
 platform::AffinityGuard: Debug, Drop
+platform::CoreClass: Clone, Debug, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+platform::CpuPlacement: Clone, Debug, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+platform::CpuPolicy: Clone, Copy, Debug, Default, Display, Eq, FromStr, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+platform::CpuTopology: Clone, Debug, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+platform::PlacementStatus: Clone, Copy, Debug, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 platform::SystemMonitor: Default
 platform::SystemState: Clone, Debug
 platform::Testbed: Clone, Debug, Display, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+platform::TopologyKind: Clone, Copy, Debug, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 quickchart::ColorScheme: Clone, Debug
 quickchart::QuickChartConfig: Clone, Debug, Default
 quickchart::QuickChartUrl: Clone, Debug
 
 ## auto traits
 
-28 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+34 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 AllocProfiler<A>: !Freeze !RefUnwindSafe !Send !Unpin !UnwindSafe
 BenchGroup: !RefUnwindSafe !Sync !UnwindSafe
 ResourceGate: !Freeze

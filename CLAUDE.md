@@ -185,3 +185,8 @@ cover MT percentage units and a foreign negative control. No burn test used.
 Linux resource admission must also exclude tasks belonging to explicitly registered worker leaders from heavy-process counts. Subtract CPU using leaders only; their CPU usage aggregates tasks, so subtracting task counters again would hide foreign load. The negative control keeps an unregistered heavy process visible.
 
 Without an explicit nonempty worker PID inventory, SystemMonitor retains global CPU-load behavior, including its caller. The gate_sees_load integration test depends on this contract; ownership subtraction is opt-in through the launcher.
+
+CPU-policy immediate-mode comparisons must attach the coordinator mask before
+checking compatibility with prior samples. Comparing a completed placement
+record against a process-only record incorrectly rejected the second benchmark
+in a Criterion-compatible group; the existing integration test caught it.

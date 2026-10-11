@@ -41,12 +41,12 @@ fmt-fix:
 
 # Run library tests
 test:
-    cargo test --lib
+    ZENBENCH_CPU_POLICY=unrestricted cargo test --lib
 
 # Run all tests including integration
 test-all:
-    cargo test
-    cargo test --features criterion-compat
+    ZENBENCH_CPU_POLICY=unrestricted cargo test
+    ZENBENCH_CPU_POLICY=unrestricted cargo test --features criterion-compat
 
 # ── Native benchmarks ────────────────────────────────────────
 
@@ -133,7 +133,7 @@ paired-rounds-build:
     cargo build --release --example paired_rounds --no-default-features
 
 paired-rounds-check:
-    cargo test --lib --no-default-features
+    ZENBENCH_CPU_POLICY=unrestricted cargo test --lib --no-default-features
     cargo test --example paired_rounds --no-default-features
     cargo clippy --lib --example paired_rounds --no-default-features -- -D warnings
 
@@ -142,11 +142,11 @@ affinity-check:
     cargo fmt -- --check
     cargo clippy --all-targets -- -D warnings
     cargo clippy --lib --tests --examples --no-default-features -- -D warnings
-    cargo test
+    ZENBENCH_CPU_POLICY=unrestricted cargo test
 
 # Print the calling thread's OS mask before, during, and after a tiny benchmark.
 affinity-example:
-    ZENBENCH_NO_SAVE=1 ZENBENCH_NO_CALIBRATE=1 cargo run --example pinned
+    ZENBENCH_CPU_POLICY=unrestricted ZENBENCH_NO_SAVE=1 ZENBENCH_NO_CALIBRATE=1 cargo run --example pinned
 
 # Type-check native backends and the unsupported-target fallback, without linking.
 affinity-platform-check:
@@ -162,13 +162,62 @@ affinity-review-check: affinity-platform-check api-doc affinity-example
 affinity-subprocess-check:
     cargo fmt -- --check
     cargo clippy --test affinity_env -- -D warnings
-    cargo test --test affinity_env
-    ZENBENCH_AFFINITY_TEST_RUNNER=/usr/bin/env cargo test --test affinity_env
+    ZENBENCH_CPU_POLICY=unrestricted cargo test --test affinity_env
+    ZENBENCH_CPU_POLICY=unrestricted ZENBENCH_AFFINITY_TEST_RUNNER=/usr/bin/env cargo test --test affinity_env
 
 # Cross.toml supplies qemu-arm to children on this emulated target.
 affinity-arm-check:
-    cross test --target armv7-unknown-linux-gnueabihf --all-features --test affinity_env
-    cross test --target armv7-unknown-linux-gnueabihf --no-default-features --test affinity_env
+    ZENBENCH_CPU_POLICY=unrestricted cross test --target armv7-unknown-linux-gnueabihf --all-features --test affinity_env
+    ZENBENCH_CPU_POLICY=unrestricted cross test --target armv7-unknown-linux-gnueabihf --no-default-features --test affinity_env
+
+# Functional fixtures opt out explicitly; policy cases clear that opt-out in fresh children.
+cpu-policy-check:
+    cargo fmt --check
+    cargo clippy --all-targets --features criterion-compat -- -D warnings
+    ZENBENCH_CPU_POLICY=unrestricted ZENBENCH_NO_SAVE=1 ZENBENCH_NO_CALIBRATE=1 cargo test --features criterion-compat
+    ZENBENCH_CPU_POLICY=unrestricted ZENBENCH_NO_SAVE=1 ZENBENCH_NO_CALIBRATE=1 cargo test --no-default-features
+
+cpu-policy-build:
+    cargo build --bin zenbench --example cpu_policy
+
+# Each class needs its own fresh process. These probes use one CPU, no sweep.
+cpu-policy-container image cpus:
+    docker run --rm --memory=12g --memory-swap=12g --cpus=1 --cpuset-cpus={{cpus}} --mount type=bind,src={{justfile_directory()}},dst=/work,readonly --env ZENBENCH_NO_SAVE=1 --env ZENBENCH_NO_CALIBRATE=1 --entrypoint /usr/bin/nice {{image}} -n19 /work/target/debug/examples/cpu_policy
+
+# This gate test requires no foreign benchmark processes on the host.
+cpu-policy-gate-check:
+    ZENBENCH_CPU_POLICY=unrestricted cargo test --lib gate::tests::own_benchmark_named_thread_does_not_block_gate -- --exact --nocapture
+
+cpu-policy-review-check:
+    cargo clippy --all-targets --features criterion-compat -- -D warnings
+    cargo test --lib platform::placement
+    cargo test --lib results::tests::placement_metadata
+    ZENBENCH_CPU_POLICY=unrestricted ZENBENCH_NO_CALIBRATE=1 ZENBENCH_NO_SAVE=1 cargo test --test cpu_policy --test affinity --test affinity_env --test criterion_compat --features criterion-compat
+    just affinity-platform-check
+    just api-doc
+    just cpu-policy-build
+
+cpu-policy-image:
+    docker pull ubuntu:26.04
+
+cpu-policy-launch-container image cpus:
+    docker run --rm --memory=12g --memory-swap=12g --cpus=1 --cpuset-cpus={{cpus}} --mount type=bind,src={{justfile_directory()}},dst=/work,readonly --entrypoint /usr/bin/nice {{image}} -n19 /work/target/debug/zenbench exec --cpu-policy auto --cpu-set={{cpus}} /usr/bin/printf -- PROGRAM_STARTED
+
+cpu-policy-cli-check:
+    cargo clippy --bin zenbench -- -D warnings
+    cargo build --bin zenbench
+    cargo test --test cpu_policy launcher_helper_cannot_certify_an_opt_out -- --exact
+
+cpu-policy-chart-check:
+    cargo clippy --all-targets --features criterion-compat,charts -- -D warnings
+    cargo test --lib --features charts charts::tests
+
+cpu-policy-subprocess-check:
+    cargo clippy --test cpu_policy -- -D warnings
+    ZENBENCH_AFFINITY_TEST_RUNNER=/usr/bin/env ZENBENCH_NO_SAVE=1 ZENBENCH_NO_CALIBRATE=1 cargo test --test cpu_policy
+
+cpu-policy-arm-check:
+    ZENBENCH_CPU_POLICY=unrestricted cross test --target armv7-unknown-linux-gnueabihf --no-default-features --features cli --test cpu_policy
 
 # Validate each review-stack boundary; run through run-heavy.
 review-check *test_args="--lib":

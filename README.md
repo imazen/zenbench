@@ -111,7 +111,22 @@ fn bench_sort(suite: &mut Suite) {
 zenbench::main!(bench_sort);
 ```
 
-## CPU affinity
+## CPU placement and affinity
+
+By default, detected asymmetric or unknown CPU topology requires a verified
+process boundary within one CPU class. Otherwise zenbench aborts before
+calibration or timed work. Inspect `zenbench cpu-info`, then launch a benchmark
+with `zenbench exec --cpu-policy performance ./my-benchmark` (or `efficiency`).
+Linux requires an enabled cpuset controller; Windows x86/x64 uses a process mask.
+These restrictions cover private Rayon pools and ordinary threads. macOS hints
+cannot certify P/E placement.
+
+Use `ZENBENCH_CPU_POLICY=unrestricted` only to opt out explicitly; every result
+row records `UNVERIFIED_UNRESTRICTED`. Configure crate-wide policy with
+`Suite::cpu_policy` / `Suite::cpu_set`, and scoped defaults with `Suite::affinity`.
+See [verified process placement](docs/process-affinity.md) for CLI/environment
+precedence, platform limits, and separate P/E runs.
+
 
 Pin a comparison group to logical CPU IDs with `g.affinity(&[2, 3])`. The scope
 covers warmup, iteration estimation, every measured round, and zenbench-created
@@ -128,6 +143,7 @@ around `thread.run()` in a
 An existing pool is unaffected by group pinning; a global pool initialized during
 one group keeps its worker configuration for subsequent groups.
 
+
 For a whole harness, set `ZENBENCH_PIN=2-7` or `ZENBENCH_PIN=0,2-4,7` before
 launching it. Ranges are inclusive, IDs are zero based, and the environment is
 parsed once per process. A group's explicit setting overrides the environment.
@@ -143,8 +159,10 @@ this is a best-effort cache-sharing hint, **not a binding to those CPUs**. The g
 restores the prior tag; hardware that rejects the hint returns an error. macOS
 has no CPU-mask query, so `current_thread_affinity()` returns `Unsupported` there.
 Other targets return `AffinityError::Unsupported` for pinning too.
-See [the pinned example](examples/pinned.rs) (`cargo run --example pinned`) for
-before/during/after mask checks on an available CPU.
+See [the pinned example](examples/pinned.rs)
+(`ZENBENCH_CPU_POLICY=unrestricted cargo run --example pinned`) for
+before/during/after scoped mask checks on an available CPU. This example opts out
+of process-class certification explicitly.
 
 ## CI regression testing
 

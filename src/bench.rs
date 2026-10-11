@@ -76,16 +76,47 @@ impl Throughput {
 pub struct Suite {
     pub(crate) groups: Vec<BenchGroup>,
     pub(crate) group_filter: Option<String>,
+    pub(crate) cpu_policy: Option<crate::platform::CpuPolicy>,
+    pub(crate) cpu_set: Option<Vec<usize>>,
+    pub(crate) affinity_cores: Option<Vec<usize>>,
     /// Pre-computed results from criterion-compat immediate mode.
     #[cfg(feature = "criterion-compat")]
     pub(crate) precomputed_comparisons: Vec<crate::results::ComparisonResult>,
 }
 
 impl Suite {
+    /// Configure process CPU-class admission for all groups. Auto (default)
+    /// refuses unknown/asymmetric placement without a verified uniform boundary.
+    pub fn cpu_policy(&mut self, policy: crate::platform::CpuPolicy) -> &mut Self {
+        self.cpu_policy = Some(policy);
+        self
+    }
+
+    /// Require this exact process CPU set. Linux needs an enabled cpuset;
+    /// Windows applies a process mask. A thread affinity mask is insufficient.
+    pub fn cpu_set(&mut self, cores: &[usize]) -> &mut Self {
+        let mut cores = cores.to_vec();
+        cores.sort_unstable();
+        cores.dedup();
+        self.cpu_set = Some(cores);
+        self
+    }
+
+    /// Set scoped affinity for all groups, including previously registered ones.
+    /// Explicit group settings take precedence; external pools use the process
+    /// boundary rather than this calling-thread mask.
+    pub fn affinity(&mut self, cores: &[usize]) -> &mut Self {
+        self.affinity_cores = Some(cores.to_vec());
+        self
+    }
+
     pub fn new() -> Self {
         Self {
             groups: Vec::new(),
             group_filter: None,
+            cpu_policy: None,
+            cpu_set: None,
+            affinity_cores: None,
             #[cfg(feature = "criterion-compat")]
             precomputed_comparisons: Vec::new(),
         }
@@ -167,7 +198,30 @@ impl Suite {
     }
 
     /// Merge another suite's groups into this one.
-    pub fn merge(&mut self, other: Suite) {
+    pub fn merge(&mut self, mut other: Suite) {
+        for (name, same) in [
+            (
+                "CPU policy",
+                self.cpu_policy.is_none()
+                    || other.cpu_policy.is_none()
+                    || self.cpu_policy == other.cpu_policy,
+            ),
+            (
+                "CPU set",
+                self.cpu_set.is_none() || other.cpu_set.is_none() || self.cpu_set == other.cpu_set,
+            ),
+        ] {
+            assert!(same, "cannot merge suites with different {name}");
+        }
+        self.cpu_policy = self.cpu_policy.or(other.cpu_policy);
+        if self.cpu_set.is_none() {
+            self.cpu_set = other.cpu_set.take();
+        }
+        for group in &mut other.groups {
+            if group.affinity_cores.is_none() {
+                group.affinity_cores = other.affinity_cores.clone();
+            }
+        }
         self.groups.extend(other.groups);
         #[cfg(feature = "criterion-compat")]
         self.precomputed_comparisons

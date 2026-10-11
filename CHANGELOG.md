@@ -8,10 +8,13 @@
 - Resource admission accounts for explicitly registered launcher/worker CPU ownership; foreign work and global RAM/temperature gates remain visible. A private development example reuses engine paired statistics for external-worker rounds (cca46093fe78).
 
 ### QUEUED BREAKING CHANGES
+- Default CPU admission now refuses asymmetric or unknown topology without verified uniform process placement. Explicit `unrestricted` policy permits unverified runs and labels every result row (d151aac6).
 <!-- Breaking changes that will ship together in the next minor release.
      Add items here as you discover them. Do NOT ship these piecemeal — batch them. -->
 
 ### Added
+- CPU topology/placement records, `Suite::cpu_policy`, `Suite::cpu_set`, and suite affinity defaults; per-row CPU evidence and incompatible-placement checks for aggregation/baselines (d151aac6).
+- `zenbench cpu-info` and `zenbench exec` verified launch control; Linux cpuset and supported Windows process-mask enforcement cover external pools. macOS class binding and Windows ARM/multiple processor groups fail closed (8e2d6334).
 - Scoped CPU affinity: `platform::pin_current_thread` / `AffinityGuard`, mask queries on Linux/Windows, `BenchGroup::affinity`, and cached `ZENBENCH_PIN` CPU lists/ranges. Group settings cover warmup, estimation, rounds, and zenbench-owned workers. macOS saves/restores an advisory Mach cache-sharing tag rather than binding CPU IDs; rejected hints return errors (ce74f0dc).
 
 ### Changed

@@ -294,7 +294,7 @@ mod backend {
     }
 }
 
-fn parse_cpu_list(spec: &str) -> Result<Vec<usize>, AffinityError> {
+pub(crate) fn parse_cpu_list(spec: &str) -> Result<Vec<usize>, AffinityError> {
     // Bound expansion before allocating. Backends validate individual CPU IDs.
     const MAX_ENTRIES: usize = 1024;
     let invalid = || AffinityError::InvalidSpecification(spec.into());
