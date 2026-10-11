@@ -349,3 +349,37 @@ monitor-check:
     ZENBENCH_CPU_POLICY=unrestricted cargo test --test round_samples
     cargo clippy --all-targets -- -D warnings
     just api-doc
+
+plan-check:
+    cargo fmt -p zenbench
+    ZENBENCH_CPU_POLICY=unrestricted cargo test --lib
+    ZENBENCH_CPU_POLICY=unrestricted cargo test --test aggregation_evidence --test round_samples
+    cargo clippy --all-targets -- -D warnings
+    just api-doc
+
+protocol-build:
+    cargo fmt -p zenbench
+    cargo clippy --all-targets -- -D warnings
+    cargo build --release --example protocol_fixture
+
+# Retains all local protocol attempts; output must be a new path under this repo.
+protocol-check output cpus="0" *options:
+    docker run --rm --user $(id -u):$(id -g) --memory=2g --memory-swap=2g --cpuset-cpus={{cpus}} --mount type=bind,src={{justfile_directory()}},dst=/work --workdir /work --env HOME=/work/.git/defaults-audit-home --env TMPDIR=/work/.git/defaults-audit-home/tmp --entrypoint /usr/bin/nice zenbench-audit -n19 python3 -B examples/check_protocol.py /work/target/release/examples/protocol_fixture {{output}} {{options}}
+
+# Generate independent expectations only into a previously absent fixture.
+coverage-oracle:
+    python3 -B examples/coverage_oracle.py
+
+# Full local verification for mode/storage changes, with explicit placement opt-out
+# for functional fixtures. Native placement subprocess controls test admission.
+modes-full-check:
+    cargo fmt -p zenbench
+    ZENBENCH_CPU_POLICY=unrestricted ZENBENCH_NO_SAVE=1 cargo test --all-features
+    ZENBENCH_CPU_POLICY=unrestricted ZENBENCH_NO_SAVE=1 cargo test --no-default-features
+    cargo clippy --all-targets --all-features -- -D warnings
+    cargo clippy --no-default-features -- -D warnings
+    just api-doc
+    cargo +1.85 check --locked --all-targets --features async,cpu-time,criterion-compat
+
+protocol-replay directory:
+    python3 -B examples/check_retained_protocol.py target/debug/zenbench {{directory}}
