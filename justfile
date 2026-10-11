@@ -304,6 +304,13 @@ windows-gate-test-build:
 windows-msrv-check:
     cargo +1.85 check --locked --target x86_64-pc-windows-gnu --all-targets --features async,cpu-time,criterion-compat
 
+# Reusable CI audit; redirect job logs to a retained capture file.
+ci-status run:
+    gh run view {{run}} --json jobs --jq '.jobs[] | [.name,.status,.conclusion] | @tsv'
+
+ci-job-log job:
+    gh api repos/imazen/zenbench/actions/jobs/{{job}}/logs --allow-escape-sequences
+
 windows-gate-test-remote host binary *options:
     python3 -B examples/windows_remote_probe.py {{host}} --upload-file {{binary}} {{options}}
     python3 -B examples/windows_remote_probe.py {{host}} --script examples/windows_repeatability.ps1 --script-arg `sha256sum {{binary}} | cut -d' ' -f1` --script-arg default --script-arg 1 --script-arg gate-test {{options}}
