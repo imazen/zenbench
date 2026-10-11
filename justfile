@@ -136,3 +136,24 @@ paired-rounds-check:
     cargo test --lib --no-default-features
     cargo test --example paired_rounds --no-default-features
     cargo clippy --lib --example paired_rounds --no-default-features -- -D warnings
+
+# Scoped-affinity verification (invoke through run-heavy on shared hosts).
+affinity-check:
+    cargo fmt -- --check
+    cargo clippy --all-targets -- -D warnings
+    cargo clippy --lib --tests --examples --no-default-features -- -D warnings
+    cargo test
+
+# Print the calling thread's OS mask before, during, and after a tiny benchmark.
+affinity-example:
+    ZENBENCH_NO_SAVE=1 ZENBENCH_NO_CALIBRATE=1 cargo run --example pinned
+
+# Type-check native backends and the unsupported-target fallback, without linking.
+affinity-platform-check:
+    cargo check --lib --tests --no-default-features --target x86_64-apple-darwin
+    cargo check --lib --tests --no-default-features --target aarch64-apple-darwin
+    cargo check --lib --tests --no-default-features --target x86_64-pc-windows-gnu
+    cargo check --lib --no-default-features --target wasm32-unknown-unknown
+
+# Update API snapshots and verify platform test compilation plus the example.
+affinity-review-check: affinity-platform-check api-doc affinity-example

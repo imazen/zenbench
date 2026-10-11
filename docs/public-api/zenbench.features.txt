@@ -39,7 +39,7 @@ pub charts::ChartConfig::show_labels: bool
 pub charts::ChartConfig::show_whiskers: bool
 pub charts::ChartConfig::theme: alloc::string::String
 pub fn charts::comparison_to_svg(&ComparisonResult, &charts::ChartConfig) -> core::option::Option<alloc::string::String>
-pub fn charts::save_charts(&SuiteResult, &std::path::Path, &charts::ChartConfig) -> std::io::error::Result<()>
+pub fn charts::save_charts(&SuiteResult, &std::path::Path, &charts::ChartConfig) -> core::io::error::Result<()>
 pub mod criterion_compat
 pub enum criterion_compat::BatchSize
 pub criterion_compat::BatchSize::LargeInput
@@ -87,7 +87,7 @@ pub fn criterion_compat::black_box<T>(T) -> T
 pub fn BenchGroup::current_subgroup(&self) -> core::option::Option<&alloc::string::String>
 pub fn Bencher::iter_async<O, F, Fut>(&mut self, &tokio::runtime::runtime::Runtime, F) where F: core::ops::function::FnMut() -> Fut, Fut: core::future::future::Future<Output = O>
 pub fn Suite::push_comparison(&mut self, ComparisonResult)
-pub fn SuiteResult::save_publication_charts(&self, impl core::convert::AsRef<std::path::Path>, &charts::ChartConfig) -> std::io::error::Result<()>
+pub fn SuiteResult::save_publication_charts(&self, impl core::convert::AsRef<std::path::Path>, &charts::ChartConfig) -> core::io::error::Result<()>
 pub mod wasm
 pub use wasm::wasmtime
 pub struct wasm::WasmBench
@@ -109,7 +109,7 @@ pub macro criterion_main!
 pub fn BenchGroup::current_subgroup(&self) -> core::option::Option<&alloc::string::String>
 pub fn Bencher::iter_async<O, F, Fut>(&mut self, &tokio::runtime::runtime::Runtime, F) where F: core::ops::function::FnMut() -> Fut, Fut: core::future::future::Future<Output = O>
 pub fn Suite::push_comparison(&mut self, ComparisonResult)
-pub fn SuiteResult::save_publication_charts(&self, impl core::convert::AsRef<std::path::Path>, &charts::ChartConfig) -> std::io::error::Result<()>
+pub fn SuiteResult::save_publication_charts(&self, impl core::convert::AsRef<std::path::Path>, &charts::ChartConfig) -> core::io::error::Result<()>
 
 ## trait impls (7 types)
 

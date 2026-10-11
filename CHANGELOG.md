@@ -11,6 +11,9 @@
 <!-- Breaking changes that will ship together in the next minor release.
      Add items here as you discover them. Do NOT ship these piecemeal — batch them. -->
 
+### Added
+- Scoped CPU affinity: `platform::pin_current_thread` / `AffinityGuard`, mask queries on Linux/Windows, `BenchGroup::affinity`, and cached `ZENBENCH_PIN` CPU lists/ranges. Group settings cover warmup, estimation, rounds, and zenbench-owned workers. macOS saves/restores an advisory Mach cache-sharing tag rather than binding CPU IDs; rejected hints return errors (ce74f0dc).
+
 ### Changed
 - **Nothing goes to the temp dir any more.** Auto-saved results move from `/tmp/zenbench/` to `<target>/zenbench/results/`, `--best-of-processes` exchange files to `<target>/zenbench/proc/`, and `self-compare`'s git worktree and builds to `<target>/zenbench/self-compare/`; the engine lock (`zenbench.lock`) and `exclusive::Lock::default_path()` move to the per-user cache dir (`~/.cache/zenbench/`, `%LOCALAPPDATA%\zenbench\`), so the rendezvous no longer follows `TMPDIR`. Versions up to 0.1.10 still lock in the temp dir, so mixed old/new runs on one box don't wait for each other until both sides upgrade (c62baca).
 - `self-compare` prunes stale git worktree registrations before creating its worktree, so a `cargo clean` can't make `worktree add` refuse the path (c62baca).

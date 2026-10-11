@@ -10,7 +10,7 @@
 ## summary
 #
 #   free functions                              4
-#   inherent methods                            4
+#   inherent methods                            5
 #   trait roster entries (type × trait)         3
 #
 # per-module pub lines:
@@ -18,8 +18,9 @@
 #   charts                            1
 #   criterion_compat                  1
 #   daemon                            1
+#   platform                          1
 
-## items (8 lines)
+## items (9 lines)
 
 pub fn RoundSample::assert_fields_are_eq(&self)
 pub fn charts::ChartOrientation::assert_fields_are_eq(&self)
@@ -28,6 +29,7 @@ pub fn daemon::RunStatus::assert_fields_are_eq(&self)
 pub fn engine_new(Suite) -> engine::Engine
 pub fn parse_pass_args() -> core::option::Option<(usize, Aggregation)>
 pub fn parse_process_args() -> core::option::Option<(usize, Aggregation)>
+pub fn platform::AffinityError::assert_fields_are_eq(&self)
 pub fn postprocess_result(&SuiteResult)
 
 ## trait impls (3 types)

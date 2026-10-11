@@ -6,34 +6,34 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenbench.txt 560 lines (supported surface) | zenbench.features.txt 94 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,precise-timing,wasm) | zenbench.internal.txt 11 lines (11 hidden + 0 excluded-feature)
+# files: zenbench.txt 574 lines (supported surface) | zenbench.features.txt 94 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,precise-timing,wasm) | zenbench.internal.txt 12 lines (12 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 9
-#   pub types (struct/enum/trait/alias)        44
+#   pub types (struct/enum/trait/alias)        46
 #   pub consts/statics                          2
 #   pub macros                                  1
-#   free functions                             37
-#   inherent methods                          173
+#   free functions                             39
+#   inherent methods                          175
 #   struct fields                             249
-#   enum variants                              20
-#   trait roster entries (type × trait)       100
-#   auto-trait-complete types                  27
-#   auto-trait exceptions                       6
+#   enum variants                              25
+#   trait roster entries (type × trait)       108
+#   auto-trait-complete types                  28
+#   auto-trait exceptions                       7
 #
 # per-module pub lines:
-#   (root)                          313
+#   (root)                          315
 #   baseline                         23
 #   calibration                       5
 #   daemon                           30
 #   exclusive                        32
 #   mcp                               1
-#   platform                         20
+#   platform                         29
 #   prelude                          81
 #   quickchart                       30
 
-## items (523 lines)
+## items (534 lines)
 
 pub mod zenbench
 pub mod baseline
@@ -54,12 +54,12 @@ pub baseline::BenchmarkDelta::new_mean: f64
 pub baseline::BenchmarkDelta::pct_change: f64
 pub baseline::BenchmarkDelta::regressed: bool
 pub fn baseline::compare_against_baseline(&SuiteResult, &SuiteResult, f64) -> baseline::BaselineComparison
-pub fn baseline::delete_baseline(&str) -> std::io::error::Result<()>
+pub fn baseline::delete_baseline(&str) -> core::io::error::Result<()>
 pub fn baseline::list_baselines() -> alloc::vec::Vec<alloc::string::String>
 pub fn baseline::load_baseline(&str) -> core::result::Result<SuiteResult, alloc::string::String>
 pub fn baseline::print_comparison_report(&baseline::BaselineComparison)
-pub fn baseline::prune_baselines(u64) -> std::io::error::Result<usize>
-pub fn baseline::save_baseline(&SuiteResult, &str) -> std::io::error::Result<std::path::PathBuf>
+pub fn baseline::prune_baselines(u64) -> core::io::error::Result<usize>
+pub fn baseline::save_baseline(&SuiteResult, &str) -> core::io::error::Result<std::path::PathBuf>
 pub mod calibration
 #[non_exhaustive] pub struct calibration::Calibration
 pub calibration::Calibration::integer_ns: f64
@@ -83,20 +83,20 @@ pub daemon::RunState::result_path: core::option::Option<std::path::PathBuf>
 pub daemon::RunState::started_at: u64
 pub daemon::RunState::status: daemon::RunStatus
 pub fn daemon::RunState::new(alloc::string::String, alloc::string::String, core::option::Option<alloc::string::String>) -> Self
-pub fn daemon::cleanup_old_runs(&std::path::Path, u64) -> std::io::error::Result<usize>
-pub fn daemon::find_latest_with_results(&std::path::Path) -> std::io::error::Result<core::option::Option<daemon::RunState>>
+pub fn daemon::cleanup_old_runs(&std::path::Path, u64) -> core::io::error::Result<usize>
+pub fn daemon::find_latest_with_results(&std::path::Path) -> core::io::error::Result<core::option::Option<daemon::RunState>>
 pub fn daemon::is_process_alive(u32) -> bool
-pub fn daemon::kill_run(&std::path::Path, &str) -> std::io::error::Result<bool>
-pub fn daemon::kill_stale_runs(&std::path::Path, &str) -> std::io::error::Result<usize>
-pub fn daemon::list_runs(&std::path::Path) -> std::io::error::Result<alloc::vec::Vec<daemon::RunState>>
-pub fn daemon::load_run_state(&std::path::Path, &str) -> std::io::error::Result<daemon::RunState>
+pub fn daemon::kill_run(&std::path::Path, &str) -> core::io::error::Result<bool>
+pub fn daemon::kill_stale_runs(&std::path::Path, &str) -> core::io::error::Result<usize>
+pub fn daemon::list_runs(&std::path::Path) -> core::io::error::Result<alloc::vec::Vec<daemon::RunState>>
+pub fn daemon::load_run_state(&std::path::Path, &str) -> core::io::error::Result<daemon::RunState>
 pub fn daemon::lock_path(&std::path::Path) -> std::path::PathBuf
 pub fn daemon::result_path_from_env() -> core::option::Option<std::path::PathBuf>
 pub fn daemon::runs_dir(&std::path::Path) -> std::path::PathBuf
-pub fn daemon::save_run_state(&std::path::Path, &daemon::RunState) -> std::io::error::Result<()>
-pub fn daemon::spawn_detached(&std::path::Path, &str, &[&str]) -> std::io::error::Result<(alloc::string::String, std::process::Child)>
-pub fn daemon::spawn_fire_and_forget(&std::path::Path, &str, &[&str]) -> std::io::error::Result<alloc::string::String>
-pub fn daemon::wait_for_run(&std::path::Path, &str, core::time::Duration, core::time::Duration) -> std::io::error::Result<daemon::RunState>
+pub fn daemon::save_run_state(&std::path::Path, &daemon::RunState) -> core::io::error::Result<()>
+pub fn daemon::spawn_detached(&std::path::Path, &str, &[&str]) -> core::io::error::Result<(alloc::string::String, std::process::Child)>
+pub fn daemon::spawn_fire_and_forget(&std::path::Path, &str, &[&str]) -> core::io::error::Result<alloc::string::String>
+pub fn daemon::wait_for_run(&std::path::Path, &str, core::time::Duration, core::time::Duration) -> core::io::error::Result<daemon::RunState>
 pub mod exclusive
 pub struct exclusive::AcquireConfig
 pub exclusive::AcquireConfig::activity: alloc::string::String
@@ -122,17 +122,24 @@ pub exclusive::HolderInfo::start: std::time::SystemTime
 pub fn exclusive::HolderInfo::is_stale(&self, core::time::Duration, std::time::SystemTime) -> bool
 pub fn exclusive::HolderInfo::waiting_message(&self, std::time::SystemTime) -> alloc::string::String
 pub struct exclusive::Lock
-pub fn exclusive::Lock::acquire(exclusive::AcquireConfig) -> std::io::error::Result<Self>
+pub fn exclusive::Lock::acquire(exclusive::AcquireConfig) -> core::io::error::Result<Self>
 pub fn exclusive::Lock::default_path() -> std::path::PathBuf
 pub fn exclusive::Lock::info(&self) -> core::option::Option<exclusive::HolderInfo>
 pub fn exclusive::Lock::path(&self) -> &std::path::Path
-pub fn exclusive::Lock::peek(&std::path::Path) -> std::io::error::Result<core::option::Option<exclusive::HolderInfo>>
-pub fn exclusive::Lock::try_acquire(exclusive::AcquireConfig) -> std::io::error::Result<core::result::Result<Self, core::option::Option<exclusive::HolderInfo>>>
+pub fn exclusive::Lock::peek(&std::path::Path) -> core::io::error::Result<core::option::Option<exclusive::HolderInfo>>
+pub fn exclusive::Lock::try_acquire(exclusive::AcquireConfig) -> core::io::error::Result<core::result::Result<Self, core::option::Option<exclusive::HolderInfo>>>
 pub fn exclusive::Lock::update_benchmark(&self, &str)
 pub fn exclusive::Lock::update_eta(&self, std::time::SystemTime)
 pub mod mcp
 pub fn mcp::run_server(std::path::PathBuf)
 pub mod platform
+#[non_exhaustive] pub enum platform::AffinityError
+pub platform::AffinityError::EmptyCoreSet
+pub platform::AffinityError::InvalidCore(usize)
+pub platform::AffinityError::InvalidSpecification(alloc::string::String)
+pub platform::AffinityError::Os(alloc::string::String)
+pub platform::AffinityError::Unsupported
+pub struct platform::AffinityGuard
 pub struct platform::SystemMonitor
 pub fn platform::SystemMonitor::new() -> Self
 pub fn platform::SystemMonitor::snapshot(&self) -> platform::SystemState
@@ -147,10 +154,12 @@ pub platform::Testbed::cpu_model: alloc::string::String
 pub platform::Testbed::logical_cores: usize
 pub platform::Testbed::os: alloc::string::String
 pub platform::Testbed::physical_cores: usize
+pub fn platform::current_thread_affinity() -> core::result::Result<alloc::vec::Vec<usize>, platform::AffinityError>
 pub fn platform::detect_ci() -> core::option::Option<&'static str>
 pub fn platform::detect_testbed() -> platform::Testbed
 pub fn platform::git_commit_hash() -> core::option::Option<alloc::string::String>
 pub fn platform::git_short_hash() -> core::option::Option<alloc::string::String>
+pub fn platform::pin_current_thread(&[usize]) -> core::result::Result<platform::AffinityGuard, platform::AffinityError>
 pub fn platform::timer_resolution_ns() -> u64
 pub mod prelude
 pub prelude::Throughput::Bytes(u64)
@@ -158,6 +167,7 @@ pub prelude::Throughput::Elements(u64)
 pub fn Throughput::compute(&self, f64, core::option::Option<&str>) -> (f64, alloc::string::String)
 pub fn Throughput::element_count(&self) -> core::option::Option<u64>
 pub fn Throughput::format(&self, f64, core::option::Option<&str>) -> alloc::string::String
+pub fn BenchGroup::affinity(&mut self, &[usize]) -> &mut Self
 pub fn BenchGroup::baseline(&mut self, impl core::convert::Into<alloc::string::String>) -> &mut Self
 pub fn BenchGroup::bench<F>(&mut self, impl core::convert::Into<alloc::string::String>, F) where F: core::ops::function::FnMut(&mut Bencher) + core::marker::Send + 'static
 pub fn BenchGroup::bench_contended<S, Setup, Work>(&mut self, impl core::convert::Into<alloc::string::String>, usize, Setup, Work) where S: core::marker::Send + core::marker::Sync + 'static, Setup: core::ops::function::Fn() -> S + core::marker::Send + 'static, Work: core::ops::function::Fn(&mut Bencher, &S, usize) + core::marker::Send + core::marker::Sync + core::clone::Clone + 'static
@@ -270,10 +280,10 @@ pub prelude::SuiteResult::timestamp: alloc::string::String
 pub prelude::SuiteResult::total_time: core::time::Duration
 pub prelude::SuiteResult::unreliable: bool
 pub fn SuiteResult::group_by_tag(&self, &str) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::vec::Vec<(&str, &BenchmarkResult)>>
-pub fn SuiteResult::load(impl core::convert::AsRef<std::path::Path>) -> std::io::error::Result<Self>
+pub fn SuiteResult::load(impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<Self>
 pub fn SuiteResult::print_report(&self)
-pub fn SuiteResult::save(&self, impl core::convert::AsRef<std::path::Path>) -> std::io::error::Result<()>
-pub fn SuiteResult::save_charts(&self, impl core::convert::AsRef<std::path::Path>) -> std::io::error::Result<()>
+pub fn SuiteResult::save(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
+pub fn SuiteResult::save_charts(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
 pub fn SuiteResult::to_csv(&self) -> alloc::string::String
 pub fn SuiteResult::to_html(&self) -> alloc::string::String
 pub fn SuiteResult::to_llm(&self) -> alloc::string::String
@@ -355,6 +365,7 @@ pub AllocStats::deallocs_per_iter: f64
 pub AllocStats::reallocs_per_iter: f64
 pub fn AllocStats::from_totals(u64, u64, u64, u64, u64, u64) -> Self
 pub struct BenchGroup [also: prelude]
+pub fn BenchGroup::affinity(&mut self, &[usize]) -> &mut Self
 pub fn BenchGroup::baseline(&mut self, impl core::convert::Into<alloc::string::String>) -> &mut Self
 pub fn BenchGroup::bench<F>(&mut self, impl core::convert::Into<alloc::string::String>, F) where F: core::ops::function::FnMut(&mut Bencher) + core::marker::Send + 'static
 pub fn BenchGroup::bench_contended<S, Setup, Work>(&mut self, impl core::convert::Into<alloc::string::String>, usize, Setup, Work) where S: core::marker::Send + core::marker::Sync + 'static, Setup: core::ops::function::Fn() -> S + core::marker::Send + 'static, Work: core::ops::function::Fn(&mut Bencher, &S, usize) + core::marker::Send + core::marker::Sync + core::clone::Clone + 'static
@@ -520,10 +531,10 @@ pub SuiteResult::timestamp: alloc::string::String
 pub SuiteResult::total_time: core::time::Duration
 pub SuiteResult::unreliable: bool
 pub fn SuiteResult::group_by_tag(&self, &str) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::vec::Vec<(&str, &BenchmarkResult)>>
-pub fn SuiteResult::load(impl core::convert::AsRef<std::path::Path>) -> std::io::error::Result<Self>
+pub fn SuiteResult::load(impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<Self>
 pub fn SuiteResult::print_report(&self)
-pub fn SuiteResult::save(&self, impl core::convert::AsRef<std::path::Path>) -> std::io::error::Result<()>
-pub fn SuiteResult::save_charts(&self, impl core::convert::AsRef<std::path::Path>) -> std::io::error::Result<()>
+pub fn SuiteResult::save(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
+pub fn SuiteResult::save_charts(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
 pub fn SuiteResult::to_csv(&self) -> alloc::string::String
 pub fn SuiteResult::to_html(&self) -> alloc::string::String
 pub fn SuiteResult::to_llm(&self) -> alloc::string::String
@@ -559,7 +570,7 @@ pub fn run_gated<F: core::ops::function::FnOnce(&mut Suite)>(GateConfig, F) -> S
 pub fn run_passes<F: core::ops::function::FnMut(&mut Suite)>(usize, Aggregation, F) -> SuiteResult
 pub fn run_processes(usize, Aggregation) -> SuiteResult
 
-## trait impls (30 types)
+## trait impls (32 types)
 
 Aggregation: Clone, Copy, Debug
 AllocProfiler<A>: GlobalAlloc
@@ -585,6 +596,8 @@ daemon::RunStatus: Clone, Debug, Eq, PartialEq, serde_core::de::Deserialize<'de>
 exclusive::AcquireConfig: Clone, Debug, Default
 exclusive::HolderInfo: Clone, Debug
 exclusive::Lock: Drop
+platform::AffinityError: Clone, Debug, Display, Eq, Error, PartialEq
+platform::AffinityGuard: Debug, Drop
 platform::SystemMonitor: Default
 platform::SystemState: Clone, Debug
 platform::Testbed: Clone, Debug, Display, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
@@ -594,10 +607,11 @@ quickchart::QuickChartUrl: Clone, Debug
 
 ## auto traits
 
-27 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+28 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 AllocProfiler<A>: !Freeze !RefUnwindSafe !Send !Unpin !UnwindSafe
 BenchGroup: !RefUnwindSafe !Sync !UnwindSafe
 ResourceGate: !Freeze
 Suite: !RefUnwindSafe !Sync !UnwindSafe
 exclusive::Lock: !RefUnwindSafe !UnwindSafe
+platform::AffinityGuard: !Send !Sync
 platform::SystemMonitor: !Freeze
