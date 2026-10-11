@@ -235,3 +235,7 @@ cpu-probe-example *cpus:
 
 cpu-probe-info:
     cargo run --bin zenbench -- cpu-info --probe --workers 2
+
+# Native API oracle through an existing trusted SSH alias; no remote file writes.
+mac-affinity-probe host:
+    ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 {{host}} 'python3 -B -' < examples/macos_affinity_probe.py

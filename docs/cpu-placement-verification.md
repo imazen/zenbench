@@ -103,3 +103,22 @@ Both APIs reported `certifies_cpu_class=false`. Fixture tests separately
 distinguished persistent speed differences from isolated slow samples and
 rejected mismatched work, duplicate worker IDs, and invalid times. The actual
 Rayon integration test preserved masks and measured both pool workers.
+
+## Native macOS Mach policy observation
+
+On 2026-10-11, a native Apple M4 Pro running macOS 27.0 reported 12 logical CPUs
+and two performance levels containing 8 and 4 CPUs. A direct native Mach probe
+using the same ABI and policy calls as `src/platform/affinity.rs` returned
+`KERN_NOT_SUPPORTED` (46) from `thread_policy_get(THREAD_AFFINITY_POLICY)`.
+The runtime error string was `(os/kern) service not supported`.
+
+The probe did not set a tag after failing to save the prior policy. The Rust
+guard follows the same path and returns `AffinityError::Unsupported`. This
+tests the native primitive, without claiming an execution of the full Rust
+crate or a P/E scheduling experiment. No QoS alternative was tested.
+
+The repeatable oracle is `examples/macos_affinity_probe.py`, invoked with
+`just mac-affinity-probe <trusted-ssh-alias>`. It executes from standard input
+without writing or building in a remote checkout. The
+[raw result](../benchmarks/macos_mach_policy_2026-10-11.json) records the observed
+OS, CPU, topology, API error, and explicit absence of placement certification.

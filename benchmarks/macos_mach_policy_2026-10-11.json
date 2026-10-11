@@ -1,0 +1,21 @@
+{
+  "os": "macOS-27.0-arm64-arm-64bit-Mach-O",
+  "cpu": "Apple M4 Pro",
+  "python_version": "3.14.7",
+  "probe": "native Mach THREAD_AFFINITY_POLICY save/set/read/restore",
+  "certifies_cpu_class": false,
+  "topology": {
+    "hw.ncpu": "12",
+    "hw.nperflevels": "2",
+    "hw.perflevel0.logicalcpu": "8",
+    "hw.perflevel1.logicalcpu": "4"
+  },
+  "before": {
+    "return_code": 46,
+    "runtime_error_name": "(os/kern) service not supported",
+    "tag": 0,
+    "count": 1,
+    "get_default": 0
+  },
+  "set_not_attempted": "Cannot save the original policy; matches zenbench guard behavior."
+}
