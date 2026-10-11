@@ -84,6 +84,11 @@ references alone are not portable. CSV is not comparison input. Read/decode/comp
 commands are embedded in saved references/snapshots and gzip header guidance.
 Reanalysis replays the frozen policy; it cannot promote exploratory data.
 
+SIMD OPTIMIZATION
+  zenbench guide --topic simd
+Archmage/magetypes: runtime versus compile-time summoning, held-token comparisons,
+correctness differentials, cargo asm, A/A controls and end-to-end confirmation.
+
 PROFILE WHY
 AllocProfiler is opt-in installation as the benchmark's global allocator; enabling
 the feature alone does not install it. It updates thread-local counters and a

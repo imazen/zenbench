@@ -2,6 +2,12 @@
 
 ### Known bugs: defaults audit (2026-10-11)
 
+Review-stack CI also observed timing-dependent failures in
+`baseline_detects_regression_with_different_workload` on macOS ARM64 and
+`iter_deferred_drop_runs` on macOS Intel. Full failed-job logs were retained;
+the failed jobs were rerun with unchanged assertions. These live performance
+assertions are distinct from the deterministic workflow-help checks.
+
 Workflow audit: macro benchmark binaries rejected `--help` before registration;
 help now returns before plan/topology validation. CLI baseline-list guidance now
 includes required confirmation/workload flags. `zenbench run --wait` still waits

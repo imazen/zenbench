@@ -16,6 +16,16 @@ fn cli() -> Command {
 fn first_use_help_explains_workflows_without_requiring_a_valid_machine_plan() {
     for (args, required) in [
         (
+            vec!["guide", "--topic", "simd"],
+            vec![
+                "compile-time",
+                "held-token",
+                "cargo asm",
+                "A/A",
+                "Differential-test",
+            ],
+        ),
+        (
             vec!["run", "--help"],
             vec!["does not preserve", "initial Cargo child wait"],
         ),

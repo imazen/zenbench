@@ -15,6 +15,10 @@ arguments after `--`; a retained executable takes them directly.
 | Can I publish a multi-machine result? | Evidence per named cell, caller-managed matrix | Same confirmation protocol for each completed cell, not publication certification |
 | Why did memory/instruction behavior change? | Separate profiler runs | Diagnostics; not native wall-clock confirmation |
 
+For archmage/magetypes kernels, see the [SIMD optimization workflow](simd-optimization.md)
+and `zenbench guide --topic simd`: token/dispatch boundaries, differential testing,
+assembly inspection and lessons from retained zenav1-svt experiments.
+
 ## Explore, then freeze and confirm
 
 Verify output correctness before timing. Match real input sizes, distributions,

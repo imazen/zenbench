@@ -1,0 +1,63 @@
+Optimizing archmage/magetypes programs
+
+1. DEFINE THE QUESTION
+   Kernel-only: both arms hold the same token outside timing and cross equivalent
+   entry boundaries. Public-call cost: both pay their actual dispatch/setup costs.
+   A held-token candidate against a runtime-dispatched baseline cannot isolate
+   vector arithmetic or abstraction overhead. Freeze the control source/binary.
+
+2. DISTINGUISH DISPATCH MECHANISMS
+   Globally enabled features can make summon() a compile-time fast path; this
+   changes CPU requirements (testable_dispatch suppresses that path for tests).
+   Portable std builds use runtime detection/caching; warmed summon() can still
+   load a cache and branch. First-call detection is a separate cost.
+   Already-specialized tier macros can rewrite nested incant! calls directly;
+   an upgrade may still summon at runtime. Pass a held token through helpers.
+   Do not benchmark with target-cpu=native when users receive runtime dispatch.
+   Enter the specialized hot path once, use appropriate rite helpers, and avoid
+   duplicate wrappers around magetypes-generated entries. Inspect generic-helper
+   inlining, feature boundaries and code size; zero-sized tokens are not proof
+   of an optimal kernel. Read your pinned archmage/magetypes version's API.
+
+3. PROVE CORRECTNESS
+   Differential-test against a frozen implementation and an independent oracle.
+   Include vector tails, padded strides, offsets, output sentinels, signed
+   extrema, wrapping/narrowing/rounding and complete operation outputs.
+   Exercise dispatch permutations and inspect their coverage reports; unavailable
+   tiers are not passing tests. Serialize process-wide token testing, outside benches.
+
+4. INSPECT ASSEMBLY
+   cargo-show-asm is the package; cargo asm is the command. Substitute your names:
+     cargo asm -p PACKAGE --bench BENCH --profile bench
+     cargo asm -p PACKAGE --bench BENCH --profile bench --asm 'kernel_v3'
+     cargo asm -p PACKAGE --bench BENCH --profile bench --rust --context 2 'kernel_v3'
+     cargo asm --file ./builds/before/kernels --disasm 'kernel'
+   --file/--disasm needs the tool's disasm feature. Preserve symbols and hashes.
+   Match compiler/target/features/profile/LTO/PGO to the measured artifact.
+   Inspect callers for inlined functions; check dispatch loads, calls, spills,
+   bounds checks, transposes and reductions. Fewer instructions alone is not a
+   measured speedup. Compare retained binaries without rebuilding the control.
+
+5. MEASURE AND CONFIRM
+   Run same-code A/A controls and candidate A/B groups; retain control bias.
+   Change one mechanism at a time. Test tiny and large inputs separately.
+   For Linux profile comparisons: perf diff before.data after.data
+   Profile equal workloads/windows; a higher sample share is not necessarily
+   more time, and inlining can move samples into a different symbol.
+   Check full-operation output identity and runtime against retained builds.
+   Explore in Iterate, freeze inputs/candidate/plan, then Confirm. Zenbench compare
+   reads packets; it does not schedule randomized two-binary A/B blocks.
+   Keep CPU/core classes separate. Recheck deployment PGO and representative data.
+   Kernel gains do not establish application gains; no universal summon cost.
+
+6. RETAIN THE DECISION
+   Keep source/binary/input identities, build flags, tier coverage, A/A and A/B
+   evidence, relevant assembly/profile artifacts and end-to-end verdicts.
+   Commit selected compact snapshots and artifact pointers, not every raw run.
+   Compilation time and code size are separate from runtime dispatch cost.
+
+Worked lessons: zenav1-svt's frozen Hadamard composition and transpose probes,
+SATD short-input threshold, DCT64 specialization controls, and saved-binary frame
+comparisons. Historical commands and timings are not new benchmark guarantees.
+Sources and detailed workflow:
+https://github.com/imazen/zenbench/blob/main/docs/simd-optimization.md

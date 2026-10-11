@@ -8,7 +8,7 @@ use zenbench::daemon;
 #[command(
     name = "zenbench",
     about = "Interleaved microbenchmarking harness",
-    after_help = "Start here: zenbench guide
+    after_help = "Start here: zenbench guide (SIMD optimization: zenbench guide --topic simd)
 Quick edit loop: cargo bench --bench NAME -- --group=GROUP
 Before accepting a change: freeze inputs, then use --mode=confirm --workload-id=ID.
 Inspect asymmetric CPUs: zenbench cpu-info; choose a verified boundary with exec.
@@ -23,7 +23,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Show workflows, CPU setup, exit meanings, provenance and profiling limits.
-    Guide,
+    Guide {
+        /// General workflows or archmage/magetypes optimization lessons.
+        #[arg(long, default_value = "workflows", value_parser = ["workflows", "simd"])]
+        topic: String,
+    },
     /// Read saved JSON, gzip JSON, or an evidence reference without running benchmarks.
     Read {
         input: PathBuf,
@@ -284,7 +288,13 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Guide => print!("{}", include_str!("../workflow-help.txt")),
+        Commands::Guide { topic } => print!(
+            "{}",
+            match topic.as_str() {
+                "simd" => include_str!("../simd-help.txt"),
+                _ => include_str!("../workflow-help.txt"),
+            }
+        ),
         Commands::Exec {
             cpu_policy,
             cpu_set,

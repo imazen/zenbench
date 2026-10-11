@@ -423,3 +423,11 @@ workflow-check:
     ZENBENCH_MODE=invalid ZENBENCH_CPU_POLICY=invalid cargo test --bench standalone_only -- -h
     cargo clippy --all-targets --all-features -- -D warnings
     just api-doc-check
+
+# Exercise the documented cargo-show-asm target/profile syntax on a real bench.
+simd-asm-check:
+    cargo asm --bench standalone_only --profile bench --asm 'standalone_only::main' 0
+
+# Inspect retained executable bytes without rebuilding them (tool needs disasm).
+simd-saved-asm binary symbol index="0":
+    cargo asm --file '{{binary}}' --disasm '{{symbol}}' {{index}}
