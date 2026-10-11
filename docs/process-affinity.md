@@ -119,6 +119,13 @@ suggestion; [explicit Rayon pool sizes](https://docs.rs/rayon/latest/rayon/struc
 can override it. Opaque pool thread counts remain `pool_thread_count=unknown`.
 The resource gate remains relevant for unrelated load.
 
+On macOS the engine and Criterion-compatible immediate path perform a separate
+100 ms compute warmup before calibration and timing metrics. This warms the
+coordinator, without running user callbacks or claiming to warm opaque pool
+workers. Existing group warmup still exercises the benchmark's own work.
+Demand can affect clocks, but maximum frequency is not guaranteed or measured;
+CPU evidence states `cpu_frequency_verified=false`.
+
 Zenbench rechecks an enforced boundary before and after measured rounds and
 before returning results; observed changes abort the run. These checks assume
 ordinary library workers do not change process policy or cgroup membership.
@@ -166,6 +173,33 @@ let workers = pool.broadcast(|_| probe_cpu_thread(CpuProbeConfig::default()))
 let report = CpuProbeReport::from_workers(workers).unwrap();
 println!("{}", serde_json::to_string_pretty(&report).unwrap());
 ```
+
+Every probe worker now performs its own separate compute warmup before samples:
+`CpuProbeConfig::warmup_ms` defaults to 100 and accepts 50 through 1000 ms.
+The report retains the actual warmup elapsed time. Reports with missing or
+short warmup evidence cannot be combined as current warmed observations.
+
+For native macOS QoS, request a preference inside each actual worker:
+
+```rust,no_run
+use zenbench::platform::{ThreadQos, set_current_thread_qos, probe_cpu_thread};
+let guard = set_current_thread_qos(ThreadQos::UserInteractive).unwrap();
+let observation = probe_cpu_thread(Default::default()).unwrap();
+drop(guard); // restores the prior requested class and relative priority
+```
+
+Use `ThreadQos::Background` in a separate measurement to request background
+scheduling. These call
+[`pthread_set_qos_class_self_np`](https://github.com/apple-oss-distributions/libpthread/blob/main/include/pthread/qos.h)
+at relative priority zero. Querying observes the requested QoS, not effective
+overrides or P/E binding. The guard is bound to its thread and rejects a prior
+unspecified/unrestorable class before mutation. Other targets return Unsupported.
+The macOS-only FFI stays in the existing narrowly allowed backend.
+
+The Rayon example accepts `--qos=interactive` or `--qos=background` before any
+positional CPU IDs, and makes the request inside each pool worker. CPU-ID Mach
+hints remain a separate mechanism and are unsupported on the tested M4 Pro.
+These preference-only observations do not satisfy strict CPU admission.
 
 `examples/cpu_probe.rs` runs that example. Optional positional CPU IDs let it
 apply a separate scoped mask/hint to each worker; inspect `cpu-info` to choose

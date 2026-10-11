@@ -198,7 +198,7 @@ pub struct CpuPlacement {
 impl CpuPlacement {
     pub(crate) fn llm(&self) -> String {
         format!(
-            "cpu_policy={} cpu_placement={} cpu_class={} cpu_enforcement={} cpu_effective_set={} cpu_requested_set={} cpu_thread_requested={} cpu_thread_effective={} cpu_class_uniform={} pool_thread_count=unknown",
+            "cpu_policy={} cpu_placement={} cpu_class={} cpu_enforcement={} cpu_effective_set={} cpu_requested_set={} cpu_thread_requested={} cpu_thread_effective={} cpu_class_uniform={} pool_thread_count=unknown cpu_frequency_verified=false",
             self.policy.name(),
             match self.status {
                 PlacementStatus::UniformHardware => "uniform_hardware",

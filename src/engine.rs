@@ -96,6 +96,16 @@ impl Engine {
             platform::CpuSession::start(self.suite.cpu_policy, self.suite.cpu_set.as_deref())
                 .unwrap_or_else(|e| panic!("{e}"));
         eprintln!("[zenbench] {}", cpu_session.placement.llm());
+        // Standalone demand warmup precedes calibration/timing metrics. This
+        // cannot certify frequency or warm opaque pools on other threads.
+        #[cfg(target_os = "macos")]
+        {
+            let elapsed = platform::warmup_cpu_for(std::time::Duration::from_millis(100));
+            eprintln!(
+                "[zenbench] separate CPU warmup: {}ms (frequency unverified)",
+                elapsed.as_millis()
+            );
+        }
         let run_id = RunId::generate();
         let ci = platform::detect_ci().map(String::from);
         let git_hash = platform::git_commit_hash();

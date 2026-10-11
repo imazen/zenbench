@@ -288,6 +288,8 @@ impl<'a> BenchmarkGroup<'a> {
         // Quick calibration
         let cpu_session =
             crate::platform::CpuSession::start(None, None).unwrap_or_else(|e| panic!("{e}"));
+        #[cfg(target_os = "macos")]
+        crate::platform::warmup_cpu_for(std::time::Duration::from_millis(100));
         let mut placement = cpu_session.placement.clone();
         placement.thread_affinity_effective = crate::platform::current_thread_affinity().ok();
         if let Some(previous) = &self.immediate_cpu_placement {
