@@ -321,3 +321,8 @@ It exercises the CPU monitor's first snapshot and the resource gate while
 workers generate load, then drops those workers. The remote runner requires
 the named test to execute and retains its status, native peak RSS, and job cap.
 This is separate from the explicitly ungated repeatability protocol above.
+
+`just windows-msrv-check` type-checks all Windows targets and the features that
+claim Rust 1.85 support using that toolchain. CI also performs this Windows
+check on Rust 1.85.0; the Linux MSRV check alone does not compile Windows-only
+dependencies or backend code.
