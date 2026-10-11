@@ -258,3 +258,9 @@ benchmark admission is checked before warmup; a timeout flags the result, and
 exclusive-lock failure also flags it. The public standalone SystemMonitor keeps
 its blocking first-snapshot/global-load contract. Monitoring still observes host
 CPU averages, not exclusive use of a selected CPU/cache domain.
+
+Cross CI now supplies `XDG_CACHE_HOME=/target/zenbench-ci-cache`: its container
+HOME was read-only, so exclusive-lock acquisition failed with EACCES. Once lock
+failure correctly flagged results, the clean-gate integration assertion exposed
+that environment defect. The target mount is writable and a native container
+control acquired an exclusive OS lock there; assertions remain unchanged.

@@ -4,4 +4,6 @@
 passthrough = ["ZENBENCH_AFFINITY_TEST_RUNNER=qemu-arm"]
 
 [build.env]
-passthrough = ["ZENBENCH_CPU_POLICY"]
+# cross can expose a read-only HOME. Keep the real cross-process lock in the
+# writable target mount shared by the test executables; do not disable locking.
+passthrough = ["ZENBENCH_CPU_POLICY", "XDG_CACHE_HOME=/target/zenbench-ci-cache"]
