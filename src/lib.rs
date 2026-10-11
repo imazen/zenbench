@@ -414,6 +414,25 @@ pub fn aggregate_results(runs: Vec<SuiteResult>, policy: Aggregation) -> SuiteRe
         runs[0]
             .check_cpu_compatibility(run)
             .unwrap_or_else(|e| panic!("{e}"));
+        let inventory = |r: &SuiteResult| {
+            r.comparisons
+                .iter()
+                .map(|g| {
+                    (
+                        g.group_name.clone(),
+                        g.benchmarks
+                            .iter()
+                            .map(|b| b.name.clone())
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            inventory(&runs[0]),
+            inventory(run),
+            "cannot aggregate different benchmark inventories"
+        );
     }
 
     // Collect per-(group, bench) the full list of per-run means.
@@ -457,11 +476,29 @@ pub fn aggregate_results(runs: Vec<SuiteResult>, policy: Aggregation) -> SuiteRe
     // Template = first run. Overwrite each bench's summary according
     // to the chosen policy.
     let mut out = runs[0].clone();
+    out.run_id = RunId::generate();
+    out.total_time = runs.iter().map(|r| r.total_time).sum();
+    out.gate_wait_time = runs.iter().map(|r| r.gate_wait_time).sum();
+    out.gate_waits = runs.iter().map(|r| r.gate_waits).sum();
+    // Calibration is local to an execution. Each replicate retains its own.
+    out.calibration = None;
+    out.loop_overhead_ns = 0.0;
+    out.timer_resolution_ns = runs
+        .iter()
+        .map(|r| r.timer_resolution_ns)
+        .max()
+        .unwrap_or(0);
     out.unreliable = runs.iter().any(|run| run.unreliable);
-    for cmp in out.comparisons.iter_mut() {
+    for (index, cmp) in out.comparisons.iter_mut().enumerate() {
         // Even Best may select different runs for different arms. None of
         // the multi-run policies preserves a single paired round population.
         cmp.samples.clear();
+        cmp.analyses.clear();
+        cmp.completed_rounds = runs
+            .iter()
+            .map(|r| r.comparisons[index].completed_rounds)
+            .sum();
+        cmp.iterations_per_sample = 0;
         for bench in cmp.benchmarks.iter_mut() {
             let key = (cmp.group_name.clone(), bench.name.clone());
             let samples = match means.get(&key) {
@@ -499,8 +536,16 @@ pub fn aggregate_results(runs: Vec<SuiteResult>, policy: Aggregation) -> SuiteRe
             // The single-run bootstrap CI no longer describes the
             // distribution the reported mean came from in any policy.
             bench.mean_ci = None;
+            bench.cpu_summary = None;
+            bench.slope_ns = None;
+            bench.timer_ticks_per_sample = 0.0;
+            #[cfg(feature = "alloc-profiling")]
+            {
+                bench.alloc_stats = None;
+            }
         }
     }
+    out.replicates = runs;
     out
 }
 

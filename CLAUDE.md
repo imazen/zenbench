@@ -12,6 +12,12 @@ the reported gate-wait counter. See `docs/defaults-audit.md` for the source audi
 measurement procedure, proposed modes, and durable storage/diff contract. These
 findings are not fixed by the affinity implementation.
 
+Aggregation correction: descriptive aggregates now clear within-run analyses,
+retain original runs in `replicates`, sum duration/gate/round accounting, and
+reject mismatched benchmark inventories. The opposed-effect regression verifies
+that the first run cannot supply a false aggregate significance claim.
+Process-aware confirmation inference is a separate implementation step.
+
 ## What this is
 
 Interleaved microbenchmarking crate for Rust. `#![forbid(unsafe_code)]`, MSRV 1.85, edition 2024, MIT/Apache-2.0. Pure Rust, no C dependencies.

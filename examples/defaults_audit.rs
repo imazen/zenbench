@@ -73,8 +73,9 @@ fn fixture() {
             "input_effects_pct": [-20, 20],
             "aggregate_base_mean": group.benchmarks[0].summary.mean,
             "aggregate_candidate_mean": group.benchmarks[1].summary.mean,
-            "reported_analysis_pct": group.analyses[0].2.pct_change,
-            "reported_analysis_significant": group.analyses[0].2.significant,
+            "reported_analysis_pct": group.analyses.first().map(|a| a.2.pct_change),
+            "reported_analysis_significant": group.analyses.first().map(|a| a.2.significant),
+            "retained_replicates": result.replicates.len(),
             "retained_rounds": group.samples.len()
         })
     );

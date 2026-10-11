@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenbench.txt 677 lines (supported surface) | zenbench.features.txt 94 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,precise-timing,wasm) | zenbench.internal.txt 26 lines (26 hidden + 0 excluded-feature)
+# files: zenbench.txt 679 lines (supported surface) | zenbench.features.txt 94 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,precise-timing,wasm) | zenbench.internal.txt 26 lines (26 hidden + 0 excluded-feature)
 
 ## summary
 #
@@ -16,24 +16,24 @@
 #   pub macros                                  1
 #   free functions                             44
 #   inherent methods                          185
-#   struct fields                             296
+#   struct fields                             298
 #   enum variants                              37
 #   trait roster entries (type × trait)       188
 #   auto-trait-complete types                  41
 #   auto-trait exceptions                       8
 #
 # per-module pub lines:
-#   (root)                          325
+#   (root)                          326
 #   baseline                         23
 #   calibration                       5
 #   daemon                           30
 #   exclusive                        32
 #   mcp                               1
 #   platform                        106
-#   prelude                          82
+#   prelude                          83
 #   quickchart                       30
 
-## items (622 lines)
+## items (624 lines)
 
 pub mod zenbench
 pub mod baseline
@@ -353,6 +353,7 @@ pub prelude::SuiteResult::gate_wait_time: core::time::Duration
 pub prelude::SuiteResult::gate_waits: usize
 pub prelude::SuiteResult::git_hash: core::option::Option<alloc::string::String>
 pub prelude::SuiteResult::loop_overhead_ns: f64
+pub prelude::SuiteResult::replicates: alloc::vec::Vec<SuiteResult>
 pub prelude::SuiteResult::run_id: RunId
 pub prelude::SuiteResult::standalones: alloc::vec::Vec<BenchmarkResult>
 pub prelude::SuiteResult::testbed: core::option::Option<platform::Testbed>
@@ -610,6 +611,7 @@ pub SuiteResult::gate_wait_time: core::time::Duration
 pub SuiteResult::gate_waits: usize
 pub SuiteResult::git_hash: core::option::Option<alloc::string::String>
 pub SuiteResult::loop_overhead_ns: f64
+pub SuiteResult::replicates: alloc::vec::Vec<SuiteResult>
 pub SuiteResult::run_id: RunId
 pub SuiteResult::standalones: alloc::vec::Vec<BenchmarkResult>
 pub SuiteResult::testbed: core::option::Option<platform::Testbed>

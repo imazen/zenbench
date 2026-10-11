@@ -180,6 +180,10 @@ pub struct SuiteResult {
     pub git_hash: Option<String>,
     pub ci_environment: Option<String>,
     pub comparisons: Vec<ComparisonResult>,
+    /// Original runs underlying a descriptive multi-run aggregate. Process/pass
+    /// boundaries and raw rounds remain available; aggregate rows are not paired rounds.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub replicates: Vec<SuiteResult>,
     /// Deprecated — always empty. `suite.bench()` now creates single-benchmark
     /// groups in `comparisons`. Kept for API and serde compatibility.
     #[deprecated(
@@ -222,6 +226,7 @@ impl Default for SuiteResult {
             git_hash: None,
             ci_environment: None,
             comparisons: Vec::new(),
+            replicates: Vec::new(),
             standalones: Vec::new(),
             total_time: Duration::ZERO,
             gate_waits: 0,
