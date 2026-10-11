@@ -383,3 +383,15 @@ modes-full-check:
 
 protocol-replay directory:
     python3 -B examples/check_retained_protocol.py target/debug/zenbench {{directory}}
+
+protocol-archive manifest binary host date *directories:
+    python3 -B examples/archive_defaults_audit.py {{manifest}} {{binary}} {{directories}} --archive-host {{host}} --date {{date}} --label modes
+
+cargo-bench-plan:
+    ZENBENCH_CPU_POLICY=unrestricted cargo test --bench sorting -- --dry-run
+
+cli-evidence-check:
+    cargo fmt -p zenbench
+    cargo test --test cli_evidence
+    ZENBENCH_CPU_POLICY=unrestricted cargo test --lib baseline::
+    cargo clippy --all-targets -- -D warnings

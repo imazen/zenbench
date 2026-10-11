@@ -406,9 +406,9 @@ pub fn print_comparison_report(comparison: &BaselineComparison) {
 
     for delta in &comparison.benchmarks {
         let marker = if delta.regressed {
-            "\x1b[31m▲ REGRESSION\x1b[0m"
+            "\x1b[31m▲ slower (descriptive)\x1b[0m"
         } else if delta.improved {
-            "\x1b[32m▼ improved\x1b[0m"
+            "\x1b[32m▼ faster (descriptive)\x1b[0m"
         } else {
             "  unchanged"
         };
@@ -435,7 +435,7 @@ pub fn print_comparison_report(comparison: &BaselineComparison) {
     }
 
     eprintln!(
-        "  Summary: {} regressions, {} improvements, {} unchanged",
+        "  Descriptive counts: {} slower, {} faster, {} unchanged",
         comparison.regressions, comparison.improvements, comparison.unchanged,
     );
 }
