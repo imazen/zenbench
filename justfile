@@ -395,3 +395,7 @@ cli-evidence-check:
     cargo test --test cli_evidence
     ZENBENCH_CPU_POLICY=unrestricted cargo test --lib baseline::
     cargo clippy --all-targets -- -D warnings
+
+# Honor cross's explicit QEMU subprocess runner; keep CLI assertions identical.
+cli-evidence-cross cross="cross":
+    CROSS_CONTAINER_OPTS="--memory=6g --memory-swap=6g --cpus=2" ZENBENCH_CPU_POLICY=unrestricted {{cross}} test --target armv7-unknown-linux-gnueabihf --all-features --test cli_evidence
