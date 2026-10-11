@@ -1,6 +1,6 @@
 //! Durable compressed evidence is ignored by Git; snapshots are explicit exports.
 use crate::{RunId, SuiteResult};
-use flate2::{Compression, read::GzDecoder, write::GzEncoder};
+use flate2::{Compression, GzBuilder, read::GzDecoder};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{self, OpenOptions};
@@ -16,6 +16,20 @@ struct Reference {
     sha256: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     data_root: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    usage: Option<serde_json::Value>,
+}
+
+// Argument arrays preserve spaces and shell metacharacters without suggesting
+// that stored metadata should ever be evaluated as shell code.
+pub(crate) fn usage(input: &Path) -> serde_json::Value {
+    serde_json::json!({
+        "syntax": "command argument arrays; replace <BASELINE> with a saved JSON/gzip/reference path",
+        "read": ["zenbench", "read", input, "--format", "llm"],
+        "decode": ["zenbench", "read", input, "--format", "json"],
+        "compare": ["zenbench", "compare", "<BASELINE>", input],
+        "compare_exit": {"0": "confirmed non-inferiority", "1": "confirmed regression", "2": "invalid or inconclusive"},
+    })
 }
 
 pub(crate) fn data_dir() -> PathBuf {
@@ -95,7 +109,9 @@ fn encode_limited(result: &SuiteResult, limit: u64) -> io::Result<Vec<u8>> {
         }
     }
     let mut limited = Limited {
-        writer: GzEncoder::new(Vec::new(), Compression::default()),
+        writer: GzBuilder::new()
+            .comment("zenbench JSON evidence; read: zenbench read FILE --format llm; decode: zenbench read FILE --format json; compare: zenbench compare BASELINE FILE")
+            .write(Vec::new(), Compression::default()),
         remaining: limit,
     };
     serde_json::to_writer(&mut limited, result).map_err(io::Error::other)?;
@@ -239,6 +255,7 @@ fn persist_at(result: &SuiteResult, root: &Path) -> io::Result<PathBuf> {
         zenbench_evidence: 1,
         sha256,
         data_root: None,
+        usage: Some(usage(&reference)),
     })
     .map_err(io::Error::other)?;
     atomic_write(&reference, &bytes)?;
@@ -250,6 +267,7 @@ pub(crate) fn save_reference(result: &SuiteResult, path: &Path) -> io::Result<()
     let mut record: Reference =
         serde_json::from_slice(&fs::read(reference)?).map_err(io::Error::other)?;
     record.data_root = Some(prepare_dir()?.canonicalize()?);
+    record.usage = Some(usage(path));
     atomic_write(
         path,
         &serde_json::to_vec(&record).map_err(io::Error::other)?,

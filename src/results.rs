@@ -460,6 +460,10 @@ impl SuiteResult {
         }
         crate::storage::persist(self)?;
         let hash = crate::storage::evidence_digest(self)?;
+        let object = crate::storage::data_dir()
+            .join("objects")
+            .join(format!("{hash}.json.gz"));
+        let usage = crate::storage::usage(&object);
         let context = serde_json::json!({
             "testbed": self.testbed,
             "cpu_class": self.cpu_placement.as_ref().and_then(|p| p.core_class.as_deref()),
@@ -471,7 +475,7 @@ impl SuiteResult {
             })),
         });
         let text = format!(
-            "# zenbench-snapshot-v1 evidence_sha256={hash}\n# context={context}\n{}",
+            "# zenbench-snapshot-v1 evidence_sha256={hash}\n# usage={usage}\n# context={context}\n{}",
             self.to_snapshot()
         );
         crate::storage::atomic_write(path.as_ref(), text.as_bytes())

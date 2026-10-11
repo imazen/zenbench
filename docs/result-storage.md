@@ -12,6 +12,28 @@ when accepting a baseline. Do not export every iteration:
 zenbench snapshot .zenbench/data/runs/<id>.json --output benchmarks/baseline.csv
 ```
 
+Read or compare retained evidence without running benchmarks:
+
+```sh
+zenbench read .zenbench/data/runs/<id>.json --format llm
+zenbench read result.json.gz --format json
+zenbench compare baseline.json.gz candidate.json.gz
+```
+
+`read` defaults to LLM-readable text and also accepts `json`, `csv`, and `md`.
+References and exported CSV headers include read, decode and compare command
+argument arrays, preserving spaces and shell metacharacters in paths. Replace
+`<BASELINE>` with the baseline packet/reference; run relative paths from the
+project directory. These arrays are instructions for the reader, never code
+executed by the loader. Gzip headers also identify the format and decoding commands;
+standard gzip tools can decode the JSON independently.
+
+Snapshots are readable summaries, not comparison inputs: use their embedded
+command to locate the full evidence. `compare` exits 0 for confirmed non-inferiority,
+1 for regression, and 2 for invalid or inconclusive evidence. Reading exploratory
+data does not turn it into confirmation. Historical references without instructions
+continue to load.
+
 The CSV has one sorted row per benchmark, an evidence-hash header and a compact
 context header with testbed/CPU, workload/scope, executable hash and decision policy. Export retains that packet before writing the CSV.
 Rows contain descriptive mean/MAD/count/scope/reliability plus available
