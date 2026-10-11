@@ -159,8 +159,10 @@ this is a best-effort cache-sharing hint, **not a binding to those CPUs**. The g
 restores the prior tag; hardware that rejects the hint returns an error. macOS
 has no CPU-mask query, so `current_thread_affinity()` returns `Unsupported` there.
 Other targets return `AffinityError::Unsupported` for pinning too.
-See [the pinned example](examples/pinned.rs) (`cargo run --example pinned`) for
-before/during/after mask checks on an available CPU.
+See [the pinned example](examples/pinned.rs)
+(`ZENBENCH_CPU_POLICY=unrestricted cargo run --example pinned`) for
+before/during/after scoped mask checks on an available CPU. This example opts out
+of process-class certification explicitly.
 
 ## CI regression testing
 
