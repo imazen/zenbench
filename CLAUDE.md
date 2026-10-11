@@ -1,5 +1,17 @@
 # Zenbench Project Instructions
 
+### Known bugs: defaults audit (2026-10-11)
+
+Known bugs identified by the defaults audit: multi-process aggregation retains
+the first run's paired analyses after changing benchmark summaries; a synthetic
+-20%/+20% pair averages to equal means but still reports -20%, significant.
+Aggregate duration and gate counters also describe the first run. Child exchange
+JSON is deleted and aggregate round samples are cleared. The per-round CPU
+monitor can sleep for its 200 ms refresh interval without charging that time to
+the reported gate-wait counter. See `docs/defaults-audit.md` for the source audit,
+measurement procedure, proposed modes, and durable storage/diff contract. These
+findings are not fixed by the affinity implementation.
+
 ## What this is
 
 Interleaved microbenchmarking crate for Rust. `#![forbid(unsafe_code)]`, MSRV 1.85, edition 2024, MIT/Apache-2.0. Pure Rust, no C dependencies.

@@ -17,6 +17,7 @@
 - Strict Windows CPU placement now holds an inherited affinity-limited Job Object, preventing process-mask widening by benchmark code; actual-mask controls cover preexisting Rayon/ordinary threads and child processes (585b0f8d, 95e4042c).
 
 ### Added
+- Reproducible defaults runtime/storage audit, aggregation counterexample, and proposed evidence/diff contract (98100750, e8921074).
 - Native Windows execution of the existing first-snapshot/load-gate regression, with retained resource and status evidence (32636ed2).
 - Native Windows fresh-process repeatability controls for integer/cache/Rayon workloads, identical work, known work increments, independent QPC batches, and resource-limit readback (fc757037).
 - Native Windows process-mask oracle with preexisting managed thread/pool negative controls, verified worker/process restoration, and separate real hybrid P/E observations.
