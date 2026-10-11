@@ -127,6 +127,13 @@ suggestion; [explicit Rayon pool sizes](https://docs.rs/rayon/latest/rayon/struc
 can override it. Opaque pool thread counts remain `pool_thread_count=unknown`.
 The resource gate remains relevant for unrelated load.
 
+On macOS the engine and Criterion-compatible immediate path perform a separate
+100 ms compute warmup before calibration and timing metrics. This warms the
+coordinator, without running user callbacks or claiming to warm opaque pool
+workers. Existing group warmup still exercises the benchmark's own work.
+Demand can affect clocks, but maximum frequency is not guaranteed or measured;
+CPU evidence states `cpu_frequency_verified=false`.
+
 Zenbench rechecks an enforced boundary before and after measured rounds and
 before returning results; observed changes abort the run. These checks assume
 ordinary library workers do not change process policy or cgroup membership.
@@ -140,6 +147,86 @@ It requires an enforced single-class process set. No large sweep is involved.
 
 Measured confinement and negative controls are recorded in
 [CPU placement verification](cpu-placement-verification.md).
+
+## Worker warmup observations
+
+Fixed-work probes complement placement checks. A worker that remains slower
+across repeated batches differs from a worker with isolated slow batches.
+Neither observation alone identifies its cause: CPU class, SMT contention,
+clock changes, or unrelated load can affect both. Similar times cannot prove
+that workers obeyed a scheduling hint.
+
+Inspect new diagnostic threads without running a benchmark:
+
+```sh
+zenbench cpu-info --probe --workers 2
+```
+
+The JSON keeps admission evidence separate from the probe. Each worker records
+dependent integer and private 64 KiB pointer-chase batches, its observed affinity
+before/after, and Linux's last CPU at batch boundaries. Summaries show medians,
+MAD, within-worker max/min ratios, and between-worker median ratios. CPU IDs
+are unavailable on other platforms, and migration between observations is
+unknown. The report always states `certifies_cpu_class=false`; it has no
+"passed" status and cannot weaken default CPU admission.
+
+Those new threads do not inspect an existing pool. To observe the actual
+workers of a private Rayon pool, execute the probe inside that pool:
+
+```rust,no_run
+use zenbench::platform::{CpuProbeConfig, CpuProbeReport, probe_cpu_thread};
+let pool = rayon::ThreadPoolBuilder::new().num_threads(2).build().unwrap();
+let workers = pool.broadcast(|_| probe_cpu_thread(CpuProbeConfig::default()))
+    .into_iter().collect::<Result<Vec<_>, _>>().unwrap();
+let report = CpuProbeReport::from_workers(workers).unwrap();
+println!("{}", serde_json::to_string_pretty(&report).unwrap());
+```
+
+Every probe worker now performs its own separate compute warmup before samples:
+`CpuProbeConfig::warmup_ms` defaults to 100 and accepts 50 through 1000 ms.
+The report retains the actual warmup elapsed time. Reports with missing or
+short warmup evidence cannot be combined as current warmed observations.
+
+For native macOS QoS, request a preference inside each actual worker:
+
+```rust,no_run
+use zenbench::platform::{ThreadQos, set_current_thread_qos, probe_cpu_thread};
+let guard = set_current_thread_qos(ThreadQos::UserInteractive).unwrap();
+let observation = probe_cpu_thread(Default::default()).unwrap();
+drop(guard); // restores the prior requested class and relative priority
+```
+
+Use `ThreadQos::Background` in a separate measurement to request background
+scheduling. These call
+[`pthread_set_qos_class_self_np`](https://github.com/apple-oss-distributions/libpthread/blob/main/include/pthread/qos.h)
+at relative priority zero. Querying observes the requested QoS, not effective
+overrides or P/E binding. The guard is bound to its thread and rejects a prior
+unspecified/unrestorable class before mutation. Other targets return Unsupported.
+The macOS-only FFI stays in the existing narrowly allowed backend.
+
+The Rayon example accepts `--qos=interactive` or `--qos=background` before any
+positional CPU IDs, and makes the request inside each pool worker. CPU-ID Mach
+hints remain a separate mechanism and are unsupported on the tested M4 Pro.
+These preference-only observations do not satisfy strict CPU admission.
+
+`examples/cpu_probe.rs` runs that example. Optional positional CPU IDs let it
+apply a separate scoped mask/hint to each worker; inspect `cpu-info` to choose
+IDs. Build diagnostics with optimization to reduce debug overhead:
+
+```sh
+cargo run --release --example cpu_probe
+# Two specific IDs selected from cpu-info:
+cargo run --release --example cpu_probe -- 0 8
+```
+
+The sampler retains the caller's
+affinity and QoS; apply any hints before invoking it. Configuration bounds
+sample counts and work per batch, and every combined worker must use identical
+configuration. Callers control simultaneity and which workers participate;
+oversubscribing one CPU can create large ratios even with enforced placement.
+Repeat probes between measurement windows to observe later scheduling changes.
+The current diagnostic reports observations and does not set an automatic
+timing threshold or infer a performance/efficiency class from timings.
 
 The `windows_job_boundary` integration fixture runs in isolated native Windows
 processes, including Windows ARM CI. It creates its Rayon and ordinary workers

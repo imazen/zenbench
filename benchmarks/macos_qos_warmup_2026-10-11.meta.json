@@ -1,0 +1,11 @@
+{
+  "command": "TMPDIR=/home/lilith/tmp run-heavy --mem 12G -- just mac-qos-probe mac",
+  "oracle_source": "examples/macos_qos_probe.py in this commit",
+  "measurement": "Native pthread readbacks and identical PBKDF2 work; not a compiled zenbench-crate execution or a frequency/core-ID measurement",
+  "warmup": "100 ms of actual per-thread CPU time before sample timers",
+  "sequence": "One fresh worker per QoS class, sequential interactive then background; no repeated-run uncertainty claim",
+  "measured_date": "2026-10-11",
+  "native_time_maximum_resident_set_size_bytes": 22396928,
+  "local_run_heavy_summary": "run-heavy: done rc=0 0s | peak-RSS 0.01GiB | min-avail 25835MiB | peak-load 0.67",
+  "resource_scope": "run-heavy capped the local SSH launcher; native interpreter was niced, CPU-time-limited, and RSS-monitored. Local peak RSS does not describe the remote interpreter."
+}

@@ -6,21 +6,21 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenbench.txt 627 lines (supported surface) | zenbench.features.txt 94 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,precise-timing,wasm) | zenbench.internal.txt 21 lines (21 hidden + 0 excluded-feature)
+# files: zenbench.txt 677 lines (supported surface) | zenbench.features.txt 94 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,precise-timing,wasm) | zenbench.internal.txt 26 lines (26 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 9
-#   pub types (struct/enum/trait/alias)        52
+#   pub types (struct/enum/trait/alias)        60
 #   pub consts/statics                          2
 #   pub macros                                  1
-#   free functions                             41
-#   inherent methods                          184
-#   struct fields                             269
-#   enum variants                              35
-#   trait roster entries (type × trait)       150
-#   auto-trait-complete types                  34
-#   auto-trait exceptions                       7
+#   free functions                             44
+#   inherent methods                          185
+#   struct fields                             296
+#   enum variants                              37
+#   trait roster entries (type × trait)       188
+#   auto-trait-complete types                  41
+#   auto-trait exceptions                       8
 #
 # per-module pub lines:
 #   (root)                          325
@@ -29,11 +29,11 @@
 #   daemon                           30
 #   exclusive                        32
 #   mcp                               1
-#   platform                         65
+#   platform                        106
 #   prelude                          82
 #   quickchart                       30
 
-## items (581 lines)
+## items (622 lines)
 
 pub mod zenbench
 pub mod baseline
@@ -148,6 +148,9 @@ pub platform::CpuPolicy::Unrestricted
 pub platform::PlacementStatus::EnforcedUniform
 pub platform::PlacementStatus::UniformHardware
 pub platform::PlacementStatus::Unrestricted
+#[non_exhaustive] pub enum platform::ThreadQos
+pub platform::ThreadQos::Background
+pub platform::ThreadQos::UserInteractive
 #[non_exhaustive] pub enum platform::TopologyKind
 pub platform::TopologyKind::Asymmetric
 pub platform::TopologyKind::Homogeneous
@@ -168,12 +171,44 @@ pub platform::CpuPlacement::status: platform::PlacementStatus
 pub platform::CpuPlacement::thread_affinity_effective: core::option::Option<alloc::vec::Vec<usize>>
 pub platform::CpuPlacement::thread_affinity_requested: core::option::Option<alloc::vec::Vec<usize>>
 pub platform::CpuPlacement::topology: platform::CpuTopology
+#[non_exhaustive] pub struct platform::CpuProbeConfig
+pub platform::CpuProbeConfig::iterations: u32
+pub platform::CpuProbeConfig::samples: usize
+pub platform::CpuProbeConfig::warmup_ms: u64
+#[non_exhaustive] pub struct platform::CpuProbeReport
+pub platform::CpuProbeReport::cache: alloc::vec::Vec<platform::CpuProbeSpread>
+pub platform::CpuProbeReport::cache_slowest_over_fastest_median: f64
+pub platform::CpuProbeReport::integer: alloc::vec::Vec<platform::CpuProbeSpread>
+pub platform::CpuProbeReport::integer_slowest_over_fastest_median: f64
+pub platform::CpuProbeReport::workers: alloc::vec::Vec<platform::CpuProbeThread>
+pub fn platform::CpuProbeReport::from_workers(alloc::vec::Vec<platform::CpuProbeThread>) -> core::result::Result<Self, alloc::string::String>
+#[non_exhaustive] pub struct platform::CpuProbeSample
+pub platform::CpuProbeSample::cache_ns_per_iteration: f64
+pub platform::CpuProbeSample::cpu_after: core::option::Option<usize>
+pub platform::CpuProbeSample::cpu_before: core::option::Option<usize>
+pub platform::CpuProbeSample::integer_ns_per_iteration: f64
+#[non_exhaustive] pub struct platform::CpuProbeSpread
+pub platform::CpuProbeSpread::mad_ns: f64
+pub platform::CpuProbeSpread::max_ns: f64
+pub platform::CpuProbeSpread::median_ns: f64
+pub platform::CpuProbeSpread::min_ns: f64
+pub platform::CpuProbeSpread::slowest_over_fastest: f64
+#[non_exhaustive] pub struct platform::CpuProbeThread
+pub platform::CpuProbeThread::affinity_after: core::result::Result<alloc::vec::Vec<usize>, alloc::string::String>
+pub platform::CpuProbeThread::affinity_before: core::result::Result<alloc::vec::Vec<usize>, alloc::string::String>
+pub platform::CpuProbeThread::config: platform::CpuProbeConfig
+pub platform::CpuProbeThread::qos_after: core::option::Option<platform::ThreadQosState>
+pub platform::CpuProbeThread::qos_before: core::option::Option<platform::ThreadQosState>
+pub platform::CpuProbeThread::samples: alloc::vec::Vec<platform::CpuProbeSample>
+pub platform::CpuProbeThread::thread_id: alloc::string::String
+pub platform::CpuProbeThread::warmup_elapsed_ns: u64
 #[non_exhaustive] pub struct platform::CpuTopology
 pub platform::CpuTopology::classes: alloc::vec::Vec<platform::CoreClass>
 pub platform::CpuTopology::diagnostic: core::option::Option<alloc::string::String>
 pub platform::CpuTopology::kind: platform::TopologyKind
 pub platform::CpuTopology::source: alloc::string::String
 pub fn platform::CpuTopology::select(&self, platform::CpuPolicy) -> core::result::Result<alloc::vec::Vec<usize>, alloc::string::String>
+pub struct platform::QosGuard
 pub struct platform::SystemMonitor
 pub fn platform::SystemMonitor::new() -> Self
 pub fn platform::SystemMonitor::snapshot(&self) -> platform::SystemState
@@ -188,14 +223,20 @@ pub platform::Testbed::cpu_model: alloc::string::String
 pub platform::Testbed::logical_cores: usize
 pub platform::Testbed::os: alloc::string::String
 pub platform::Testbed::physical_cores: usize
+#[non_exhaustive] pub struct platform::ThreadQosState
+pub platform::ThreadQosState::class: u32
+pub platform::ThreadQosState::relative_priority: i32
 pub fn platform::check_cpu_placement() -> core::result::Result<platform::CpuPlacement, alloc::string::String>
 pub fn platform::current_thread_affinity() -> core::result::Result<alloc::vec::Vec<usize>, platform::AffinityError>
+pub fn platform::current_thread_qos() -> core::result::Result<platform::ThreadQosState, platform::AffinityError>
 pub fn platform::detect_ci() -> core::option::Option<&'static str>
 pub fn platform::detect_cpu_topology() -> platform::CpuTopology
 pub fn platform::detect_testbed() -> platform::Testbed
 pub fn platform::git_commit_hash() -> core::option::Option<alloc::string::String>
 pub fn platform::git_short_hash() -> core::option::Option<alloc::string::String>
 pub fn platform::pin_current_thread(&[usize]) -> core::result::Result<platform::AffinityGuard, platform::AffinityError>
+pub fn platform::probe_cpu_thread(platform::CpuProbeConfig) -> core::result::Result<platform::CpuProbeThread, alloc::string::String>
+pub fn platform::set_current_thread_qos(platform::ThreadQos) -> core::result::Result<platform::QosGuard, platform::AffinityError>
 pub fn platform::timer_resolution_ns() -> u64
 pub mod prelude
 pub prelude::Throughput::Bytes(u64)
@@ -617,7 +658,7 @@ pub fn run_gated<F: core::ops::function::FnOnce(&mut Suite)>(GateConfig, F) -> S
 pub fn run_passes<F: core::ops::function::FnMut(&mut Suite)>(usize, Aggregation, F) -> SuiteResult
 pub fn run_processes(usize, Aggregation) -> SuiteResult
 
-## trait impls (38 types)
+## trait impls (46 types)
 
 Aggregation: Clone, Copy, Debug
 AllocProfiler<A>: GlobalAlloc
@@ -648,11 +689,19 @@ platform::AffinityGuard: Debug, Drop
 platform::CoreClass: Clone, Debug, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 platform::CpuPlacement: Clone, Debug, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 platform::CpuPolicy: Clone, Copy, Debug, Default, Display, Eq, FromStr, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+platform::CpuProbeConfig: Clone, Copy, Debug, Default, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+platform::CpuProbeReport: Clone, Debug, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+platform::CpuProbeSample: Clone, Debug, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+platform::CpuProbeSpread: Clone, Debug, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+platform::CpuProbeThread: Clone, Debug, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 platform::CpuTopology: Clone, Debug, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 platform::PlacementStatus: Clone, Copy, Debug, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+platform::QosGuard: Debug, Drop
 platform::SystemMonitor: Default
 platform::SystemState: Clone, Debug
 platform::Testbed: Clone, Debug, Display, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+platform::ThreadQos: Clone, Copy, Debug, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+platform::ThreadQosState: Clone, Copy, Debug, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 platform::TopologyKind: Clone, Copy, Debug, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 quickchart::ColorScheme: Clone, Debug
 quickchart::QuickChartConfig: Clone, Debug, Default
@@ -660,11 +709,12 @@ quickchart::QuickChartUrl: Clone, Debug
 
 ## auto traits
 
-34 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+41 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 AllocProfiler<A>: !Freeze !RefUnwindSafe !Send !Unpin !UnwindSafe
 BenchGroup: !RefUnwindSafe !Sync !UnwindSafe
 ResourceGate: !Freeze
 Suite: !RefUnwindSafe !Sync !UnwindSafe
 exclusive::Lock: !RefUnwindSafe !UnwindSafe
 platform::AffinityGuard: !Send !Sync
+platform::QosGuard: !Send !Sync
 platform::SystemMonitor: !Freeze

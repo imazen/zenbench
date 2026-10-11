@@ -13,6 +13,8 @@
      Add items here as you discover them. Do NOT ship these piecemeal — batch them. -->
 
 ### Added
+- Scoped macOS pthread QoS requests/readbacks and worker probe QoS records; separate 100 ms CPU warmup before probe samples and macOS startup calibration. Warmup and QoS do not certify core class or maximum frequency (cd44614f).
+- Observational CPU warmup probes callable on actual Rayon workers, fixed integer/cache batches and per-worker timing spread (7d15cacf); `cpu-info --probe` diagnoses new workers without certifying CPU placement (914111a9).
 - CPU topology/placement records, `Suite::cpu_policy`, `Suite::cpu_set`, and suite affinity defaults; per-row CPU evidence and incompatible-placement checks for aggregation/baselines (d151aac6).
 - `zenbench cpu-info` and `zenbench exec` verified launch control; Linux cpuset and supported Windows process-mask enforcement cover external pools. macOS class binding and Windows ARM/multiple processor groups fail closed (8e2d6334).
 - Scoped CPU affinity: `platform::pin_current_thread` / `AffinityGuard`, mask queries on Linux/Windows, `BenchGroup::affinity`, and cached `ZENBENCH_PIN` CPU lists/ranges. Group settings cover warmup, estimation, rounds, and zenbench-owned workers. macOS saves/restores an advisory Mach cache-sharing tag rather than binding CPU IDs; rejected hints return errors (ce74f0dc).

@@ -152,6 +152,7 @@ affinity-example:
 affinity-platform-check:
     cargo check --lib --tests --no-default-features --target x86_64-apple-darwin
     cargo check --lib --tests --no-default-features --target aarch64-apple-darwin
+    cargo check --lib --features criterion-compat --target aarch64-apple-darwin
     cargo check --lib --tests --no-default-features --target x86_64-pc-windows-gnu
     cargo check --lib --no-default-features --target wasm32-unknown-unknown
 
@@ -218,6 +219,37 @@ cpu-policy-subprocess-check:
 
 cpu-policy-arm-check:
     ZENBENCH_CPU_POLICY=unrestricted cross test --target armv7-unknown-linux-gnueabihf --no-default-features --features cli --test cpu_policy
+
+# Fixed-work diagnostics: an actual Rayon pool and new CLI diagnostic workers.
+cpu-probe-check:
+    cargo fmt --check
+    cargo clippy --all-targets --features criterion-compat -- -D warnings
+    cargo clippy --lib --tests --examples --no-default-features -- -D warnings
+    cargo test --lib platform::probe
+    cargo test --test cpu_probe
+    cargo test --test cpu_probe --no-default-features
+    ZENBENCH_AFFINITY_TEST_RUNNER=/usr/bin/env cargo test --test cpu_probe
+    cargo build --bin zenbench --example cpu_probe
+
+cpu-probe-example *cpus:
+    cargo run --release --example cpu_probe -- {{cpus}}
+
+cpu-probe-info:
+    cargo run --bin zenbench -- cpu-info --probe --workers 2
+
+# Native API oracle through an existing trusted SSH alias; no remote file writes.
+mac-affinity-probe host:
+    ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 {{host}} 'python3 -B -' < examples/macos_affinity_probe.py
+
+# Invoke through run-heavy locally; native interpreter is niced, CPU-time-limited, and RSS-monitored.
+mac-qos-probe host:
+    ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 {{host}} 'nice -n19 /usr/bin/time -l python3 -B -' < examples/macos_qos_probe.py
+
+# Verify QoS guard compile-fail documentation and normal Criterion startup.
+qos-warmup-check:
+    cargo test --lib platform::affinity
+    ZENBENCH_CPU_POLICY=unrestricted ZENBENCH_NO_SAVE=1 ZENBENCH_NO_CALIBRATE=1 cargo test --doc
+    ZENBENCH_CPU_POLICY=unrestricted ZENBENCH_NO_SAVE=1 ZENBENCH_NO_CALIBRATE=1 cargo test --features criterion-compat --test criterion_compat
 
 # Validate each review-stack boundary; run through run-heavy.
 review-check *test_args="--lib":

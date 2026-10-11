@@ -1,0 +1,12 @@
+{
+  "sampler_commit": "7d15cacf5edc28f2376d78dc85575a7e80e55b32",
+  "example_source": "examples/cpu_probe.rs in the same commit as this record",
+  "command": "TMPDIR=/home/lilith/tmp run-heavy --mem 12G -- just cpu-probe-example 0 8",
+  "build_command": "cargo run --release --example cpu_probe -- 0 8",
+  "compiler": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "cpu": "Intel Core Ultra 7 265K",
+  "cpu_classes": "CPU 0 performance; CPU 8 efficiency; resolved with zenbench cpu-info",
+  "measured_date": "2026-10-11",
+  "run_heavy_summary": "run-heavy: done rc=0 9s | peak-RSS 0.51GiB | min-avail 23584MiB | peak-load 4.32",
+  "scope": "One short diagnostic on two explicitly pinned workers; no general benchmark/class-certification claim"
+}

@@ -7,6 +7,107 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::OnceLock;
 
+/// macOS scheduling preferences. Neither preference binds a P/E core class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ThreadQos {
+    UserInteractive,
+    Background,
+}
+
+/// Requested QoS readback from pthreads; overrides and actual CPU placement
+/// are not observable through this query.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub struct ThreadQosState {
+    /// Native SDK code: 0x21 interactive, 0x09 background, 0x15 default.
+    pub class: u32,
+    pub relative_priority: i32,
+}
+
+/// Restores the calling worker's requested QoS on drop. Cannot cross threads.
+///
+/// ```compile_fail
+/// let guard = zenbench::platform::set_current_thread_qos(
+///     zenbench::platform::ThreadQos::UserInteractive,
+/// ).unwrap();
+/// std::thread::spawn(move || drop(guard));
+/// ```
+#[derive(Debug)]
+#[must_use = "dropping the guard restores the previous requested QoS"]
+pub struct QosGuard {
+    previous: Option<ThreadQosState>,
+    _thread_bound: PhantomData<Rc<()>>,
+}
+
+impl Drop for QosGuard {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.take() {
+            if let Err(error) = set_qos_state(previous) {
+                eprintln!("[zenbench] requested QoS restoration failed: {error}");
+            }
+        }
+    }
+}
+
+/// Query the current worker's requested macOS QoS, or return Unsupported.
+pub fn current_thread_qos() -> Result<ThreadQosState, AffinityError> {
+    #[cfg(target_os = "macos")]
+    {
+        backend::qos_current()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err(AffinityError::Unsupported)
+    }
+}
+
+fn set_qos_state(state: ThreadQosState) -> Result<(), AffinityError> {
+    #[cfg(target_os = "macos")]
+    {
+        backend::qos_set(state)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = state;
+        Err(AffinityError::Unsupported)
+    }
+}
+
+/// Request interactive/background QoS at relative priority zero for this worker.
+///
+/// Existing pools must invoke this inside their actual workers. Readbacks reflect
+/// requests, not effective scheduling overrides or guaranteed P/E placement.
+/// An unspecified/unrestorable prior QoS is rejected before any change. On other
+/// platforms this returns Unsupported. Keep guards nested in stack order.
+pub fn set_current_thread_qos(qos: ThreadQos) -> Result<QosGuard, AffinityError> {
+    let previous = current_thread_qos()?;
+    if !matches!(previous.class, 0x21 | 0x19 | 0x15 | 0x11 | 0x09) {
+        return Err(AffinityError::Os(
+            "prior QoS cannot be restored by pthread_set_qos_class_self_np".into(),
+        ));
+    }
+    let requested = ThreadQosState {
+        class: match qos {
+            ThreadQos::UserInteractive => 0x21,
+            ThreadQos::Background => 0x09,
+        },
+        relative_priority: 0,
+    };
+    let guard = QosGuard {
+        previous: Some(previous),
+        _thread_bound: PhantomData,
+    };
+    set_qos_state(requested)?;
+    if current_thread_qos()? != requested {
+        return Err(AffinityError::Os(
+            "pthread QoS request readback differed from the request".into(),
+        ));
+    }
+    Ok(guard)
+}
+
 /// An affinity request could not be parsed or applied.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -153,6 +254,49 @@ mod backend {
 
     pub(super) type Saved = libc::integer_t;
 
+    // Raw integer ABI avoids representing a future SDK class as a Rust enum.
+    unsafe extern "C" {
+        fn pthread_get_qos_class_np(
+            thread: libc::pthread_t,
+            class: *mut u32,
+            relative: *mut i32,
+        ) -> i32;
+        fn pthread_set_qos_class_self_np(class: u32, relative: i32) -> i32;
+    }
+
+    pub(super) fn qos_current() -> Result<super::ThreadQosState, AffinityError> {
+        let mut class = 0u32;
+        let mut relative_priority = 0i32;
+        // SAFETY: pthread_self names the live caller. Both scalar out-pointers
+        // are initialized, writable, ABI-sized, and valid for the whole call.
+        let rc = unsafe {
+            pthread_get_qos_class_np(libc::pthread_self(), &mut class, &mut relative_priority)
+        };
+        if rc != 0 {
+            return Err(AffinityError::Os(format!(
+                "pthread QoS query: {}",
+                std::io::Error::from_raw_os_error(rc)
+            )));
+        }
+        Ok(super::ThreadQosState {
+            class,
+            relative_priority,
+        })
+    }
+
+    pub(super) fn qos_set(state: super::ThreadQosState) -> Result<(), AffinityError> {
+        // SAFETY: affects only the live caller, passing two scalar values.
+        // Invalid priorities/classes are rejected by pthreads with an errno.
+        let rc = unsafe { pthread_set_qos_class_self_np(state.class, state.relative_priority) };
+        if rc != 0 {
+            return Err(AffinityError::Os(format!(
+                "pthread QoS request: {}",
+                std::io::Error::from_raw_os_error(rc)
+            )));
+        }
+        Ok(())
+    }
+
     fn check(result: libc::kern_return_t) -> Result<(), AffinityError> {
         match result {
             libc::KERN_SUCCESS => Ok(()),
@@ -244,6 +388,36 @@ mod backend {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn qos_requests_restore_the_original_requested_state() {
+            let before = qos_current().unwrap();
+            if !matches!(before.class, 0x21 | 0x19 | 0x15 | 0x11 | 0x09) {
+                for qos in [
+                    super::super::ThreadQos::UserInteractive,
+                    super::super::ThreadQos::Background,
+                ] {
+                    assert!(super::super::set_current_thread_qos(qos).is_err());
+                    assert_eq!(qos_current().unwrap(), before);
+                }
+            } else {
+                for (qos, code) in [
+                    (super::super::ThreadQos::UserInteractive, 0x21),
+                    (super::super::ThreadQos::Background, 0x09),
+                ] {
+                    let guard = super::super::set_current_thread_qos(qos).unwrap();
+                    assert_eq!(
+                        qos_current().unwrap(),
+                        super::super::ThreadQosState {
+                            class: code,
+                            relative_priority: 0
+                        }
+                    );
+                    drop(guard);
+                    assert_eq!(qos_current().unwrap(), before);
+                }
+            }
+        }
 
         #[test]
         fn policy_round_trip_or_explicit_os_error() {
@@ -374,6 +548,19 @@ impl Drop for GroupAffinityGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn qos_never_silently_succeeds_on_an_unsupported_platform() {
+        assert!(matches!(
+            current_thread_qos(),
+            Err(AffinityError::Unsupported)
+        ));
+        assert!(matches!(
+            set_current_thread_qos(ThreadQos::UserInteractive),
+            Err(AffinityError::Unsupported)
+        ));
+    }
 
     #[test]
     fn parses_cpu_lists() {
