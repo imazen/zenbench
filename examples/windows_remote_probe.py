@@ -19,9 +19,13 @@ def main():
     parser.add_argument('--relay')
     parser.add_argument('--network-jump')
     parser.add_argument('--known-hosts', type=Path)
+    parser.add_argument('--cpu-id', type=int,
+                        help='Optional 0..63 argument for the process-mask oracle')
     parser.add_argument('--script', type=Path,
                         default=Path(__file__).with_name('windows_topology_probe.ps1'))
     args = parser.parse_args()
+    if args.cpu_id is not None and not 0 <= args.cpu_id < 64:
+        parser.error('--cpu-id must be in 0..63')
     for host in [args.host, args.relay, args.network_jump]:
         if host is not None and (not host or host.startswith('-') or any(c.isspace() for c in host)):
             parser.error('SSH aliases must be nonempty single destination tokens')
@@ -54,7 +58,9 @@ def main():
         "$m=[IO.MemoryStream]::new($b);"
         "$z=[IO.Compression.GZipStream]::new($m,[IO.Compression.CompressionMode]::Decompress);"
         "$r=[IO.StreamReader]::new($z);"
-        "try { & ([ScriptBlock]::Create($r.ReadToEnd())) } finally { $r.Dispose();$z.Dispose();$m.Dispose() }"
+        "try { & ([ScriptBlock]::Create($r.ReadToEnd())) "
+        + (str(args.cpu_id) if args.cpu_id is not None else '')
+        + " } finally { $r.Dispose();$z.Dispose();$m.Dispose() }"
     )
     powershell = 'powershell.exe -NoProfile -Command "' + decoder + '"'
     if len(powershell) > 7500:

@@ -13,6 +13,7 @@
      Add items here as you discover them. Do NOT ship these piecemeal — batch them. -->
 
 ### Added
+- Native Windows process-mask oracle with preexisting managed thread/pool negative controls, verified worker/process restoration, and separate real hybrid P/E observations.
 - Repeatable SSH transport for the native Windows topology oracle using existing credentials, optional relay/jump hosts, and trusted host pins.
 - Read-only PowerShell native Windows core/cache/group topology oracle, executed by Windows x64/ARM CI; it does not change affinity or supply the Rust backend's missing ARM topology.
 - Scoped macOS pthread QoS requests/readbacks and worker probe QoS records; separate 100 ms CPU warmup before probe samples and macOS startup calibration. Warmup and QoS do not certify core class or maximum frequency (cd44614f).

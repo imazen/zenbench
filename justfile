@@ -252,8 +252,8 @@ qos-warmup-check:
     ZENBENCH_CPU_POLICY=unrestricted ZENBENCH_NO_SAVE=1 ZENBENCH_NO_CALIBRATE=1 cargo test --features criterion-compat --test criterion_compat
 
 # Compile the diagnostic's native declarations without invoking Windows APIs.
-windows-topology-compile image="mcr.microsoft.com/powershell:latest":
-    docker run --rm --memory=2g --memory-swap=2g --cpus=1 --mount type=bind,src={{justfile_directory()}},dst=/work,readonly --entrypoint /usr/bin/nice {{image}} -n19 pwsh -NoProfile -File /work/examples/windows_topology_probe.ps1 -CompileOnly
+windows-topology-compile image="mcr.microsoft.com/powershell:latest" script="windows_topology_probe.ps1":
+    docker run --rm --memory=2g --memory-swap=2g --cpus=1 --mount type=bind,src={{justfile_directory()}},dst=/work,readonly --entrypoint /usr/bin/nice {{image}} -n19 pwsh -NoProfile -File /work/examples/{{script}} -CompileOnly
 
 # Additional arguments select existing relays, network jumps, and trusted pins.
 windows-topology-remote host *options:

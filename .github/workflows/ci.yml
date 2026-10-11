@@ -70,6 +70,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./examples/windows_topology_probe.ps1
+      - name: Native Windows process-mask worker oracle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./examples/windows_process_mask_probe.ps1
       - name: Unit tests (all features)
         run: cargo test --all-features
       - name: Unit tests (no default features)
