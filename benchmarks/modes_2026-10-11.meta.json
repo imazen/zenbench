@@ -1,0 +1,35 @@
+{
+  "source_commit": "0acfd44aaa1d88c91a3bc37ab985c16fd58608ba",
+  "build_note": "Release default-feature binary built from the same Rust source and fixture before commits were split; documentation edits were present. Runtime git_hash is not build identity.",
+  "binary_sha256": "4ebd65e57b120255f4b21e6427518a6504b9a03b7d3d80c684ada965c705bc97",
+  "commands": [
+    "just protocol-check .git/protocol-diagnostic",
+    "just protocol-replay .git/protocol-diagnostic"
+  ],
+  "earlier_attempts": [
+    "protocol-first (driver aggregate assertion corrected with approval)",
+    "protocol-refusals (all selected refusal controls passed)",
+    "protocol-complete (one Evidence child had 30 flagged resource rounds; verdict refused)"
+  ],
+  "earlier_binary_note": "Earlier attempt packets retain their binary digests; this archive includes the final diagnostic executable, not earlier executable revisions.",
+  "host_cpu_label": "i265",
+  "cpuset": [
+    0
+  ],
+  "container_memory_limit_bytes": 2147483648,
+  "priority": "nice 19",
+  "features": "default",
+  "profile": "release",
+  "rustflags": [],
+  "compiler": "rustc 1.99.0 (b940084d7 2026-09-28)\nbinary: rustc\ncommit-hash: b940084d7eb6a299eb4bfeb8e34901bc051e7ac4\ncommit-date: 2026-09-28\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.0\nLLVM version: 23.1.1\n",
+  "run_heavy": "run-heavy: done rc=0 11s | peak-RSS 0.10GiB | min-avail 26797MiB | peak-load 1.22",
+  "rss_scope": "Wrapper covers Docker client and Python replay; benchmark payload separately capped at 2 GiB",
+  "full_verification": "run-heavy: done rc=0 249s | peak-RSS 1.72GiB | min-avail 24967MiB | peak-load 6.65",
+  "oracles": [
+    "Python stdlib gzip/json/hashlib exact packet checks",
+    "SciPy 1.18.1 replay of process intervals",
+    "committed deterministic SciPy interval/coverage fixtures"
+  ],
+  "run_driver_sha256": "568324f42495f3b09a0b09ca0c04996d983817f26d136ebead58bf46a1f2f262",
+  "replay_driver_sha256": "51a73ed40666e2ad767e9aa7d490b4268a39e434377976599a1b3d1aa8d81b45"
+}
