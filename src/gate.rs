@@ -520,19 +520,25 @@ fn collect_ancestors(
     start: Option<sysinfo::Pid>,
     out: &mut Vec<sysinfo::Pid>,
 ) {
+    collect_ancestors_with(start, out, |pid| sys.process(pid)?.parent());
+}
+
+fn collect_ancestors_with(
+    start: Option<sysinfo::Pid>,
+    out: &mut Vec<sysinfo::Pid>,
+    parent_of: impl Fn(sysinfo::Pid) -> Option<sysinfo::Pid>,
+) {
     let mut cur = start;
     // Hard cap independent of the process count: PID chains are shallow,
     // and this guards against a reused-PID cycle the visited-set might miss.
     for _ in 0..1024 {
         let Some(pid) = cur else { return };
-        let Some(proc_) = sys.process(pid) else {
+        let Some(parent) = parent_of(pid) else {
             return;
         };
-        let Some(parent) = proc_.parent() else {
-            return;
-        };
-        if out.contains(&parent) {
-            // Already walked this ancestor (shared chain) — stop.
+        if Some(parent) == start || out.contains(&parent) {
+            // PID reuse can close a cycle through the starting process,
+            // which is not necessarily already present in the output.
             return;
         }
         out.push(parent);
@@ -669,6 +675,39 @@ mod tests {
         let mut ancestors = Vec::new();
         collect_ancestors(&sys, None, &mut ancestors);
         assert!(ancestors.is_empty());
+    }
+
+    #[test]
+    fn collect_ancestors_excludes_start_in_cycles() {
+        let start = sysinfo::Pid::from(100);
+        let parent = sysinfo::Pid::from(200);
+        let mut ancestors = Vec::new();
+        collect_ancestors_with(Some(start), &mut ancestors, |pid| {
+            Some(if pid == start { parent } else { start })
+        });
+        assert_eq!(ancestors, vec![parent]);
+
+        ancestors.clear();
+        collect_ancestors_with(Some(start), &mut ancestors, Some);
+        assert!(ancestors.is_empty());
+    }
+
+    #[test]
+    fn collect_ancestors_retains_chain_and_stops_at_shared_ancestor() {
+        let start = sysinfo::Pid::from(300);
+        let parent = sysinfo::Pid::from(200);
+        let grandparent = sysinfo::Pid::from(100);
+        let parent_of = |pid| match pid {
+            p if p == start => Some(parent),
+            p if p == parent => Some(grandparent),
+            _ => None,
+        };
+        let mut ancestors = Vec::new();
+        collect_ancestors_with(Some(start), &mut ancestors, parent_of);
+        assert_eq!(ancestors, vec![parent, grandparent]);
+
+        collect_ancestors_with(Some(start), &mut ancestors, parent_of);
+        assert_eq!(ancestors, vec![parent, grandparent]);
     }
 
     #[test]

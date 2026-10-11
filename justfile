@@ -357,6 +357,11 @@ plan-check:
     cargo clippy --all-targets -- -D warnings
     just api-doc
 
+ancestor-check:
+    cargo fmt -p zenbench -- --check
+    cargo test --lib gate::tests::collect_ancestors
+    cargo clippy --all-targets --all-features -- -D warnings
+
 protocol-build:
     cargo fmt -p zenbench
     cargo clippy --all-targets -- -D warnings

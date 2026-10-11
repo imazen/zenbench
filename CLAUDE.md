@@ -2,6 +2,11 @@
 
 ### Known bugs: defaults audit (2026-10-11)
 
+Windows x64 CI exposed an ancestor walk that could append its starting PID
+when the observed parent links formed a cycle. The walk now stops before that
+append, even when its output was initially empty. Deterministic self-cycle and
+two-process-cycle regressions supplement the unchanged live parent assertion.
+
 Known bugs identified by the defaults audit: multi-process aggregation retains
 the first run's paired analyses after changing benchmark summaries; a synthetic
 -20%/+20% pair averages to equal means but still reports -20%, significant.
