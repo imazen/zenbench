@@ -297,3 +297,10 @@ windows-job-test-build:
 windows-job-test-remote host binary *options:
     python3 -B examples/windows_remote_probe.py {{host}} --upload-file {{binary}} {{options}}
     python3 -B examples/windows_remote_probe.py {{host}} --script examples/windows_repeatability.ps1 --script-arg `sha256sum {{binary}} | cut -d' ' -f1` --script-arg default --script-arg 1 --script-arg job-test {{options}}
+
+windows-gate-test-build:
+    just windows-cargo test --release --target x86_64-pc-windows-gnu --test gate_sees_load --no-run
+
+windows-gate-test-remote host binary *options:
+    python3 -B examples/windows_remote_probe.py {{host}} --upload-file {{binary}} {{options}}
+    python3 -B examples/windows_remote_probe.py {{host}} --script examples/windows_repeatability.ps1 --script-arg `sha256sum {{binary}} | cut -d' ' -f1` --script-arg default --script-arg 1 --script-arg gate-test {{options}}

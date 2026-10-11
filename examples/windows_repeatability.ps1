@@ -59,7 +59,7 @@ public static class ZenbenchBenchJob {
 }
 '@
 if ($CompileOnly) { 'Native benchmark Job Object declarations compiled'; return }
-if ($Mode -notin @('benchmark','job-test')) { throw 'Invalid native execution mode' }
+if ($Mode -notin @('benchmark','job-test','gate-test')) { throw 'Invalid native execution mode' }
 if ($Sha256 -notmatch '^[0-9a-f]{64}$') { throw 'Invalid executable hash' }
 if ($Repeats -lt 1 -or $Repeats -gt 32) { throw 'Repeats must be 1..32' }
 $sets = $CpuSets.Split(';')
@@ -81,13 +81,14 @@ for ($repeat=0; $repeat -lt $Repeats; $repeat++) {
   $psi = New-Object Diagnostics.ProcessStartInfo
   $psi.FileName=$exe; $psi.Arguments=$set; $psi.WorkingDirectory=$root
   if ($Mode -eq 'job-test') { $psi.Arguments='--exact inherited_job_prevents_process_and_worker_escape --nocapture' }
+  if ($Mode -eq 'gate-test') { $psi.Arguments='--exact gate_sees_cpu_load --nocapture' }
   $psi.UseShellExecute=$false; $psi.RedirectStandardOutput=$true; $psi.RedirectStandardError=$true
   $p = New-Object Diagnostics.Process; $p.StartInfo=$psi
   if (!$p.Start()) { throw 'Child did not start' }
   $outTask=$p.StandardOutput.ReadToEndAsync(); $errTask=$p.StandardError.ReadToEndAsync()
   if (!$p.WaitForExit(90000)) { $p.Kill(); $p.WaitForExit(); throw 'Native benchmark timeout' }
   $stdout=$outTask.GetAwaiter().GetResult(); $stderr=$errTask.GetAwaiter().GetResult()
-  if ($Mode -eq 'job-test' -and $p.ExitCode -eq 0 -and $stdout -notmatch '1 passed; 0 failed') { throw 'Native job fixture did not execute its test' }
+  if ($Mode -ne 'benchmark' -and $p.ExitCode -eq 0 -and $stdout -notmatch '1 passed; 0 failed') { throw 'Native fixture did not execute its test' }
   $peakRss=[ZenbenchBenchJob]::PeakRss($p.Handle)
   $run = [ordered]@{cpu_set=$set; repeat=$repeat; exit_code=$p.ExitCode; peak_rss_bytes=$peakRss; stderr=$stderr}
   if ($p.ExitCode -eq 0 -and $Mode -eq 'benchmark') { $run.evidence=($stdout | ConvertFrom-Json) } else { $run.stdout=$stdout }
@@ -97,4 +98,4 @@ for ($repeat=0; $repeat -lt $Repeats; $repeat++) {
  }
 }
 [ordered]@{mode=$Mode; binary_sha256=$Sha256; memory_limit_bytes=2147483648; priority='idle'; peak_job_commit_bytes=[ZenbenchBenchJob]::Peak($job); runs=$runs} | ConvertTo-Json -Depth 40 -Compress
-if ($Mode -eq 'job-test' -and @($runs | Where-Object { $_.exit_code -ne 0 }).Count -ne 0) { exit 1 }
+if ($Mode -ne 'benchmark' -and @($runs | Where-Object { $_.exit_code -ne 0 }).Count -ne 0) { exit 1 }

@@ -314,3 +314,10 @@ before installing the affinity job, attempts process/thread escape, and checks
 an inherited descendant process. This tests the OS boundary independently of
 CPU class discovery; Windows ARM P/E discovery remains unsupported and default
 benchmark admission still fails closed there.
+
+The unchanged `gate_sees_load` regression can also run natively with
+`just windows-gate-test-build` and `just windows-gate-test-remote HOST BINARY`.
+It exercises the CPU monitor's first snapshot and the resource gate while
+workers generate load, then drops those workers. The remote runner requires
+the named test to execute and retains its status, native peak RSS, and job cap.
+This is separate from the explicitly ungated repeatability protocol above.
