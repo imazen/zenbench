@@ -714,6 +714,7 @@ mod tests {
         throughput: Option<Throughput>,
     ) -> ComparisonResult {
         ComparisonResult {
+            config: None,
             group_name: name.to_string(),
             benchmarks,
             analyses: Vec::new(),

@@ -90,12 +90,99 @@ impl Engine {
 
     /// Run all benchmarks and return results.
     pub fn run(mut self) -> SuiteResult {
+        let plan = self.suite.plan.clone().resolve().unwrap_or_else(|e| {
+            eprintln!("[zenbench] invalid benchmark plan: {e}");
+            std::process::exit(2);
+        });
+        let dry_run = std::env::args().any(|a| a == "--dry-run");
+        let confirming = plan.mode != crate::BenchmarkMode::Iterate;
+        if confirming && !dry_run && std::env::var("ZENBENCH_SUBPROCESS").as_deref() != Ok("1") {
+            drop(self); // release registered inputs before starting the first child
+            return crate::run_processes_planned(plan.processes, crate::Aggregation::Mean, plan);
+        }
+        if confirming {
+            self.gate_config.strict = true;
+            self.gate_config.max_wait_count = 0;
+            self.gate_config.max_cpu_load = self.gate_config.max_cpu_load.min(0.05);
+            self.gate_config.max_heavy_processes = 0;
+            assert!(
+                self.gate_config.enabled,
+                "confirmation requires resource monitoring"
+            );
+            assert!(
+                std::env::var_os("ZENBENCH_NO_SAVE").is_none(),
+                "confirmation requires retained evidence"
+            );
+            #[cfg(feature = "criterion-compat")]
+            assert!(
+                self.suite.precomputed_comparisons.is_empty(),
+                "confirmation requires registered groups, not immediate-mode measurements"
+            );
+        }
+        for group in &mut self.suite.groups {
+            if let Some(rounds) = plan.rounds {
+                group.config.max_rounds = rounds;
+            }
+            if confirming {
+                assert!(
+                    group.config.max_rounds >= 2,
+                    "confirmation requires at least two rounds per process"
+                );
+                group.config.min_rounds = group.config.max_rounds;
+                group.config.auto_rounds = false;
+            }
+        }
+        eprintln!(
+            "[zenbench] mode={} inference={} workload={:?}",
+            plan.mode,
+            if confirming {
+                "pending_process_confirmation"
+            } else {
+                "exploratory"
+            },
+            plan.workload_id
+        );
         // Parse the environment once per process, before any benchmark can run.
         platform::configured_affinity().unwrap_or_else(|e| panic!("benchmark affinity: {e}"));
         let cpu_session =
             platform::CpuSession::start(self.suite.cpu_policy, self.suite.cpu_set.as_deref())
                 .unwrap_or_else(|e| panic!("{e}"));
         eprintln!("[zenbench] {}", cpu_session.placement.llm());
+        if dry_run {
+            let groups: Vec<_> = self
+                .suite
+                .groups
+                .iter()
+                .filter(|g| !g.benchmarks.is_empty())
+                .filter(|g| {
+                    self.suite
+                        .group_filter
+                        .as_ref()
+                        .is_none_or(|f| g.name.contains(f))
+                })
+                .map(|g| {
+                    serde_json::json!({
+                        "name": g.name,
+                        "benchmarks": g.benchmarks.iter().map(|b| &b.name).collect::<Vec<_>>(),
+                        "config": g.config,
+                    })
+                })
+                .collect();
+            if confirming && groups.is_empty() {
+                eprintln!("[zenbench] empty confirmation selection");
+                std::process::exit(2);
+            }
+            println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+                "plan": plan,
+                "groups": groups,
+                "cpu_placement": cpu_session.placement,
+                "binary_sha256": crate::storage::binary_digest().expect("cannot hash executable"),
+                "data_directory": crate::storage::data_dir(),
+                "runtime_estimate": null,
+                "note": "Registration has run; benchmark callbacks have not. Durations are budgets, not runtime predictions. Supervisor deadline applies to Confirm/Evidence child processes, not detached descendants.",
+            })).expect("plan serializes"));
+            std::process::exit(0);
+        }
         // Standalone demand warmup precedes calibration/timing metrics. This
         // cannot certify frequency or warm opaque pools on other threads.
         #[cfg(target_os = "macos")]
@@ -153,6 +240,20 @@ impl Engine {
                 loop_overhead_ns,
             );
             None
+        };
+        let execution = crate::ExecutionRecord {
+            protocol: "zenbench-process-v1".into(),
+            plan: plan.clone(),
+            binary_sha256: crate::storage::binary_digest()
+                .expect("cannot hash benchmark executable"),
+            process_id: std::process::id(),
+            independent_processes: false,
+            timer_backend: if tsc_ticks_per_ns.is_some() {
+                "hardware_counter"
+            } else {
+                "instant"
+            }
+            .into(),
         };
         let start = Instant::now();
 
@@ -294,6 +395,7 @@ impl Engine {
             // Checkpoint completed groups, including all raw rounds.
             if let Some(path) = &save_path {
                 let partial = SuiteResult {
+                    execution: Some(execution.clone()),
                     run_id: run_id.clone(),
                     timestamp: chrono_now(),
                     git_hash: git_hash.clone(),
@@ -322,6 +424,7 @@ impl Engine {
         cpu_session.verify().unwrap_or_else(|e| panic!("{e}"));
 
         let result = SuiteResult {
+            execution: Some(execution),
             run_id,
             timestamp: chrono_now(),
             git_hash,
@@ -345,6 +448,10 @@ impl Engine {
                 .unwrap_or_else(|e| panic!("cannot persist benchmark evidence: {e}"));
             eprintln!("[zenbench] evidence → {}", reference.display());
             std::fs::remove_file(path).unwrap_or_else(|e| panic!("cannot retire checkpoint: {e}"));
+        }
+
+        if let Some(path) = crate::daemon::result_path_from_env() {
+            result.save(path).expect("cannot save child result packet");
         }
 
         // Print footer (groups were already printed as they completed)
@@ -559,6 +666,7 @@ fn run_comparison_group(
         let mut retained = crate::results::RoundSample {
             gate_clean,
             gate_observation_age_ns: gate.observation_age_ns(),
+            gate_observation: gate.last_observation(),
             iterations: round_iters,
             execution_order: order.clone(),
             elapsed_ns: vec![0; n_benchmarks],
@@ -883,6 +991,7 @@ fn run_comparison_group(
     }
 
     ComparisonResult {
+        config: Some(config.clone()),
         cpu_placement: Some(group_placement),
         group_name: group.name.clone(),
         benchmarks: individual_results,
@@ -1069,6 +1178,34 @@ fn random_permutation(n: usize, rng: &mut Xoshiro256SS) -> Vec<usize> {
         perm.swap(i, j);
     }
     perm
+}
+
+#[cfg(test)]
+mod shuffle_tests {
+    use super::*;
+
+    #[test]
+    fn seeded_schedules_are_permutations_and_consume_fresh_randomness() {
+        for n in [2, 3, 8] {
+            let schedule = || {
+                let mut rng = Xoshiro256SS::seed(42);
+                (0..64)
+                    .map(|_| random_permutation(n, &mut rng))
+                    .collect::<Vec<_>>()
+            };
+            let orders = schedule();
+            assert_eq!(
+                orders,
+                schedule(),
+                "the fixed-seed control must be reproducible"
+            );
+            assert!(orders.windows(2).any(|pair| pair[0] != pair[1]));
+            for mut order in orders {
+                order.sort_unstable();
+                assert_eq!(order, (0..n).collect::<Vec<_>>());
+            }
+        }
+    }
 }
 
 /// Cache firewall: reads a buffer to spoil CPU cache lines.

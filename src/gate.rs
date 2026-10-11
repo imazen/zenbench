@@ -141,6 +141,7 @@ pub struct ResourceGate {
     total_wait_time: Duration,
     background: Option<crate::monitor::Monitor>,
     observation_age_ns: Option<u64>,
+    last_observation: Option<String>,
     missing_observations: bool,
 }
 
@@ -153,6 +154,7 @@ impl ResourceGate {
             total_wait_time: Duration::ZERO,
             background: None,
             observation_age_ns: None,
+            last_observation: None,
             missing_observations: false,
         }
     }
@@ -167,6 +169,10 @@ impl ResourceGate {
 
     pub(crate) fn observation_age_ns(&self) -> Option<u64> {
         self.observation_age_ns
+    }
+
+    pub(crate) fn last_observation(&self) -> Option<String> {
+        self.last_observation.clone()
     }
 
     /// Set thread allowance for the current benchmark group.
@@ -365,6 +371,7 @@ impl ResourceGate {
 
     /// Share the existing check with the engine's retained round evidence.
     pub(crate) fn check_and_record_status(&mut self) -> Option<bool> {
+        self.last_observation = None;
         if !self.config.enabled {
             return None;
         }
@@ -384,6 +391,7 @@ impl ResourceGate {
         };
         let reason = self.check_state(&state);
         let clean = reason.is_none();
+        self.last_observation = Some(format!("reason={reason:?} state={state:?}"));
         if std::env::var_os("ZENBENCH_GATE_TRACE").is_some() {
             eprintln!("[zenbench gate] clean={clean} reason={reason:?} state={state:?}");
         }

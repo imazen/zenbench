@@ -74,6 +74,7 @@ impl Throughput {
 
 /// A complete benchmark suite containing comparison groups.
 pub struct Suite {
+    pub(crate) plan: crate::BenchmarkPlan,
     pub(crate) groups: Vec<BenchGroup>,
     pub(crate) group_filter: Option<String>,
     pub(crate) cpu_policy: Option<crate::platform::CpuPolicy>,
@@ -85,6 +86,16 @@ pub struct Suite {
 }
 
 impl Suite {
+    /// Set crate-wide experiment intent; CLI overrides environment, then this default.
+    pub fn mode(&mut self, mode: crate::BenchmarkMode) -> &mut Self {
+        self.plan.mode = mode;
+        self
+    }
+
+    /// Configure the recorded process count, workload identity, margin and deadline.
+    pub fn plan(&mut self) -> &mut crate::BenchmarkPlan {
+        &mut self.plan
+    }
     /// Configure process CPU-class admission for all groups. Auto (default)
     /// refuses unknown/asymmetric placement without a verified uniform boundary.
     pub fn cpu_policy(&mut self, policy: crate::platform::CpuPolicy) -> &mut Self {
@@ -112,6 +123,7 @@ impl Suite {
 
     pub fn new() -> Self {
         Self {
+            plan: crate::BenchmarkPlan::default(),
             groups: Vec::new(),
             group_filter: None,
             cpu_policy: None,
@@ -607,7 +619,7 @@ impl BenchGroup {
 }
 
 /// Configuration for a benchmark group's execution.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct GroupConfig {
     /// Target number of measurement rounds.
@@ -754,9 +766,9 @@ pub struct GroupConfig {
 impl Default for GroupConfig {
     fn default() -> Self {
         Self {
-            max_rounds: 200,
+            max_rounds: 30,
             min_rounds: 5,
-            warmup_time: Duration::from_millis(500),
+            warmup_time: Duration::from_millis(100),
             max_time: Duration::from_secs(10),
             min_iterations: 1,
             max_iterations: 10_000_000,

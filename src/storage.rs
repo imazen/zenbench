@@ -14,6 +14,8 @@ const MAX_PACKET_BYTES: u64 = 256 * 1024 * 1024;
 struct Reference {
     zenbench_evidence: u32,
     sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    data_root: Option<PathBuf>,
 }
 
 pub(crate) fn data_dir() -> PathBuf {
@@ -24,7 +26,12 @@ pub(crate) fn data_dir() -> PathBuf {
 
 pub(crate) fn prepare_dir() -> io::Result<PathBuf> {
     let root = data_dir();
-    fs::create_dir_all(&root)?;
+    ignore_raw_dir(&root)?;
+    Ok(root)
+}
+
+pub(crate) fn ignore_raw_dir(root: &Path) -> io::Result<()> {
+    fs::create_dir_all(root)?;
     // Each data root protects itself, including a user-selected root inside Git.
     match OpenOptions::new()
         .write(true)
@@ -37,7 +44,7 @@ pub(crate) fn prepare_dir() -> io::Result<PathBuf> {
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
         Err(e) => return Err(e),
     }
-    Ok(root)
+    Ok(())
 }
 
 pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
@@ -104,9 +111,13 @@ pub(crate) fn load(path: &Path) -> io::Result<SuiteResult> {
                 "invalid evidence reference",
             ));
         }
-        let root = path.parent().and_then(Path::parent).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "reference has no data root")
-        })?;
+        let root = reference
+            .data_root
+            .as_deref()
+            .or_else(|| path.parent().and_then(Path::parent))
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "reference has no data root")
+            })?;
         let object = root
             .join("objects")
             .join(format!("{}.json.gz", reference.sha256));
@@ -136,6 +147,20 @@ fn digest(bytes: &[u8]) -> String {
 
 pub(crate) fn evidence_digest(result: &SuiteResult) -> io::Result<String> {
     encoded(result).map(|bytes| digest(&bytes))
+}
+
+pub(crate) fn binary_digest() -> io::Result<String> {
+    let mut file = fs::File::open(std::env::current_exe()?)?;
+    let mut hash = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        hash.update(&buffer[..n]);
+    }
+    Ok(hash.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// Publish content once and a small reference only after the object is durable.
@@ -175,10 +200,22 @@ fn persist_at(result: &SuiteResult, root: &Path) -> io::Result<PathBuf> {
     let bytes = serde_json::to_vec(&Reference {
         zenbench_evidence: 1,
         sha256,
+        data_root: None,
     })
     .map_err(io::Error::other)?;
     atomic_write(&reference, &bytes)?;
     Ok(reference)
+}
+
+pub(crate) fn save_reference(result: &SuiteResult, path: &Path) -> io::Result<()> {
+    let reference = persist(result)?;
+    let mut record: Reference =
+        serde_json::from_slice(&fs::read(reference)?).map_err(io::Error::other)?;
+    record.data_root = Some(prepare_dir()?.canonicalize()?);
+    atomic_write(
+        path,
+        &serde_json::to_vec(&record).map_err(io::Error::other)?,
+    )
 }
 
 #[cfg(test)]
