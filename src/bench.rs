@@ -206,6 +206,7 @@ pub struct BenchGroup {
     pub(crate) baseline_name: Option<String>,
     /// Current subgroup label, applied to subsequent benchmarks.
     current_subgroup: Option<String>,
+    pub(crate) affinity_cores: Option<Vec<usize>>,
 }
 
 impl BenchGroup {
@@ -223,7 +224,28 @@ impl BenchGroup {
             throughput_unit: None,
             baseline_name: None,
             current_subgroup: None,
+            affinity_cores: None,
         }
+    }
+
+    /// Pin this group's coordinator and zenbench-created workers to logical CPUs.
+    ///
+    /// Overrides `ZENBENCH_PIN` for this group. Covers warmup, iteration estimation,
+    /// and all measured rounds, restoring the calling thread's previous affinity
+    /// afterward. Existing external thread pools are unaffected. Empty CPU sets
+    /// and OS failures abort the run before results are returned.
+    ///
+    /// ```rust,no_run
+    /// # use zenbench::prelude::*;
+    /// # let mut suite = Suite::new();
+    /// suite.group("pinned", |g| {
+    ///     g.affinity(&[2, 3]);
+    ///     g.bench("work", |b| b.iter(|| std::hint::black_box(42)));
+    /// });
+    /// ```
+    pub fn affinity(&mut self, cores: &[usize]) -> &mut Self {
+        self.affinity_cores = Some(cores.to_vec());
+        self
     }
 
     /// Add a benchmark to this comparison group.
@@ -304,6 +326,7 @@ impl BenchGroup {
                 let shared = setup();
                 let shared = Arc::new(shared);
                 let iterations = bencher.iterations;
+                let affinity = crate::platform::benchmark_affinity();
                 let barrier = Arc::new(Barrier::new(threads + 1)); // +1 for the timing thread
 
                 let mut handles = Vec::with_capacity(threads);
@@ -311,12 +334,22 @@ impl BenchGroup {
                     let shared = shared.clone();
                     let barrier = barrier.clone();
                     let work = work.clone();
+                    let affinity = affinity.clone();
                     handles.push(std::thread::spawn(move || {
+                        let pin = affinity
+                            .as_deref()
+                            .map(crate::platform::pin_current_thread)
+                            .transpose();
                         // Each thread gets its own bencher for iteration counting
                         let mut thread_bencher = Bencher::new(iterations);
                         barrier.wait(); // synchronized start
-                        work(&mut thread_bencher, &shared, tid);
+                        if pin.is_ok() {
+                            work(&mut thread_bencher, &shared, tid);
+                        }
                         barrier.wait(); // synchronized end
+                        // Participate in both barriers on failure so the coordinator
+                        // can join and abort without deadlocking or running unpinned.
+                        let _pin = pin.unwrap_or_else(|e| panic!("benchmark worker affinity: {e}"));
                     }));
                 }
 
@@ -372,17 +405,26 @@ impl BenchGroup {
             subgroup: self.current_subgroup.clone(),
             func: BenchFn::new(move |bencher: &mut Bencher| {
                 let iterations = bencher.iterations;
+                let affinity = crate::platform::benchmark_affinity();
                 let barrier = Arc::new(Barrier::new(threads + 1));
 
                 let mut handles = Vec::with_capacity(threads);
                 for tid in 0..threads {
                     let barrier = barrier.clone();
                     let work = work.clone();
+                    let affinity = affinity.clone();
                     handles.push(std::thread::spawn(move || {
+                        let pin = affinity
+                            .as_deref()
+                            .map(crate::platform::pin_current_thread)
+                            .transpose();
                         let mut thread_bencher = Bencher::new(iterations);
                         barrier.wait();
-                        work(&mut thread_bencher, tid);
+                        if pin.is_ok() {
+                            work(&mut thread_bencher, tid);
+                        }
                         barrier.wait();
+                        let _pin = pin.unwrap_or_else(|e| panic!("benchmark worker affinity: {e}"));
                     }));
                 }
 

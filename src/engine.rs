@@ -90,6 +90,8 @@ impl Engine {
 
     /// Run all benchmarks and return results.
     pub fn run(mut self) -> SuiteResult {
+        // Parse the environment once per process, before any benchmark can run.
+        platform::configured_affinity().unwrap_or_else(|e| panic!("benchmark affinity: {e}"));
         let run_id = RunId::generate();
         let ci = platform::detect_ci().map(String::from);
         let git_hash = platform::git_commit_hash();
@@ -362,6 +364,11 @@ fn run_comparison_group(
     tsc_ticks_per_ns: Option<f64>,
     timer_resolution_ns: u64,
 ) -> ComparisonResult {
+    let environment =
+        platform::configured_affinity().unwrap_or_else(|e| panic!("benchmark affinity: {e}"));
+    let cores = group.affinity_cores.as_deref().or(environment.as_deref());
+    let _affinity = platform::GroupAffinityGuard::enter(cores)
+        .unwrap_or_else(|e| panic!("benchmark group '{}' affinity: {e}", group.name));
     let config = &group.config;
     let n_benchmarks = group.benchmarks.len();
     let group_start = Instant::now();

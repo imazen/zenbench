@@ -1,12 +1,20 @@
-// Without precise-timing or alloc-profiling, no unsafe is permitted anywhere.
-// With either feature, unsafe is denied (errors) but the timing/alloc modules
-// can override with #[allow(unsafe_code)] for TSC reads, asm fences, and GlobalAlloc.
+// Unsafe is forbidden except for the existing timing/allocation features and
+// the macOS affinity backend. Those configurations deny unsafe everywhere;
+// only the corresponding primitive modules have scoped allow attributes.
 #![cfg_attr(
-    not(any(feature = "precise-timing", feature = "alloc-profiling")),
+    not(any(
+        feature = "precise-timing",
+        feature = "alloc-profiling",
+        target_os = "macos"
+    )),
     forbid(unsafe_code)
 )]
 #![cfg_attr(
-    any(feature = "precise-timing", feature = "alloc-profiling"),
+    any(
+        feature = "precise-timing",
+        feature = "alloc-profiling",
+        target_os = "macos"
+    ),
     deny(unsafe_code)
 )]
 #![doc = include_str!("../README.md")]
