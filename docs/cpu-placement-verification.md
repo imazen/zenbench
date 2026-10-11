@@ -162,3 +162,32 @@ Criterion compatibility also exercise the coordinator for 100 ms before
 calibration. Opaque external pools must warm their actual workers separately.
 All CPU evidence rows retain `cpu_frequency_verified=false`; these exercises
 do not establish maximum frequency or replace fail-closed admission.
+
+## Native asymmetric-cache inventory
+
+A read-only sysfs query on an AMD Ryzen 9 9950X3D on 2026-10-11 reported online
+CPUs `0-31` and the following last-level-cache domains:
+
+| Reported L3 size | Shared logical CPU IDs |
+|---|---|
+| `32768K` (32 MiB) | `8-15,24-31` |
+| `98304K` (96 MiB) | `0-7,16-23` |
+
+These CPU assignments are observations on that installation. Resolve them
+again before selecting CPUs; numbering is not a portable CCD identifier. The
+query read `level`, `size`, and `shared_cpu_list` under
+`/sys/devices/system/cpu/cpu*/cache/index*/` through an existing trusted SSH
+connection, without a benchmark workload or compiled Rust execution.
+
+The Linux Rust discovery path already distinguishes L3 `size` classes. Its
+equal-core-capacity 96M/32M fixture verifies that a mixed process boundary is
+refused, named performance selection cannot choose between equal-ranked cache
+classes, and a confined explicit CPU set is admitted. This native inventory
+confirms the hardware exposes unequal sizes; it does not measure confinement
+or performance on the 9950X3D. `shared_cpu_list` was observed by the inventory,
+but cache-domain identities are not currently separate Rust metadata fields.
+
+Select each detected cache class in a fresh process and retain its CPU set and
+cache-class label in results. Do not combine classes or infer the faster CCD
+from cache capacity. Equal-size caches with different sharing/placement remain
+a separate discovery limitation.
