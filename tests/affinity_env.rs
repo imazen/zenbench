@@ -57,7 +57,17 @@ fn environment_pinning() {
             ("invalid", Some("3-2".into())),
             ("invalid", Some(usize::MAX.to_string())),
         ] {
-            let mut child = Command::new(std::env::current_exe().unwrap());
+            let executable = std::env::current_exe().unwrap();
+            // Cross's user-mode emulator does not intercept execve in the
+            // guest. The caller must supply the emulator for each fresh child.
+            let mut child = if let Some(runner) = std::env::var_os("ZENBENCH_AFFINITY_TEST_RUNNER")
+            {
+                let mut command = Command::new(runner);
+                command.arg(executable);
+                command
+            } else {
+                Command::new(executable)
+            };
             child
                 .args(["--exact", "environment_pinning", "--nocapture"])
                 .env("ZENBENCH_AFFINITY_TEST_MODE", mode)

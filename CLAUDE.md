@@ -163,6 +163,13 @@ Tested via WSL→PowerShell bridge (Windows cargo 1.92 nightly):
 
 ### Known Bugs (SPEEDQ)
 
+The affinity environment regression test originally relaunched its ARMv7
+executable directly under cross's QEMU user-mode runner. QEMU does not intercept
+the guest's execve, so the child failed with an executable-format shell error.
+Cross.toml now explicitly supplies ZENBENCH_AFFINITY_TEST_RUNNER=qemu-arm for
+that target; every fresh-process environment case still executes and asserts
+the requested mask and restoration. Native callers use direct execution.
+
 Foreign Linux process leaders and their user-thread entries were counted as
 separate heavy processes. A live sleeping-thread regression reproduced a count
 of two for one foreign owner before the correction. The gate now counts each

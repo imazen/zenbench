@@ -1,0 +1,4 @@
+# ARM user-mode emulation needs an explicit runner for test subprocesses too.
+# QEMU_LD_PREFIX is inherited from cross's linux-runner wrapper.
+[target.armv7-unknown-linux-gnueabihf.env]
+passthrough = ["ZENBENCH_AFFINITY_TEST_RUNNER=qemu-arm"]

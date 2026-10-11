@@ -157,3 +157,15 @@ affinity-platform-check:
 
 # Update API snapshots and verify platform test compilation plus the example.
 affinity-review-check: affinity-platform-check api-doc affinity-example
+
+# Exercise native and explicitly wrapped launches without changing assertions.
+affinity-subprocess-check:
+    cargo fmt -- --check
+    cargo clippy --test affinity_env -- -D warnings
+    cargo test --test affinity_env
+    ZENBENCH_AFFINITY_TEST_RUNNER=/usr/bin/env cargo test --test affinity_env
+
+# Cross.toml supplies qemu-arm to children on this emulated target.
+affinity-arm-check:
+    cross test --target armv7-unknown-linux-gnueabihf --all-features --test affinity_env
+    cross test --target armv7-unknown-linux-gnueabihf --no-default-features --test affinity_env
