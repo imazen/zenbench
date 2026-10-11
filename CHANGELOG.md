@@ -12,7 +12,12 @@
 <!-- Breaking changes that will ship together in the next minor release.
      Add items here as you discover them. Do NOT ship these piecemeal — batch them. -->
 
+### Fixed
+- Measurement schedules now receive independent seeds across groups and fresh processes; recorded round orders preserve the realized schedule (b40ac4a3).
+- Strict Windows CPU placement now holds an inherited affinity-limited Job Object, preventing process-mask widening by benchmark code; actual-mask controls cover preexisting Rayon/ordinary threads and child processes (585b0f8d, 95e4042c).
+
 ### Added
+- Native Windows execution of the existing first-snapshot/load-gate regression, with retained resource and status evidence (32636ed2).
 - Native Windows fresh-process repeatability controls for integer/cache/Rayon workloads, identical work, known work increments, independent QPC batches, and resource-limit readback (fc757037).
 - Native Windows process-mask oracle with preexisting managed thread/pool negative controls, verified worker/process restoration, and separate real hybrid P/E observations.
 - Repeatable SSH transport for the native Windows topology oracle using existing credentials, optional relay/jump hosts, and trusted host pins.
@@ -32,8 +37,6 @@
 ## [0.1.10] - 2026-10-06
 
 ### Fixed
-- Measurement schedules now receive independent seeds across groups and fresh processes; recorded round orders preserve the realized schedule (b40ac4a3).
-
 - Preserve global CPU-load checks when no worker PID inventory is supplied.
 
 - Exclude explicitly registered workers’ Linux tasks from rival counts without double-subtracting CPU usage.

@@ -256,3 +256,89 @@ CPU with preexisting managed workers. They are not native compiled Rust/Rayon
 execution; the Windows Rust backend uses the corresponding safe `affinity`
 wrapper, whose crate tests run separately in CI. This experiment does not
 establish cross-group placement or Windows ARM class discovery.
+
+## Native Rust Windows repeatability and inherited boundaries
+
+The final repeatability source is `95e4042c9e58bc53070b352d36a4a65f93293885`,
+built with Rust 1.99.0, LLVM 23.1.1, and the GNU Windows cross linker. The
+local build image was resolved with `docker image inspect zenbench-windows-build`
+to `sha256:c6b67715ac784d2dcf9308cf555163f69954e03e84a8b8a4167962bb888a495c`.
+These executables ran natively on the previously inventoried Core Ultra 7
+270K Plus; this extends the earlier primitive-only observations.
+
+Strict admission now retains an affinity-limited Windows Job Object. Native
+Rust controls created Rayon workers before admission, attempted to widen both
+process and worker masks, and verified actual masks throughout setup. Windows
+returned success for some process widen requests while retaining the job mask;
+the actual mask, rather than the return code, is the confinement oracle. A
+separate isolated fixture verified an ordinary existing thread and an inherited
+child process, plus scoped guard restoration.
+
+Each timer series used five fresh processes for each of four placements, with
+class order reversed on alternate repetitions. Each process retained 200
+interleaved rounds for integer, cache, and two-worker Rayon workloads. Four
+benchmark arms did identical work twice, 10% more work, and double work.
+Separate worker warmup and 16 independent QPC batches preceded sampling.
+All 40 successful processes retained independent execution schedules; all
+20 default/mixed-set controls refused before measurement. All 120 paired
+identical-work verdicts remained below the existing practical significance
+gate, and all 240 known work-increment comparisons cleared it in the correct
+direction. More work does not imply an equal percentage increase in latency,
+especially for Rayon calls with scheduling overhead.
+
+Fresh-process range below is `100 × (largest median − smallest median) /
+median(process medians)`, using every process. It is descriptive variability,
+not a confidence interval. Each cell contains integer / cache / Rayon ranges.
+
+| Placement | TSC ranges (%) | QPC-only ranges (%) |
+|---|---:|---:|
+| Full P class | 1.429 / 1.030 / 2.904 | 1.552 / 5.400 / 2.441 |
+| Full E class | 0.046 / 0.410 / 1.166 | 0.134 / 0.552 / 4.599 |
+| P pair `[0,1]` | 0.170 / 0.967 / 0.732 | 0.117 / 1.530 / 2.969 |
+| E pair `[2,3]` | 0.180 / 0.539 / 0.187 | 0.114 / 0.371 / 0.911 |
+
+Raw identical-work 95% intervals excluded zero in 9 of 60 TSC comparisons
+and 5 of 60 QPC comparisons, despite none clearing the existing ±1% practical
+threshold. These controls support the practical verdicts at this workload
+scale; they do not establish nominal 95% coverage for sub-percent effects.
+Per-process intervals do not capture the full fresh-process variability.
+
+On the fixed pairs, integer medians differed from the independent QPC reference
+by −0.110% to +0.111% with TSC, and −0.104% to +0.037% with QPC-only timing.
+Full-P results differed by as much as +1.769%; no cause was established.
+For this tested conference path, retain explicit CPU sets, separate P/E results,
+and fresh-process repeats of the actual workload. A shared core class does not
+certify identical instantaneous speed.
+
+The repeatability series explicitly disabled resource admission. An additional
+execution of the unchanged `gate_sees_cpu_load` regression passed natively: the
+first monitor snapshot observed generated CPU load, and the resource gate
+refused the busy system. This is a regression control, not proof that the
+repeatability runs were quiet. The runner read back its inherited 2 GiB native
+process/job memory caps and idle priority before launching work. Native maximum
+working sets were 18,812,928 bytes (TSC), 18,386,944 bytes (QPC), and 21,970,944
+bytes (load-gate fixture). Local launcher resource records were:
+
+```text
+TSC: run-heavy: done rc=0 115s | peak-RSS 0.02GiB | min-avail 26859MiB | peak-load 0.83
+QPC: run-heavy: done rc=0 115s | peak-RSS 0.02GiB | min-avail 26010MiB | peak-load 3.12
+Gate: run-heavy: done rc=0 7s | peak-RSS 0.02GiB | min-avail 26852MiB | peak-load 0.88
+```
+
+These wrapper RSS values cover the local SSH launcher; the native working sets
+above were read through GetProcessMemoryInfo.
+
+[Full TSC rounds and source pointer](../benchmarks/windows_repeatability_job_tsc_2026-10-11.pointer.md),
+[TSC aggregate summary](../benchmarks/windows_repeatability_job_tsc_2026-10-11.summary.json),
+[full QPC rounds and source pointer](../benchmarks/windows_repeatability_job_qpc_2026-10-11.pointer.md),
+and [QPC aggregate summary](../benchmarks/windows_repeatability_job_qpc_2026-10-11.summary.json)
+preserve all results, including refusals, outliers, and raw execution orders.
+Large raw packets have content-addressed primary and mirrored storage; the
+pointers record hashes and resolving locations.
+
+Windows ARM class discovery, multiple processor groups, macOS hard P/E binding,
+and equal-size cache-sharing domain identity remain unsupported. Maximum CPU
+frequency, quietness, and opaque pool size remain unverified. The Windows ARM
+Job fixture tests the OS boundary independently of missing core-class discovery.
+
+[Native boundary and load-gate fixture packets](../benchmarks/windows_native_boundary_gate_2026-10-11.json) retain their executable/source hashes, test output, native RSS, and local resource records.
