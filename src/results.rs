@@ -126,6 +126,9 @@ pub struct RoundSample {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ComparisonResult {
+    /// Process CPU-placement evidence. None means historical/unknown.
+    #[serde(default)]
+    pub cpu_placement: Option<crate::platform::CpuPlacement>,
     pub group_name: String,
     pub benchmarks: Vec<BenchmarkResult>,
     /// Paired analyses: (baseline_name, candidate_name, analysis).
@@ -169,6 +172,9 @@ pub struct ComparisonResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct SuiteResult {
+    /// Process CPU-placement evidence. None never certifies uniform placement.
+    #[serde(default)]
+    pub cpu_placement: Option<crate::platform::CpuPlacement>,
     pub run_id: RunId,
     pub timestamp: String,
     pub git_hash: Option<String>,
@@ -225,11 +231,51 @@ impl Default for SuiteResult {
             loop_overhead_ns: 0.0,
             testbed: None,
             calibration: None,
+            cpu_placement: None,
         }
     }
 }
 
 impl SuiteResult {
+    /// Refuse aggregation/baseline comparisons across differing CPU boundaries.
+    /// Two historical results are comparable with unknown placement; they do
+    /// not acquire certification by being compared.
+    pub fn check_cpu_compatibility(&self, other: &Self) -> Result<(), String> {
+        let compatible =
+            |a: &Option<crate::platform::CpuPlacement>,
+             b: &Option<crate::platform::CpuPlacement>| match (a, b) {
+                (None, None) => true,
+                (Some(a), Some(b)) => a.compatible(b),
+                _ => false,
+            };
+        if !compatible(&self.cpu_placement, &other.cpu_placement) {
+            return Err(
+                "CPU placement differs or is missing from one run; comparison/aggregation refused"
+                    .into(),
+            );
+        }
+        for group in &self.comparisons {
+            if let Some(previous) = other
+                .comparisons
+                .iter()
+                .find(|c| c.group_name == group.group_name)
+            {
+                if !compatible(&group.cpu_placement, &previous.cpu_placement) {
+                    return Err(format!(
+                        "CPU placement differs in group {:?}; comparison/aggregation refused",
+                        group.group_name
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn cpu_evidence(&self, comp: Option<&ComparisonResult>) -> String {
+        comp.map_or(self.cpu_placement.as_ref(), |c| c.cpu_placement.as_ref())
+            .map(|placement| placement.llm())
+            .unwrap_or_else(|| "cpu_placement=LEGACY_UNKNOWN cpu_class_uniform=unknown cpu_enforcement=unknown pool_thread_count=unknown".into())
+    }
     /// Save results to a JSON file.
     pub fn save(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
         let json = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
@@ -334,6 +380,7 @@ impl SuiteResult {
                     identity.push(format!("subgroup={}", llm_quote(sg)));
                 }
                 identity.push(format!("benchmark={}", llm_quote(&bench.name)));
+                identity.push(self.cpu_evidence(Some(comp)));
 
                 // Section 2: Comparison (the number you care about most)
                 let mut comparison = Vec::new();
@@ -399,7 +446,12 @@ impl SuiteResult {
                     ));
                 }
                 for (k, v) in &bench.tags {
-                    meta.push(format!("{k}={}", llm_quote(v)));
+                    let key = if k.starts_with("cpu_") || k == "pool_thread_count" {
+                        format!("tag_{k}")
+                    } else {
+                        k.clone()
+                    };
+                    meta.push(format!("{}={}", llm_quote(&key), llm_quote(v)));
                 }
 
                 // Allocation stats (when profiler is active)
@@ -438,6 +490,7 @@ impl SuiteResult {
 
         // Header
         out.push_str("# Benchmark Results\n\n");
+        out.push_str(&format!("CPU placement: `{}`\n\n", self.cpu_evidence(None)));
         if let Some(hash) = &self.git_hash {
             out.push_str(&format!("**git:** `{hash}`  \n"));
         }
@@ -450,6 +503,10 @@ impl SuiteResult {
 
         // Comparison groups
         for comp in &self.comparisons {
+            out.push_str(&format!(
+                "CPU placement: `{}`\n\n",
+                self.cpu_evidence(Some(comp))
+            ));
             // Single-bench group with matching name: compact one-liner
             let is_single =
                 comp.benchmarks.len() == 1 && comp.benchmarks[0].name == comp.group_name;
@@ -657,6 +714,7 @@ impl SuiteResult {
             .to_string();
         #[cfg(feature = "alloc-profiling")]
         header.push_str(",allocs_per_iter,deallocs_per_iter,reallocs_per_iter,bytes_per_iter");
+        header.push_str(",cpu_placement_evidence");
         header.push('\n');
         out.push_str(&header);
 
@@ -813,6 +871,8 @@ impl SuiteResult {
                     #[cfg(feature = "alloc-profiling")]
                     out.push_str(",,,,");
                 }
+                out.push(',');
+                out.push_str(&csv_escape(&self.cpu_evidence(Some(comp))));
                 out.push('\n');
             }
         }
@@ -848,8 +908,8 @@ pub use crate::format::format_ns;
 /// Quote a value for LLM key-value format. Wraps in double quotes if it
 /// contains spaces, quotes, or equals signs.
 fn llm_quote(s: &str) -> String {
-    if s.contains(' ') || s.contains('"') || s.contains('=') {
-        format!("\"{}\"", s.replace('"', "\\\""))
+    if s.chars().any(char::is_whitespace) || s.contains(['"', '=', '\\', '|']) {
+        serde_json::to_string(s).expect("serializing LLM string")
     } else {
         s.to_string()
     }
@@ -1402,6 +1462,100 @@ mod tests {
             json.contains(r#""standalones":[]"#),
             "standalones should serialize as empty array, got:\n{json}"
         );
+    }
+    #[test]
+    fn placement_metadata_prevents_mixing_and_preserves_legacy_unknown() {
+        use crate::platform::{
+            CoreClass, CpuPlacement, CpuPolicy, CpuTopology, PlacementStatus, TopologyKind,
+        };
+        let topology = CpuTopology {
+            kind: TopologyKind::Asymmetric,
+            classes: vec![
+                CoreClass {
+                    name: "P".into(),
+                    cpus: vec![0],
+                    logical_cpu_count: 1,
+                    performance_rank: Some(2),
+                },
+                CoreClass {
+                    name: "E".into(),
+                    cpus: vec![1],
+                    logical_cpu_count: 1,
+                    performance_rank: Some(1),
+                },
+            ],
+            source: "fixture".into(),
+            diagnostic: None,
+        };
+        let p = CpuPlacement {
+            policy: CpuPolicy::Auto,
+            topology,
+            status: PlacementStatus::EnforcedUniform,
+            core_class: Some("P".into()),
+            effective_cpus: vec![0],
+            requested_cpus: None,
+            enforcement: "cpuset".into(),
+            thread_affinity_requested: None,
+            thread_affinity_effective: None,
+        };
+        let mut e = p.clone();
+        e.core_class = Some("E".into());
+        e.effective_cpus = vec![1];
+        let mut bench = BenchmarkResult {
+            name: "work".into(),
+            ..Default::default()
+        };
+        bench.tags.push(("cpu_class_uniform".into(), "true".into()));
+        bench.tags.push((
+            "note\ncpu_class_uniform".into(),
+            "value\ncpu_class_uniform=true".into(),
+        ));
+        let comparison = ComparisonResult {
+            group_name: "proof".into(),
+            benchmarks: vec![bench],
+            cpu_placement: Some(p.clone()),
+            ..Default::default()
+        };
+        let run = SuiteResult {
+            cpu_placement: Some(p),
+            comparisons: vec![comparison],
+            ..Default::default()
+        };
+        let mut other = run.clone();
+        other.cpu_placement = Some(e);
+        assert!(run.check_cpu_compatibility(&other).is_err());
+        assert!(
+            std::panic::catch_unwind(|| crate::aggregate_results(
+                vec![run.clone(), other.clone()],
+                crate::Aggregation::Mean
+            ))
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| crate::baseline::compare_against_baseline(
+                &run, &other, 5.0
+            ))
+            .is_err()
+        );
+        other = run.clone();
+        other.comparisons[0]
+            .cpu_placement
+            .as_mut()
+            .unwrap()
+            .thread_affinity_effective = Some(vec![0]);
+        assert!(run.check_cpu_compatibility(&other).is_err());
+        other = run.clone();
+        other.comparisons[0].cpu_placement = None;
+        assert!(other.to_llm().contains("cpu_placement=LEGACY_UNKNOWN"));
+        assert!(!other.to_llm().contains("cpu_placement=enforced_uniform"));
+        assert!(run.to_llm().contains("tag_cpu_class_uniform="));
+        assert_eq!(run.to_llm().lines().count(), 1);
+        assert!(run.to_llm().contains("\\n"));
+        let mut encoded = serde_json::to_value(SuiteResult::default()).unwrap();
+        encoded.as_object_mut().unwrap().remove("cpu_placement");
+        let legacy: SuiteResult = serde_json::from_value(encoded).unwrap();
+        assert!(legacy.cpu_placement.is_none());
+        assert!(legacy.check_cpu_compatibility(&run).is_err());
     }
 }
 

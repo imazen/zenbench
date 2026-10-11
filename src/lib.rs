@@ -410,6 +410,12 @@ pub fn aggregate_results(runs: Vec<SuiteResult>, policy: Aggregation) -> SuiteRe
         return runs.into_iter().next().unwrap();
     }
 
+    for run in &runs[1..] {
+        runs[0]
+            .check_cpu_compatibility(run)
+            .unwrap_or_else(|e| panic!("{e}"));
+    }
+
     // Collect per-(group, bench) the full list of per-run means.
     // Used by all policies: Best needs to find the winner; Mean and
     // Median rebuild the summary from this distribution; Best reports

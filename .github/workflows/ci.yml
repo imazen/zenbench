@@ -9,6 +9,10 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
   ZENBENCH_NO_SAVE: "1"
+  # Functional/statistical fixtures exercise measurements intentionally without
+  # enforcing a core class. CPU-policy subprocess tests remove this opt-out and
+  # verify fail-closed defaults independently.
+  ZENBENCH_CPU_POLICY: unrestricted
 
 # Superseded runs only waste runner queue — particularly the macOS
 # jobs, which wait on GitHub's scarcest pool. Only the newest

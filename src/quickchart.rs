@@ -728,6 +728,7 @@ mod tests {
             expect_sub_ns: false,
             cold_start: false,
             iterations_per_sample: 1000,
+            cpu_placement: None,
         }
     }
 

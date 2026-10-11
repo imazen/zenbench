@@ -7,6 +7,14 @@
 use crate::format::format_ns;
 use crate::results::{ComparisonResult, SuiteResult};
 
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 /// Generate a baseline comparison HTML section.
 #[allow(dead_code)]
 pub fn baseline_comparison_html(comparison: &crate::baseline::BaselineComparison) -> String {
@@ -81,6 +89,10 @@ pub fn to_html(result: &SuiteResult) -> String {
 
     html.push_str(HTML_HEAD);
     html.push_str(&format!(
+        "<p class=\"cpu-placement\">{}</p>\n",
+        html_escape(&result.cpu_evidence(None))
+    ));
+    html.push_str(&format!(
         "<h1>zenbench <small>{}</small></h1>\n",
         result.run_id
     ));
@@ -123,6 +135,10 @@ pub fn to_html(result: &SuiteResult) -> String {
     html.push_str("</div>\n");
 
     for comp in &result.comparisons {
+        html.push_str(&format!(
+            "<p class=\"cpu-placement\">{}</p>\n",
+            html_escape(&result.cpu_evidence(Some(comp)))
+        ));
         html.push_str(&render_group(comp));
     }
 
@@ -1067,6 +1083,7 @@ mod tests {
             expect_sub_ns: false,
             cold_start: false,
             iterations_per_sample: 100,
+            cpu_placement: None,
         }
     }
 
