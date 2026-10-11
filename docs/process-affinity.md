@@ -114,6 +114,15 @@ The Windows x64/ARM CI jobs execute the oracle before Rust tests. These
 and [cache](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-cache_relationship)
 records are the OS-level inputs needed to extend Windows discovery.
 
+For repeatable remote observations, `just windows-topology-remote WINDOWS_ALIAS`
+runs the script through existing SSH credentials. Optional `--relay HOST`,
+`--network-jump HOST`, and `--known-hosts FILE` separate the credential host,
+connection route, and an already trusted host pin. Host verification remains
+enabled; private keys stay on the credential host. The helper sends a compressed
+PowerShell command without writing remote files. An earlier stdin transport
+using `Console.ReadToEnd` timed out; the command transport completed on native
+Windows. This is a diagnostic transport, not a benchmark launcher.
+
 macOS detects `hw.nperflevels` and performance-level counts. Its
 [Mach affinity policy](https://developer.apple.com/library/archive/releasenotes/Performance/RN-AffinityAPI/)
 is advisory and cannot bind P/E classes. Therefore an asymmetric macOS machine

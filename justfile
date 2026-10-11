@@ -254,3 +254,7 @@ qos-warmup-check:
 # Compile the diagnostic's native declarations without invoking Windows APIs.
 windows-topology-compile image="mcr.microsoft.com/powershell:latest":
     docker run --rm --memory=2g --memory-swap=2g --cpus=1 --mount type=bind,src={{justfile_directory()}},dst=/work,readonly --entrypoint /usr/bin/nice {{image}} -n19 pwsh -NoProfile -File /work/examples/windows_topology_probe.ps1 -CompileOnly
+
+# Additional arguments select existing relays, network jumps, and trusted pins.
+windows-topology-remote host *options:
+    python3 -B examples/windows_remote_probe.py {{host}} {{options}}
