@@ -1,0 +1,12 @@
+{
+  "oracle": "SciPy 1.18.1",
+  "seed": 42,
+  "trials": 2000,
+  "counts": {
+    "null": 97,
+    "known_effect_misses": 97,
+    "known_effect_detected": 1999,
+    "correlated": 1193,
+    "optional_stopping": 460
+  }
+}
