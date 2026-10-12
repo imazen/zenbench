@@ -484,3 +484,7 @@ fleet-cross cross="cross":
 # Run on Windows from a revision-identified source tree; keeps a transcript.
 windows-native-check:
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File examples/windows_native_check.ps1
+
+windows-topology-parser-check:
+    cargo test --lib windows_topology
+    cargo clippy --lib --tests -- -D warnings
