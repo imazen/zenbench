@@ -568,8 +568,8 @@ mod tests {
         let base = synthetic_population(&[100_000, 100_010, 99_990, 100_020, 99_980]);
         assert!(issues(&base).is_empty(), "{:?}", issues(&base));
         let equivalent = synthetic_population(&[100_000, 100_010, 99_990, 100_020, 99_980]);
-        assert!(crate::baseline::compare_against_baseline(&base, &equivalent, 1.0).promotable);
-        let reused = crate::baseline::compare_against_baseline(&base, &base, 1.0);
+        assert!(crate::baseline::assess_baseline(&base, &equivalent, 1.0).promotable);
+        let reused = crate::baseline::assess_baseline(&base, &base, 1.0);
         assert!(!reused.promotable);
         assert!(reused.confirmed.is_empty());
         assert!(
@@ -579,12 +579,12 @@ mod tests {
                 .any(|s| s.contains("reuse process measurements"))
         );
         let noisy = synthetic_population(&[60_000, 80_000, 100_000, 120_000, 140_000]);
-        let diff = crate::baseline::compare_against_baseline(&base, &noisy, 1.0);
+        let diff = crate::baseline::assess_baseline(&base, &noisy, 1.0);
         assert!(!diff.promotable);
         assert_eq!(diff.confirmed[0].verdict, Verdict::Inconclusive);
         let mut missing = synthetic_population(&[100_000, 100_010, 99_990, 100_020, 99_980]);
         missing.comparisons.clear();
-        assert!(!crate::baseline::compare_against_baseline(&base, &missing, 1.0).promotable);
+        assert!(!crate::baseline::assess_baseline(&base, &missing, 1.0).promotable);
         for change in 0..6 {
             let mut invalid = synthetic_population(&[100_000, 100_010, 99_990, 100_020, 99_980]);
             match change {
@@ -602,7 +602,7 @@ mod tests {
                 5 => invalid.incomplete = true,
                 _ => unreachable!(),
             }
-            let diff = crate::baseline::compare_against_baseline(&base, &invalid, 1.0);
+            let diff = crate::baseline::assess_baseline(&base, &invalid, 1.0);
             assert!(!diff.promotable, "mutation {change}");
             assert!(diff.confirmed.is_empty(), "mutation {change}");
         }
@@ -645,7 +645,7 @@ mod tests {
                 .iter()
                 .any(|s| s.contains("numerically unresolved"))
         );
-        assert!(!crate::baseline::compare_against_baseline(&result, &result, 1.0).promotable);
+        assert!(!crate::baseline::assess_baseline(&result, &result, 1.0).promotable);
     }
 
     #[test]

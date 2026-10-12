@@ -1396,8 +1396,8 @@ fn print_comparison(baseline: &zenbench::SuiteResult, candidate: &zenbench::Suit
         eprintln!("INVALID comparison: {e}");
         std::process::exit(2);
     }
-    let comparison = zenbench::baseline::compare_against_baseline(baseline, candidate, margin);
-    zenbench::baseline::print_comparison_report(&comparison);
+    let comparison = zenbench::baseline::assess_baseline(baseline, candidate, margin);
+    comparison.print_report();
     if comparison
         .confirmed
         .iter()

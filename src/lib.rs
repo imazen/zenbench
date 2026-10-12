@@ -134,8 +134,8 @@ pub fn postprocess_result(result: &SuiteResult) {
                     eprintln!("[zenbench] INVALID comparison: {e}");
                     std::process::exit(2);
                 }
-                let comparison = baseline::compare_against_baseline(&saved, result, max_regression);
-                baseline::print_comparison_report(&comparison);
+                let comparison = baseline::assess_baseline(&saved, result, max_regression);
+                comparison.print_report();
 
                 if comparison
                     .confirmed

@@ -366,6 +366,9 @@ class selection and existing Rayon confinement. Multiple groups remain refused.
 At 9d84e8b2, native Linux `cargo semver-checks` against published 0.1.10 reports
 added fields on the exhaustively constructible `BaselineComparison` and lost
 `UnwindSafe`/`RefUnwindSafe` on `ResourceGate`. Both default and expanded feature
-checks reproduce these source-compatibility failures. They are unresolved;
+checks reproduced these source-compatibility failures. The cleanup restores the
+published result layout, puts confirmation in `BaselineAssessment`, and places
+the monitor handle behind a mutex unwind boundary. The same expanded-feature
+semver check now passes all 202 applicable checks;
 see [the release surface review](docs/public-api/review-0.1.10.md) for scope,
 reproduction commands, behavioral migration and CLI consistency findings.

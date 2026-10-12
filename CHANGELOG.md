@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Restore published `BaselineComparison` construction and `ResourceGate` unwind traits; use `baseline::assess_baseline` for separate confirmation decisions.
+
 - Add exploratory `zenbench pair` for prebuilt executable/environment A/B, clustered internal timings, A/A controls, correctness contracts, retained evidence and checked resume.
 
 - Add FIFO cooperative admission before benchmark warmup, inherited experiment reservations, and `zenbench nice` for background commands with bounded admission, priority and Linux memory scopes.

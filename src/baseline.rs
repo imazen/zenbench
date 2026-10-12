@@ -34,12 +34,6 @@ fn validate_name(name: &str) -> std::io::Result<()> {
 /// Result of comparing a benchmark run against a saved baseline.
 #[derive(Debug)]
 pub struct BaselineComparison {
-    /// Process-level decisions. Empty when the evidence contract is invalid.
-    pub confirmed: Vec<crate::ProcessComparison>,
-    /// Reasons this comparison cannot support CI acceptance or promotion.
-    pub validity_issues: Vec<String>,
-    /// Every required case establishes non-inferiority within the declared margin.
-    pub promotable: bool,
     /// Per-benchmark comparisons: (group, benchmark, analysis, regression?).
     pub benchmarks: Vec<BenchmarkDelta>,
     /// Number of benchmarks that regressed beyond the threshold.
@@ -54,6 +48,21 @@ pub struct BaselineComparison {
     pub missing_benchmarks: Vec<String>,
     /// Warnings about the comparison (staleness, hardware mismatch, etc.).
     pub warnings: Vec<String>,
+}
+
+/// Confirmation assessment kept separate from the published descriptive result.
+/// Invalid or exploratory evidence cannot authorize baseline promotion.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct BaselineAssessment {
+    /// Arithmetic changes, inventory differences and descriptive warnings.
+    pub comparison: BaselineComparison,
+    /// Process-level decisions. Empty when the evidence contract is invalid.
+    pub confirmed: Vec<crate::ProcessComparison>,
+    /// Reasons this comparison cannot support CI acceptance or promotion.
+    pub validity_issues: Vec<String>,
+    /// Every required case establishes non-inferiority within the declared margin.
+    pub promotable: bool,
 }
 
 /// Comparison result for a single benchmark.
@@ -166,12 +175,23 @@ fn format_bench_key(group: &str, name: &str) -> String {
 /// Benchmarks that regress by more than this are flagged.
 ///
 /// Returns the comparison result. The caller decides whether to fail CI based on
-/// process-level `confirmed` decisions and `promotable`; legacy count fields are descriptive.
+/// `BaselineAssessment` from [`crate::baseline::assess_baseline`]. This function
+/// retains the published descriptive result shape; its counts do not certify acceptance.
 pub fn compare_against_baseline(
     baseline: &SuiteResult,
     current: &SuiteResult,
     max_regression_pct: f64,
 ) -> BaselineComparison {
+    assess_baseline(baseline, current, max_regression_pct).comparison
+}
+
+/// Assess complete independent evidence for non-inferiority and baseline promotion.
+/// See [`crate::baseline::BaselineAssessment`] for decisions and invalidity reasons.
+pub fn assess_baseline(
+    baseline: &SuiteResult,
+    current: &SuiteResult,
+    max_regression_pct: f64,
+) -> BaselineAssessment {
     baseline
         .check_cpu_compatibility(current)
         .unwrap_or_else(|e| panic!("{e}"));
@@ -356,17 +376,42 @@ pub fn compare_against_baseline(
             )
         });
 
-    BaselineComparison {
+    BaselineAssessment {
         confirmed,
         validity_issues,
         promotable,
-        benchmarks,
-        regressions,
-        improvements,
-        unchanged,
-        new_benchmarks,
-        missing_benchmarks,
-        warnings,
+        comparison: BaselineComparison {
+            benchmarks,
+            regressions,
+            improvements,
+            unchanged,
+            new_benchmarks,
+            missing_benchmarks,
+            warnings,
+        },
+    }
+}
+
+impl BaselineAssessment {
+    /// Print confirming decisions followed by descriptive arithmetic changes.
+    pub fn print_report(&self) {
+        for issue in &self.validity_issues {
+            eprintln!("  UNCONFIRMED: {issue}");
+        }
+        for decision in &self.confirmed {
+            eprintln!(
+                "  {}::{}: {:+.4}% [{:+.4}%, {:+.4}%] {} ({})",
+                decision.group,
+                decision.candidate,
+                decision.estimate_pct,
+                decision.lower_pct,
+                decision.upper_pct,
+                decision.verdict,
+                decision.method
+            );
+        }
+        eprintln!("  Promotion eligible={}", self.promotable);
+        print_comparison_report(&self.comparison);
     }
 }
 
@@ -375,25 +420,7 @@ pub fn print_comparison_report(comparison: &BaselineComparison) {
     eprintln!();
     eprintln!("  Baseline comparison");
     eprintln!("  ───────────────────");
-    for issue in &comparison.validity_issues {
-        eprintln!("  UNCONFIRMED: {issue}");
-    }
-    for decision in &comparison.confirmed {
-        eprintln!(
-            "  {}::{}: {:+.4}% [{:+.4}%, {:+.4}%] {} ({})",
-            decision.group,
-            decision.candidate,
-            decision.estimate_pct,
-            decision.lower_pct,
-            decision.upper_pct,
-            decision.verdict,
-            decision.method
-        );
-    }
-    eprintln!(
-        "  Arithmetic changes below are descriptive; promotion eligible={}",
-        comparison.promotable
-    );
+    eprintln!("  Arithmetic changes below are descriptive.");
 
     for w in &comparison.warnings {
         eprintln!("  \x1b[33m⚠ {w}\x1b[0m");

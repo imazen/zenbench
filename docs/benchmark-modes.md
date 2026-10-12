@@ -99,7 +99,7 @@ can retain a baseline population without making a within-suite relative claim.
 case; empty/missing/added cases, incompatible settings or unverified results cannot
 replace the baseline. Initial `--save-baseline=NAME` requires complete confirmation
 evidence. The low-level `baseline::save_baseline` API remains descriptive storage;
-callers must apply `confirmation_issues` and `BaselineComparison::promotable` for
+callers must apply `confirmation_issues` and `baseline::assess_baseline(...).promotable` for
 acceptance. Legacy percentage/count fields are descriptive, not CI decisions.
 
 ## Validation and limits

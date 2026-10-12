@@ -42,6 +42,18 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
+  api-compatibility:
+    name: Published API compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install API compatibility checker
+        run: cargo install cargo-semver-checks --locked --version 0.51.0
+      - name: Compare against published 0.1.10
+        run: cargo semver-checks check-release --baseline-version 0.1.10 --default-features --features async,cpu-time,criterion-compat,charts --current-features heap-profiling
+
   test:
     name: Test (${{ matrix.name }})
     needs: lint
