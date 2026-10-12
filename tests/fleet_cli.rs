@@ -241,3 +241,58 @@ fn os_high_water_is_named_and_separate_from_requested_heap() {
             .any(|m| m["quantity"] == "private_commit_high_water")
     );
 }
+
+#[test]
+fn fleet_exports_are_compact_and_comparisons_verify_evidence() {
+    let root = root();
+    std::fs::create_dir(root.join("queue")).unwrap();
+    observation_bundle(&root, "wall", "ok");
+    let result = run_observation(&root).output().unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let attempt = root.join("attempt");
+    let diff = cli()
+        .arg("fleet-diff")
+        .arg(&attempt)
+        .arg(&attempt)
+        .output()
+        .unwrap();
+    assert!(
+        diff.status.success(),
+        "{}",
+        String::from_utf8_lossy(&diff.stderr)
+    );
+    let export = root.join("records.jsonl");
+    let result = cli()
+        .arg("fleet-export")
+        .arg(&export)
+        .arg(&attempt)
+        .output()
+        .unwrap();
+    assert!(result.status.success());
+    let text = std::fs::read_to_string(&export).unwrap();
+    assert_eq!(text.lines().count(), 1);
+    assert!(
+        text.len()
+            < std::fs::metadata(attempt.join("packet.json"))
+                .unwrap()
+                .len() as usize
+    );
+    let record: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(record["status"], "complete");
+    assert_eq!(record["packet_sha256"].as_str().unwrap().len(), 64);
+    assert!(
+        record["commands"]["compare"]
+            .as_str()
+            .unwrap()
+            .contains("fleet-diff")
+    );
+    // An OS/driver stream edited after collection is no longer verified evidence.
+    std::fs::write(attempt.join("stdout.txt"), b"modified stream").unwrap();
+    let result = cli().arg("fleet-read").arg(&attempt).output().unwrap();
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("artifact differs"));
+}

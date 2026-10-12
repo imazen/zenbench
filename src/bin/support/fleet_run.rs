@@ -150,7 +150,7 @@ pub(crate) fn run(options: Options) -> io::Result<i32> {
         "experiment":options.experiment,"machine":options.machine,"domain":options.domain,
         "replicate":options.replicate,"attempt":options.attempt,"status":"incomplete",
         "runner":fleet::capabilities()?,"started_unix_ns":now(),"memory":[],"inference":"descriptive individual observation; no acceptance decision","environment_limit":"inherits worker environment plus retained explicit overrides; not hermetic",
-        "commands":{"decode":"zenbench fleet-read ATTEMPT_DIRECTORY","compare":"compare only matching bundle, machine, domain, backend and workload contracts"}});
+        "commands":{"decode":"zenbench fleet-read ATTEMPT_DIRECTORY","compare":"zenbench fleet-diff LEFT_ATTEMPT RIGHT_ATTEMPT","compact":"zenbench fleet-export OUTPUT.jsonl ATTEMPT_DIRECTORY..."}});
     fs::write(output.join("started.json"), serde_json::to_vec(&receipt)?)?;
     let result = execute(&options, &output, &mut receipt, &mut poll);
     match result {
@@ -552,6 +552,22 @@ pub(crate) fn read(directory: &Path) -> io::Result<Value> {
     let v: Value = serde_json::from_slice(&limited(&directory.join("packet.json"))?)?;
     if v["kind"] != "zenbench_fleet_attempt" || v["schema"] != 1 {
         return Err(io::Error::other("unsupported fleet packet"));
+    }
+    let artifacts = v["artifacts"]
+        .as_object()
+        .ok_or_else(|| io::Error::other("packet lacks artifact inventory"))?;
+    for (name, expected) in artifacts {
+        fleet::relative(Path::new(name))?;
+        if Path::new(name).components().count() != 1
+            || fs::symlink_metadata(directory.join(name))?
+                .file_type()
+                .is_symlink()
+            || expected.as_str() != Some(fleet::hash_file(&directory.join(name))?.as_str())
+        {
+            return Err(io::Error::other(format!(
+                "attempt artifact differs: {name}"
+            )));
+        }
     }
     Ok(v)
 }
