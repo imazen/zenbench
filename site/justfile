@@ -19,3 +19,8 @@ browser:
 # Parse the actual JSON examples with an existing binary; never rebuild Rust here.
 plans binary:
     python3 -B scripts/check_plans.py '{{binary}}'
+
+# Compile the runnable first-benchmark guide without executing measurements.
+# Invoke through the host resource wrapper; serialize with other Rust builds.
+rust:
+    python3 -B scripts/check_rust.py
