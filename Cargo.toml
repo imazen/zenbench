@@ -132,3 +132,7 @@ required-features = ["heap-profiling"]
 [[test]]
 name = "harness_arguments"
 harness = false
+
+[[example]]
+name = "chart_gallery"
+required-features = ["charts"]

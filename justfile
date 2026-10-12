@@ -542,3 +542,13 @@ pair-full-check:
     ZENBENCH_CPU_POLICY=unrestricted ZENBENCH_NO_SAVE=1 cargo test --all-features
     ZENBENCH_CPU_POLICY=unrestricted ZENBENCH_NO_SAVE=1 cargo test --no-default-features
     just api-doc-check
+
+# Verify saved-evidence chart exports with and without the optional renderer.
+chart-check:
+    cargo test --test cli_evidence
+    cargo test --features charts --test cli_evidence
+    cargo clippy --all-targets --all-features -- -D warnings
+
+# Render explicitly illustrative data; this does not run a benchmark.
+chart-gallery output:
+    cargo run --features charts --example chart_gallery -- '{{output}}'
