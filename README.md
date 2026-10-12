@@ -4,6 +4,7 @@ The CLI installs with Cargo. [Installation instructions](https://github.com/imaz
 cover the current review stack and released versions. Run `zenbench --help` for
 offline workflows, `zenbench pair --help` for executable/environment comparisons,
 and `zenbench nice --help` for cooperative background jobs.
+[Fleet deployment](docs/fleet.md) covers capability probing and verified bundles.
 
 Interleaved microbenchmarking for Rust with paired statistics, CI regression testing, and hardware-adaptive measurement.
 

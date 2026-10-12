@@ -11,6 +11,7 @@ mod coordination;
 #[path = "../paths.rs"]
 mod paths;
 mod support {
+    pub(super) mod fleet;
     pub(super) mod nice;
     pub(super) mod pair;
     pub(super) mod supervisor;
@@ -19,6 +20,7 @@ mod support {
 #[derive(Parser)]
 #[command(
     name = "zenbench",
+    version,
     about = "Interleaved microbenchmarking harness",
     after_help = "Start here: zenbench guide (SIMD optimization: zenbench guide --topic simd)
 Measurement assumptions and busy systems: zenbench guide --topic methodology
@@ -37,6 +39,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Machine-readable runner identity, CPU placement and supported protocols.
+    Capabilities,
+    /// Copy explicitly listed executables, inputs and assets into a verified portable bundle.
+    Bundle { spec: PathBuf, output: PathBuf },
+    /// Verify every content hash before using a deployed bundle.
+    BundleCheck { directory: PathBuf },
     /// Compare prebuilt programs or one program under different environments.
     #[command(after_help = include_str!("../pair-help.txt"))]
     Pair {
@@ -347,6 +355,27 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::BundleCheck { directory } => match support::fleet::verify(&directory) {
+            Ok(value) => println!("{}", serde_json::to_string_pretty(&value).unwrap()),
+            Err(e) => {
+                eprintln!("bundle verification failed: {e}");
+                std::process::exit(2);
+            }
+        },
+        Commands::Capabilities => match support::fleet::capabilities() {
+            Ok(value) => println!("{}", serde_json::to_string_pretty(&value).unwrap()),
+            Err(e) => {
+                eprintln!("capability probe failed: {e}");
+                std::process::exit(2);
+            }
+        },
+        Commands::Bundle { spec, output } => match support::fleet::bundle(&spec, &output) {
+            Ok(value) => println!("{}", serde_json::to_string_pretty(&value).unwrap()),
+            Err(e) => {
+                eprintln!("bundle failed: {e}");
+                std::process::exit(2);
+            }
+        },
         Commands::Pair {
             plan,
             mode,
