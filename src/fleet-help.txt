@@ -1,0 +1,47 @@
+Heap and fleet measurement
+=========================
+Start with `zenbench capabilities` and `zenbench cpu-info`. Refused or unknown
+CPU placement is a reason to configure the host, not to silently accept a run.
+A reported architecture is not verified native execution; check the binary and
+host architecture when emulation is possible.
+
+Keep two builds: ordinary for latency, instrumented for Rust heap phases.
+`heap-profiling` adds HeapProfiler, HeapPhase and HeapSnapshot; install the
+profiler as the global allocator only in the memory build. It counts requested
+live bytes across all Rust threads, including existing Rayon pools. Serialization
+changes allocation cost and scheduling. Its timings cannot establish native
+latency. Native allocators, mappings and GPU memory are separate quantities.
+
+Package exactly one declared workload (inputs, layout/color, metric settings,
+reuse and threads) with a correctness contract and fixed operation count:
+  zenbench bundle bundle-spec.json new-bundle
+  zenbench bundle-check new-bundle
+  zenbench fleet-run new-bundle --output attempts/unique-id \
+    --experiment study --machine cpu-testbed --domain selected-class \
+    --replicate 0 --attempt unique-id --wait 300
+
+Backends: wall = descriptive process duration; os_peak = named OS high-water
+counters; heaptrack = whole-child intercepted heap on Linux; driver = explicit
+instrumented memory records. Never call resident memory "heap", divide a peak
+by iterations, or sum independent worker peaks. Phase watermarks include retained
+inputs/reference state. Null means unavailable with a reason; zero means zero.
+
+Every attempt survives, including busy, timeout, cancellation and wrong output.
+Exit 2 means inspect the receipt; do not retry until a fast result appears.
+  zenbench fleet-read attempts/unique-id
+  zenbench fleet-diff attempts/before attempts/after
+  zenbench fleet-export study.jsonl attempts/before attempts/after
+
+Read verifies retained hashes. Diff is descriptive and refuses incompatible
+contracts; use `zenbench pair` for replicated latency inference. Export writes
+one compact JSONL study file suitable for version control. Keep packets and raw
+traces in the content store. Repeated attempts and planned replicates differ.
+
+Zenfleet owns deployment, routing, leases and storage. Share the local admission
+directory between workers and cooperative background tasks (`zenbench nice`).
+The default fast iteration workflow remains uninstrumented.
+
+Full schemas and examples:
+  https://github.com/imazen/zenbench/blob/main/docs/fleet.md
+  https://github.com/imazen/zenbench/blob/main/docs/heap-profiling.md
+  https://github.com/imazen/zenmetrics/blob/master/docs/BENCHMARK_FLEET.md

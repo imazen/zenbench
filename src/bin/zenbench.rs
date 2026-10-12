@@ -28,6 +28,7 @@ mod support {
 Measurement assumptions and busy systems: zenbench guide --topic methodology
 Queue background work: zenbench nice -- cargo build --release
 Compare external programs/environments: zenbench pair --help
+Measure heap and deploy fleet cases: zenbench guide --topic fleet
 Quick edit loop: cargo bench --bench NAME -- --group=GROUP
 Before accepting a change: freeze inputs, then use --mode=confirm --workload-id=ID.
 Inspect asymmetric CPUs: zenbench cpu-info; choose a verified boundary with exec.
@@ -106,7 +107,7 @@ Example: zenbench nice --jobs 8 -- cargo build --release"
     /// Show workflows, CPU setup, exit meanings, provenance and profiling limits.
     Guide {
         /// Workflows, SIMD optimization, or measurement methodology and busy systems.
-        #[arg(long, default_value = "workflows", value_parser = ["workflows", "simd", "methodology", "pair"])]
+        #[arg(long, default_value = "workflows", value_parser = ["workflows", "simd", "methodology", "pair", "fleet"])]
         topic: String,
     },
     /// Read saved JSON, gzip JSON, or an evidence reference without running benchmarks.
@@ -475,6 +476,7 @@ fn main() {
         Commands::Guide { topic } => print!(
             "{}",
             match topic.as_str() {
+                "fleet" => include_str!("../fleet-help.txt"),
                 "pair" => include_str!("../pair-help.txt"),
                 "simd" => include_str!("../simd-help.txt"),
                 "methodology" => include_str!("../methodology-help.txt"),
