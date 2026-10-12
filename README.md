@@ -1,11 +1,11 @@
 # zenbench [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenbench/ci.yml?style=flat-square&label=CI)](https://github.com/imazen/zenbench/actions/workflows/ci.yml) [![crates.io](https://img.shields.io/crates/v/zenbench?style=flat-square)](https://crates.io/crates/zenbench) [![lib.rs](https://img.shields.io/crates/v/zenbench?style=flat-square&label=lib.rs&color=blue)](https://lib.rs/crates/zenbench) [![docs.rs](https://img.shields.io/docsrs/zenbench?style=flat-square)](https://docs.rs/zenbench) [![MSRV](https://img.shields.io/badge/MSRV-1.85-blue?style=flat-square)](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field) [![license](https://img.shields.io/crates/l/zenbench?style=flat-square)](#license) [![codecov](https://img.shields.io/codecov/c/github/imazen/zenbench?style=flat-square)](https://codecov.io/gh/imazen/zenbench)
 
 The CLI installs with Cargo. [Installation instructions](https://github.com/imazen/zenbench/blob/main/docs/installation.md)
-cover the current review stack and released versions. Run `zenbench --help` for
+cover the current Git build and released versions. Run `zenbench --help` for
 offline workflows, `zenbench pair --help` for executable/environment comparisons,
 and `zenbench nice --help` for cooperative background jobs.
-[Fleet deployment](docs/fleet.md) covers capability probing and verified bundles.
-[Heap profiling](docs/heap-profiling.md) separates memory peaks from latency.
+[Fleet deployment](https://github.com/imazen/zenbench/blob/main/docs/fleet.md) covers capability probing and verified bundles.
+[Heap profiling](https://github.com/imazen/zenbench/blob/main/docs/heap-profiling.md) separates memory peaks from latency.
 
 Interleaved microbenchmarking for Rust with paired statistics, CI regression testing, and hardware-adaptive measurement.
 
@@ -89,9 +89,9 @@ intervals and fail-closed evidence checks.
 ## Quick start
 
 For the edit → confirm workflow, run `zenbench guide` or
-`cargo bench --bench my_bench -- --help`. The [workflow guide](docs/benchmark-workflows.md)
+`cargo bench --bench my_bench -- --help`. The [workflow guide](https://github.com/imazen/zenbench/blob/main/docs/benchmark-workflows.md)
 covers source revisions, retained executables, CPU/Rayon setup, profiling and small Git exports.
-The [measurement protocol](METHODOLOGY.md) documents the statistical
+The [measurement protocol](https://github.com/imazen/zenbench/blob/main/METHODOLOGY.md) documents the statistical
 methods, busy-machine tradeoffs, limits, and measured wall-time/storage costs.
 
 ```toml
@@ -129,9 +129,9 @@ zenbench::main!(bench_sort);
 ## Retaining results
 
 Raw results are compressed in the ignored `.zenbench/data/` directory. Export
-only selected baselines with `zenbench snapshot <result> --output benchmarks/baseline.csv`:
+only selected baselines with `zenbench data snapshot <result> --output benchmarks/baseline.csv`:
 one stable row per benchmark, with a hash referencing the complete evidence.
-See [storage and compact exports](docs/result-storage.md).
+See [storage and compact exports](https://github.com/imazen/zenbench/blob/main/docs/result-storage.md).
 
 ## CPU placement and affinity
 
@@ -146,7 +146,7 @@ cannot certify P/E placement.
 Use `ZENBENCH_CPU_POLICY=unrestricted` only to opt out explicitly; every result
 row records `UNVERIFIED_UNRESTRICTED`. Configure crate-wide policy with
 `Suite::cpu_policy` / `Suite::cpu_set`, and scoped defaults with `Suite::affinity`.
-See [verified process placement](docs/process-affinity.md) for CLI/environment
+See [verified process placement](https://github.com/imazen/zenbench/blob/main/docs/process-affinity.md) for CLI/environment
 precedence, platform limits, and separate P/E runs.
 
 
@@ -181,7 +181,7 @@ this is a best-effort cache-sharing hint, **not a binding to those CPUs**. The g
 restores the prior tag; hardware that rejects the hint returns an error. macOS
 has no CPU-mask query, so `current_thread_affinity()` returns `Unsupported` there.
 Other targets return `AffinityError::Unsupported` for pinning too.
-See [the pinned example](examples/pinned.rs)
+See [the pinned example](https://github.com/imazen/zenbench/blob/main/examples/pinned.rs)
 (`ZENBENCH_CPU_POLICY=unrestricted cargo run --example pinned`) for
 before/during/after scoped mask checks on an available CPU. This example opts out
 of process-class certification explicitly.
@@ -189,9 +189,10 @@ of process-class certification explicitly.
 ## Iteration and confirmation
 
 Local runs default to exploratory **Iterate**: one process, up to 30 rounds and
-100 ms warmup per arm. Use **Confirm** for a frozen candidate and **Evidence**
-for a named hardware/workload matrix cell. Both use five fresh processes by
-default and refuse incomplete, noisy or unverified evidence.
+100 ms warmup per arm. Use **Confirm** for a frozen candidate; add `--scope=ID`
+for a named hardware/workload cell. Confirm uses five fresh processes by default
+and refuses incomplete, noisy or unverified evidence. The existing Evidence
+spelling remains supported with the same protocol and a required scope.
 
 ```sh
 cargo bench -- --mode=confirm --workload-id=inputs-v3 --dry-run
@@ -202,8 +203,8 @@ cargo bench -- --mode=confirm --workload-id=inputs-v3 --baseline=main --update-o
 A baseline updates only when every required case establishes non-inferiority
 within the declared margin. Missing cases and inconclusive intervals cannot pass.
 CPU scope is separate from mode. The CLI and environment override `Suite::plan()`
-and suite CPU defaults. See [modes and assumptions](docs/benchmark-modes.md) and
-[regression testing](REGRESSION-TESTING.md).
+and suite CPU defaults. See [modes and assumptions](https://github.com/imazen/zenbench/blob/main/docs/benchmark-modes.md) and
+[regression testing](https://github.com/imazen/zenbench/blob/main/REGRESSION-TESTING.md).
 
 ## Thread scaling
 
@@ -309,7 +310,7 @@ CI-plus-timer-floor as described above.
 `--max-regression=N` uses process-level intervals with a declared practical margin.
 Exit 1 means a confirmed regression; exit 2 means inconclusive or invalid evidence.
 A wide interval cannot pass merely because it fails to detect a regression.
-The [shared comparison policy](docs/benchmark-modes.md#decisions-and-promotion)
+The [shared comparison policy](https://github.com/imazen/zenbench/blob/main/docs/benchmark-modes.md#decisions-and-promotion)
 uses fixed independent processes, paired log ratios within a binary and Welch
 log-latency intervals across retained baseline populations. The within-process
 statistics above remain exploratory.

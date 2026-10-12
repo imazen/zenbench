@@ -3,9 +3,11 @@
 # zenbench
 
 The CLI installs with Cargo. [Installation instructions](https://github.com/imazen/zenbench/blob/main/docs/installation.md)
-cover the current review stack and released versions. Run `zenbench --help` for
+cover the current Git build and released versions. Run `zenbench --help` for
 offline workflows, `zenbench pair --help` for executable/environment comparisons,
 and `zenbench nice --help` for cooperative background jobs.
+[Fleet deployment](https://github.com/imazen/zenbench/blob/main/docs/fleet.md) covers capability probing and verified bundles.
+[Heap profiling](https://github.com/imazen/zenbench/blob/main/docs/heap-profiling.md) separates memory peaks from latency.
 
 Interleaved microbenchmarking for Rust with paired statistics, CI regression testing, and hardware-adaptive measurement.
 
@@ -31,12 +33,20 @@ Interleaved microbenchmarking for Rust with paired statistics, CI regression tes
 
 ## Why zenbench
 
-Existing harnesses run benchmarks **sequentially**. Benchmark A runs on a hot CPU; benchmark B runs on an even hotter CPU with degraded turbo boost. System load changes between runs corrupt results.
-
-Zenbench **interleaves**: each round, all benchmarks run in shuffled order. Round N of A and round N of B execute under identical conditions. Paired statistics on the round-by-round differences detect real changes — not thermal drift.
+Zenbench **interleaves**: each round, benchmarks run in shuffled order, keeping
+comparison arms close in time. Paired observations help account for shared noise;
+they do not guarantee identical clocks, caches or scheduling. Local results are
+exploratory. Fixed-process confirmation adds an explicit plan, independent-run
+intervals and fail-closed evidence checks.
 
 
 ## Quick start
+
+For the edit → confirm workflow, run `zenbench guide` or
+`cargo bench --bench my_bench -- --help`. The [workflow guide](https://github.com/imazen/zenbench/blob/main/docs/benchmark-workflows.md)
+covers source revisions, retained executables, CPU/Rayon setup, profiling and small Git exports.
+The [measurement protocol](https://github.com/imazen/zenbench/blob/main/METHODOLOGY.md) documents the statistical
+methods, busy-machine tradeoffs, limits, and measured wall-time/storage costs.
 
 ```toml
 # Cargo.toml
@@ -70,35 +80,85 @@ fn bench_sort(suite: &mut Suite) {
 zenbench::main!(bench_sort);
 ```
 
-## CI regression testing
+## Retaining results
 
-```bash
-# After merging to main — save a baseline
-cargo bench -- --save-baseline=main
+Raw results are compressed in the ignored `.zenbench/data/` directory. Export
+only selected baselines with `zenbench data snapshot <result> --output benchmarks/baseline.csv`:
+one stable row per benchmark, with a hash referencing the complete evidence.
+See [storage and compact exports](https://github.com/imazen/zenbench/blob/main/docs/result-storage.md).
 
-# On PRs — check for regressions (exits 1 on a >5% slowdown that's also
-# statistically significant; see "CI regression gate semantics" below)
-cargo bench -- --baseline=main
+## CPU placement and affinity
 
-# Auto-update baseline on clean runs
-cargo bench -- --baseline=main --update-on-pass --max-regression=5
+By default, detected asymmetric or unknown CPU topology requires a verified
+process boundary within one CPU class. Otherwise zenbench aborts before
+calibration or timed work. Inspect `zenbench cpu-info`, then launch a benchmark
+with `zenbench exec --cpu-policy performance ./my-benchmark` (or `efficiency`).
+Linux requires an enabled cpuset controller; Windows x86/x64 uses a process mask.
+These restrictions cover private Rayon pools and ordinary threads. macOS hints
+cannot certify P/E placement.
+
+Use `ZENBENCH_CPU_POLICY=unrestricted` only to opt out explicitly; every result
+row records `UNVERIFIED_UNRESTRICTED`. Configure crate-wide policy with
+`Suite::cpu_policy` / `Suite::cpu_set`, and scoped defaults with `Suite::affinity`.
+See [verified process placement](https://github.com/imazen/zenbench/blob/main/docs/process-affinity.md) for CLI/environment
+precedence, platform limits, and separate P/E runs.
+
+
+Pin a comparison group to logical CPU IDs with `g.affinity(&[2, 3])`. The scope
+covers warmup, iteration estimation, every measured round, and zenbench-created
+parallel/contention workers. It restores the calling thread's prior affinity when
+the group ends, including panic unwinding. Existing external thread pools retain
+their own affinity; configure those pools separately.
+
+Rayon parallel iterators use Rayon's current pool. Configure that pool's worker
+affinity and thread count explicitly, and execute the benchmark through
+[`ThreadPool::install`](https://docs.rs/rayon/latest/rayon/struct.ThreadPool.html#method.install).
+Hold each worker's `AffinityGuard` for its entire worker lifetime, for example
+around `thread.run()` in a
+[`spawn_handler`](https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html#method.spawn_handler).
+An existing pool is unaffected by group pinning; a global pool initialized during
+one group keeps its worker configuration for subsequent groups.
+
+
+For a whole harness, set `ZENBENCH_PIN=2-7` or `ZENBENCH_PIN=0,2-4,7` before
+launching it. Ranges are inclusive, IDs are zero based, and the environment is
+parsed once per process. A group's explicit setting overrides the environment.
+Empty sets, malformed syntax, unavailable CPUs, and OS errors abort the benchmark
+instead of producing results with unapplied affinity.
+
+For a manual scope, use `zenbench::platform::pin_current_thread(&[2])?` and keep
+the returned `AffinityGuard` alive. `current_thread_affinity()` queries the mask.
+Linux enforces the entire requested set; Windows IDs belong to the calling
+thread's current processor group. macOS maps each CPU set to one opaque
+[Mach affinity tag](https://developer.apple.com/library/archive/releasenotes/Performance/RN-AffinityAPI/):
+this is a best-effort cache-sharing hint, **not a binding to those CPUs**. The guard
+restores the prior tag; hardware that rejects the hint returns an error. macOS
+has no CPU-mask query, so `current_thread_affinity()` returns `Unsupported` there.
+Other targets return `AffinityError::Unsupported` for pinning too.
+See [the pinned example](https://github.com/imazen/zenbench/blob/main/examples/pinned.rs)
+(`ZENBENCH_CPU_POLICY=unrestricted cargo run --example pinned`) for
+before/during/after scoped mask checks on an available CPU. This example opts out
+of process-class certification explicitly.
+
+## Iteration and confirmation
+
+Local runs default to exploratory **Iterate**: one process, up to 30 rounds and
+100 ms warmup per arm. Use **Confirm** for a frozen candidate; add `--scope=ID`
+for a named hardware/workload cell. Confirm uses five fresh processes by default
+and refuses incomplete, noisy or unverified evidence. The existing Evidence
+spelling remains supported with the same protocol and a required scope.
+
+```sh
+cargo bench -- --mode=confirm --workload-id=inputs-v3 --dry-run
+cargo bench -- --mode=confirm --workload-id=inputs-v3 --save-baseline=main
+cargo bench -- --mode=confirm --workload-id=inputs-v3 --baseline=main --update-on-pass
 ```
 
-```text
-  Baseline comparison
-  ───────────────────
-  compress::level_1     16.2µs →   16.4µs    +1.2%    unchanged
-  compress::level_6     15.1µs →   15.3µs    +1.3%    unchanged
-  compress::level_9     15.0µs →   15.6µs    +4.0%    unchanged
-  compress::mixed      401.0µs →  412.3µs    +2.8%    unchanged
-  decompress::zenflate  91.5µs →   92.7µs    +1.3%    unchanged
-
-  Summary: 0 regressions, 0 improvements, 5 unchanged
-
-[zenbench] PASS: no regressions exceed 5% threshold
-```
-
-Full CI guide with GitHub Actions workflows: [REGRESSION-TESTING.md](https://github.com/imazen/zenbench/blob/main/REGRESSION-TESTING.md)
+A baseline updates only when every required case establishes non-inferiority
+within the declared margin. Missing cases and inconclusive intervals cannot pass.
+CPU scope is separate from mode. The CLI and environment override `Suite::plan()`
+and suite CPU defaults. See [modes and assumptions](https://github.com/imazen/zenbench/blob/main/docs/benchmark-modes.md) and
+[regression testing](https://github.com/imazen/zenbench/blob/main/REGRESSION-TESTING.md).
 
 ## Thread scaling
 
@@ -201,20 +261,13 @@ CI-plus-timer-floor as described above.
 
 ## CI regression gate semantics
 
-`--max-regression=N` is **significance-gated**, not a raw percentage cutoff. A
-benchmark fails the gate (counts as a regression, exit code 1) only when it is
-**both**:
-
-- more than `N%` slower than the saved baseline, **and**
-- statistically significant — a pooled two-sample t-test on the baseline-vs-new
-  samples gives `t > 2.0` (≈ p < 0.05). With < 2 samples per side, or zero
-  variance, the percentage alone decides.
-
-This means a noisy `+10%` swing on a loaded CI runner can **pass** the gate if
-the variance is high enough that the t-test can't confirm it — by design, so
-flaky runners don't fail your build on noise. If you need a hard percentage
-ceiling that ignores significance, gate on the raw `pct_change` in the CSV/JSON
-output yourself rather than relying on `--max-regression`.
+`--max-regression=N` uses process-level intervals with a declared practical margin.
+Exit 1 means a confirmed regression; exit 2 means inconclusive or invalid evidence.
+A wide interval cannot pass merely because it fails to detect a regression.
+The [shared comparison policy](https://github.com/imazen/zenbench/blob/main/docs/benchmark-modes.md#decisions-and-promotion)
+uses fixed independent processes, paired log ratios within a binary and Welch
+log-latency intervals across retained baseline populations. The within-process
+statistics above remain exploratory.
 
 ## Don't accidentally measure nothing
 
@@ -294,9 +347,9 @@ JavaScript or external assets); see the
 publication-quality SVG charts (grouped bars, themes) enable the `charts` feature
 (`charts-rs`), and the `quickchart` module emits ready-to-embed chart image URLs.
 
-Every run also saves an LLM-format copy to
-`<target dir>/zenbench/results/zenbench-<run_id>.txt` and prints the path when it
-starts (`ZENBENCH_NO_SAVE=1` turns this off). The cross-process lock that keeps
+Every run retains a complete gzip packet under `.zenbench/data/` and prints its
+evidence reference. `ZENBENCH_DATA_DIR` selects an external durable root.
+`ZENBENCH_NO_SAVE=1` disables storage for Iterate only; confirmation requires it. The cross-process lock that keeps
 concurrent benchmark runs from overlapping lives in the per-user cache directory
 (`~/.cache/zenbench/`, `%LOCALAPPDATA%\zenbench\` on Windows).
 
@@ -374,7 +427,7 @@ when requiring every retained round to have passed admission.
 
 ```rust,ignore
 group.config()
-    .max_rounds(200)              // default 200
+    .max_rounds(200)              // default 30; explicit override
     .noise_threshold(0.02)        // ±2% significance gate
     .bootstrap_resamples(100_000) // CI precision (default 10K)
     .linear_sampling(true)        // slope regression for sub-100ns
@@ -506,3 +559,26 @@ MIT OR Apache-2.0
 [imageflow-dotnet]: https://github.com/imazen/imageflow-dotnet
 [imageflow-node]: https://github.com/imazen/imageflow-node
 [imageflow-go]: https://github.com/imazen/imageflow-go
+
+### Benchmark owners in separate processes
+
+`ZENBENCH_LAUNCHER_PIDS` lists comma-separated launcher/worker PIDs belonging
+ to the current benchmark. Resource admission subtracts their CPU contribution
+ from global load and excludes them from foreign heavy-process/benchmark scans.
+ RAM and temperature checks remain global. Only explicitly listed PIDs and the
+ measuring process are excluded; unrelated processes remain visible.
+
+Linux heavy-process counts count each process leader once. User-thread entries
+are deduplicated for both benchmark owners and foreign processes; global CPU
+admission still includes all foreign thread work.
+
+Set `ZENBENCH_GATE_TRACE=1` to log each round's gate verdict, blocking reason,
+system snapshot and foreign heavy-process identities to stderr. The trace is
+opt-in and runs outside benchmark timers; it uses the existing admission checks.
+
+The `paired_rounds` development example analyzes retained external-worker
+ timings through the same private `stats.rs` owner as the engine, including
+ paired IQR filtering and 10,000-resample bootstrap intervals. It accepts a
+ JSON array of `{baseline, candidate, iterations, timer_resolution_ns}` packets
+ on stdin and writes analyses on stdout. It does not run a workload or modify
+ the public library API.

@@ -14,8 +14,13 @@ An explicit `unrestricted` CPU policy permits exploratory measurements only.
 cargo bench --bench kernels -- --group=filter
 cargo bench --bench kernels -- --mode=confirm --workload-id=images-v3 --dry-run
 cargo bench --bench kernels -- --mode=confirm --workload-id=images-v3
-cargo bench --bench kernels -- --mode=evidence --workload-id=images-v3 --scope=linux/performance/filter
+cargo bench --bench kernels -- --mode=confirm --workload-id=images-v3 --scope=linux/performance/filter
 ```
+
+The primary intents are Iterate and Confirm. Add `--scope` to Confirm for a
+named study cell. The existing `Evidence` API variant and `--mode=evidence`
+remain supported and require scope; they use the same measurement protocol.
+Keep the spelling fixed within a recorded experiment for identity compatibility.
 
 Confirm launches five fresh processes by default, with a fixed round count in
 each. It retains every process and every round. Evidence runs the same protocol
@@ -34,7 +39,7 @@ CPU class, upload results or schedule a fleet.
 | Evidence matrix cell | `--scope=ID` | `ZENBENCH_SCOPE` | required for Evidence |
 | Supervisor deadline (seconds) | `--timeout=N` | `ZENBENCH_TIMEOUT` | 300 |
 
-CLI overrides environment, which overrides `Suite::plan()` settings. For example:
+Both `--name=value` and `--name value` work. CLI overrides environment, which overrides `Suite::plan()` settings. For example:
 
 ```rust
 let mut suite = zenbench::Suite::new();
@@ -121,7 +126,7 @@ opaque pool membership are not automatically certified; retain a build manifest
 and workload correctness controls alongside evidence intended for publication.
 
 Raw evidence and selected Git exports are described in
-[result storage](result-storage.md). `zenbench reanalyze INPUT --output analysis.json`
+[result storage](result-storage.md). `zenbench data reanalyze INPUT --output analysis.json`
 recomputes the frozen process policy without executing benchmarks and writes a
 separate versioned analysis referencing the immutable packet hash.
 

@@ -209,7 +209,8 @@ unknown; its label should say so. The current resolver requires membership in a
 known class. Consider allowing an explicitly selected singleton once the platform
 can prove its CPU/group identity and confinement. This would not establish a
 performance-core claim, make a multi-CPU unknown set homogeneous, or supply the
-missing Windows ARM/multi-group topology backend.
+multi-group topology backend. Native Windows ARM64 single-group discovery was
+subsequently implemented; see [placement verification](cpu-placement-verification.md).
 
 Keep boundary checks and correctness validation in every mode. Validate workload
 outputs outside timing; the harness cannot infer arbitrary closure semantics.

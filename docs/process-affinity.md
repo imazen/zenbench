@@ -108,7 +108,8 @@ library's attempt to change the process mask cannot widen this job boundary.
 Windows may return success while retaining the restricted mask, so readback
 of the actual mask is the confinement oracle. Job creation/assignment failure
 aborts admission before calibration or callbacks.
-Multiple processor groups and Windows ARM class discovery are unsupported and
+Native Windows ARM64 discovers OS core efficiency/cache classes and uses the
+same inherited Job boundary. Multiple processor groups remain unsupported and
 fail closed by default. Start a fresh process to change classes; unavailable
 classes cannot be selected from a previously narrowed mask.
 
@@ -312,8 +313,8 @@ The `windows_job_boundary` integration fixture runs in isolated native Windows
 processes, including Windows ARM CI. It creates its Rayon and ordinary workers
 before installing the affinity job, attempts process/thread escape, and checks
 an inherited descendant process. This tests the OS boundary independently of
-CPU class discovery; Windows ARM P/E discovery remains unsupported and default
-benchmark admission still fails closed there.
+CPU class discovery. The separate `windows_arm_topology` fixture now validates
+native ARM64 discovery and selected-class admission against the OS oracle.
 
 The unchanged `gate_sees_load` regression can also run natively with
 `just windows-gate-test-build` and `just windows-gate-test-remote HOST BINARY`.

@@ -336,10 +336,12 @@ preserve all results, including refusals, outliers, and raw execution orders.
 Large raw packets have content-addressed primary and mirrored storage; the
 pointers record hashes and resolving locations.
 
-Windows ARM class discovery, multiple processor groups, macOS hard P/E binding,
-and equal-size cache-sharing domain identity remain unsupported. Maximum CPU
-frequency, quietness, and opaque pool size remain unverified. The Windows ARM
-Job fixture tests the OS boundary independently of missing core-class discovery.
+At this earlier measurement revision Windows ARM class discovery was absent;
+the native ARM64 discovery and class-admission controls below supersede that
+limitation. Multiple processor groups, macOS hard P/E binding and equal-size
+cache-sharing domain identity remain unsupported. Maximum CPU frequency,
+quietness and opaque pool size remain unverified. The Windows ARM Job fixture
+tests the OS boundary independently of core-class discovery.
 
 [Native boundary and load-gate fixture packets](../benchmarks/windows_native_boundary_gate_2026-10-11.json) retain their executable/source hashes, test output, native RSS, and local resource records.
 
