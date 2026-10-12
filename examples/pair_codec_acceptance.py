@@ -69,7 +69,7 @@ def prepare(args):
         [arm('c',c_encode,['64','64','40','10','${input}','${output}/result.obu','1'],args.c_rev)],
         [dict(id='gradient-64-p10-q40',inputs=dict(input=str(raw),checker=str(checker)))],
         dict(extract=dict(kind='regex',pattern=r'ENCODE_NS=(\d+)',capture=1),unit='ns',expected=1),
-        check('check-encoder'),'each driver performs one excluded warmup encode')
+        dict(kind='files',paths=['result.obu']),'each driver performs one excluded warmup encode')
     for name,plan in [('decoder',decoder),('encoder',encoder)]:
         (root/f'{name}.json').write_text(json.dumps(plan,indent=2)+'\n')
     (root/'identity.json').write_text(json.dumps(dict(profile=digest(profile),encode=digest(encode),
@@ -86,6 +86,9 @@ def audit(path):
     for ci,case in enumerate(packet['plan']['cases']):
         rows=[i for i in packet['invocations'] if i['case']==ci]
         if any(i['status']!='completed' for i in rows): raise ValueError('failed invocation')
+        for invocation in rows:
+            for artifact, expected in invocation['artifacts'].items():
+                if digest(artifact)!=expected: raise ValueError('artifact hash differs')
         narms=len(packet['plan']['candidates'])+1+int(packet['plan']['aa'])
         if len(rows)!=packet['plan']['blocks']*narms: raise ValueError('missing invocation')
         for arm in range(1,narms):
@@ -93,6 +96,11 @@ def audit(path):
             for block in range(packet['plan']['blocks']):
                 group=[i for i in rows if i['block']==block]
                 if sorted(i['arm'] for i in group)!=list(range(narms)): raise ValueError('invalid block')
+                outputs={i['arm']:Path(i['output']) for i in group}
+                if packet['plan']['check']['kind']=='files':
+                    encoder_check(outputs[0],outputs[arm])
+                else:
+                    decoder_check(outputs[0],outputs[arm])
                 values={i['arm']:statistics.mean(i['values_ns']) for i in group}
                 ratios.append(values[arm]/values[0])
             estimate=100*math.expm1(statistics.mean(math.log(x) for x in ratios))
