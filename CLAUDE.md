@@ -372,3 +372,12 @@ the monitor handle behind a mutex unwind boundary. The same expanded-feature
 semver check now passes all 202 applicable checks;
 see [the release surface review](docs/public-api/review-0.1.10.md) for scope,
 reproduction commands, behavioral migration and CLI consistency findings.
+
+### macOS fixture isolation (2026-10-12)
+
+Concurrent fleet CLI scenarios can saturate the hosted runner while hashing bundles,
+causing real resource admission to expire. The scenarios now serialize without
+changing admission thresholds or assertions. A live Rayon pool can asynchronously
+release scheduler allocations during later exact heap-ledger controls; those
+controls now run before pool creation. CI exposed a 48-byte live-ledger difference
+on macOS Intel; the exact assertions remain unchanged.
