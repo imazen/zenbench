@@ -1,0 +1,21 @@
+# Match .github/workflows/pages.yml. Override ZOLA with an installed binary path.
+zola := env("ZOLA", "zola")
+
+build:
+    {{zola}} --root . build
+
+# Check rendered links/resources, including the GitHub Pages /zenbench prefix.
+check: build
+    python3 -B scripts/check_links.py public
+
+# Full external checks can take longer; retain output when running this recipe.
+check-external:
+    {{zola}} --root . check
+
+# Requires playwright installed in the caller's Python environment.
+browser:
+    python3 -B scripts/check_browser.py public
+
+# Parse the actual JSON examples with an existing binary; never rebuild Rust here.
+plans binary:
+    python3 -B scripts/check_plans.py '{{binary}}'
