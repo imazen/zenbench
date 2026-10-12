@@ -474,8 +474,10 @@ Keep the intent explicit and bound the time spent obtaining an answer.
 The current Iterate path takes background observations and continues through
 ordinary load rather than sleeping before every round. It retains flags and
 can provide useful directional evidence. It still has cooperative locking and
-the named-rival admission wait described above. It does **not** have a bounded,
-load-aware multi-agent reservation scheduler. `--no-busy-gate` is an explicit
+the named-rival admission wait described above. FIFO cooperative admission now
+bounds its own queue wait and includes participating `zenbench nice` tasks.
+It serializes whole jobs; it does not reserve CPU/cache capacity or preempt
+unwrapped background work. `--no-busy-gate` is an explicit
 exploratory escape when those observations/waits are unsuitable; it removes the
 observations needed for confirmation. It is not the default recommendation.
 CPU-class uncertainty and ordinary background load are separate problems: keep
@@ -500,7 +502,8 @@ cache footprints can change carryover; AVX use can change the next arm's power
 state. Short spikes can hit only one arm. Pairing and randomization reduce some
 biases but cannot promise cancellation on a busy host.
 
-Useful next steps for this workload, **not implemented admission guarantees**:
+The external runner now provides the edit-feedback row below. Resource-domain
+reservations and acceptance under busy-system conditions remain future work:
 
 | Intent | Pragmatic behavior to aim for | Honest result |
 |---|---|---|
@@ -532,8 +535,9 @@ and performance acceptance are separate statuses.
 ## 8. External executables and environment A/B: issue 29
 
 The [external-process implementation design](docs/external-process-design.md)
-turns this review into a delivery scope and acceptance gates. It is a proposal,
-not an available command.
+sets the delivery scope and acceptance gates. The exploratory stage is available
+as [`zenbench pair`](docs/external-process.md); external Confirm/Evidence remains
+unavailable until its separate analysis and validity gates are verified.
 
 [Issue 29](https://github.com/imazen/zenbench/issues/29) requests a serial paired
 runner for prebuilt executables with per-arm environments, internal metrics,
@@ -545,11 +549,13 @@ bytes removes a build difference, but does not prove the only effect is the
 intended runtime switch. Controls should exercise the same launch shape and
 record that limitation.
 
-**This runner is not implemented.** Current fresh-process confirmation reruns one
-zenbench executable/configuration. `self-compare` builds two revisions and runs
-them sequentially. Saved packets can be compared with Welch inference, but there
-is no automatic randomized external A/B schedule, per-arm environment manifest,
-metric extractor or paired-block inference for these invocations.
+The external runner now supports serial randomized fresh-process blocks,
+per-arm environment manifests, metric adapters, correctness contracts, A/A,
+retained failures and artifact-checked resume. It reports one mean per child
+and descriptive paired-block log ratios. It does not perform external
+confirmation inference. In-process fresh-process confirmation still reruns one
+zenbench executable/configuration; `self-compare` still builds and runs two
+revisions sequentially. These remain different measurement protocols.
 
 The issue's concrete use cases support the following design requirements:
 
@@ -584,7 +590,7 @@ The issue's concrete use cases support the following design requirements:
   another source of variation that an interval must account for.
 
 For busy systems, interleaving is worth preserving at the **process** level as
-well as inside a process. The external runner should offer bounded exploratory
+well as inside a process. The external runner offers bounded exploratory
 feedback without pretending global load is harmless. Confirmation needs its own
 validated block-level analysis and contamination policy. Reusing the existing
 presentation/storage components is appropriate; reusing an in-process bootstrap
@@ -867,3 +873,13 @@ references, not claims that Zenbench implements those tools or their guarantees.
 - [Bencher: Continuous Benchmarking](https://bencher.dev/docs/explanation/continuous-benchmarking/)
 - [Aakinshin: Performance Stability of GitHub Actions](https://aakinshin.net/posts/github-actions-perf-stability/)
 - [rustc-perf: Instruction counts as primary metric](https://kobzol.github.io/rust/rustc/2023/09/23/rustc-runtime-benchmarks.html)
+
+### Cooperative admission update
+
+Updated benchmark binaries acquire FIFO admission before warmup/calibration.
+A process experiment retains its reservation across children. `zenbench nice`
+lets foreground background commands participate; shared-directory configuration
+extends cooperation across accounts. The queue is non-preemptive, not CPU
+isolation. Unwrapped load remains observable and confirmation's resource
+criteria are unchanged. See [scheduling and recovery](docs/cooperative-scheduling.md)
+and the [external runner contract](docs/external-process.md).

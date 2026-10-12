@@ -111,3 +111,10 @@ SHARED WORKSTATIONS
   For multiple accounts, configure the same ZENBENCH_COORDINATION_DIR.
   Unwrapped work remains visible to benchmark resource checks.
   See zenbench nice --help and docs/cooperative-scheduling.md for limits.
+
+EXTERNAL PROGRAMS / STARTUP ENVIRONMENT CHANGES
+  zenbench pair --help
+  zenbench guide --topic pair
+  zenbench pair plan.json --dry-run
+  Same or different binaries, fresh serial processes, A/A by default.
+  Exploratory only; use retained vectors and controls to guide the next edit.

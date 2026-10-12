@@ -10,8 +10,9 @@ not automatic publication readiness or fleet coverage.
 BUSY WORKSTATIONS
 Ordinary load observations do not stall every Iterate round. Keep them enabled
 for context; results can guide investigation without authorizing acceptance.
-The cooperative lock and named-rival scan can still wait. There is no bounded
-multi-agent reservation scheduler. --no-busy-gate is an explicit exploration-only
+Cooperative FIFO admission and the named-rival scan can still wait.
+Use zenbench nice for background work and a shared ZENBENCH_COORDINATION_DIR
+for participating accounts. --no-busy-gate is an explicit exploration-only
 escape, removing observations required for confirmation.
 
 Keep equivalent work, a small targeted group and nearby A/B samples. Inspect
@@ -42,12 +43,11 @@ guarantees of fresh execution. Many rounds do not create independent processes.
 Invalid/inconclusive confirmation is exit 2, confirmed regression is exit 1.
 
 EXTERNAL BINARIES / DIFFERENT ENVIRONMENTS
-A first-class randomized two-binary/per-arm-environment runner is not implemented.
-Separate retained binaries can produce packets for compare; self-compare runs
-revisions sequentially. Neither implements external paired-block scheduling.
-Issue 29's proposed runner must preserve invocation boundaries for multiple
-internal timings, correctness checks, all failures and environment interventions.
-A/A's observed difference is a diagnostic, not a calibrated significance rule.
+zenbench pair implements exploratory serial fresh-process A/B with per-arm
+environments, timing vectors, correctness checks, A/A and retained failures.
+Use zenbench pair --help or zenbench guide --topic pair for a complete plan.
+Each invocation remains one process-level observation. External Confirm/Evidence
+is not implemented; A/A is a diagnostic, not a calibrated significance rule.
 
 COST AND REPRODUCIBILITY
 The retained Linux controls measured Iterate 0.766s and five-process Confirm

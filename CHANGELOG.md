@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Add exploratory `zenbench pair` for prebuilt executable/environment A/B, clustered internal timings, A/A controls, correctness contracts, retained evidence and checked resume.
+
 - Add FIFO cooperative admission before benchmark warmup, inherited experiment reservations, and `zenbench nice` for background commands with bounded admission, priority and Linux memory scopes.
 
 - Deduplicate foreign Linux user-thread entries in heavy-process counts while retaining their global CPU contribution.
