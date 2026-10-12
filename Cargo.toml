@@ -30,6 +30,8 @@ precise-timing = []
 # AllocProfiler for tracking heap allocations per benchmark.
 # Install as #[global_allocator] in your bench binary to activate.
 alloc-profiling = []
+# Dedicated memory runs: process-wide serialization, never latency profiling.
+heap-profiling = ["alloc-profiling"]
 # Drop-in criterion compatibility layer. Opt-in for migration.
 criterion-compat = []
 # Async benchmarking via Bencher::iter_async(runtime, || async { ... }).
@@ -122,3 +124,7 @@ tokio = { version = "1.53.2", features = ["rt", "macros"] }
 # executables under emulation without optimizing benchmark/test code itself.
 [profile.dev.package.sha2]
 opt-level = 3
+
+[[example]]
+name = "heap_phases"
+required-features = ["heap-profiling"]

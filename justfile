@@ -466,3 +466,14 @@ fleet-check:
 fleet-memory-check output:
     cargo build --bin zenbench --example fleet_memory_fixture
     python3 -B examples/check_fleet_memory.py {{output}}
+
+heap-check:
+    cargo fmt -p zenbench --check
+    cargo test --features heap-profiling --lib heap::
+    cargo run --features heap-profiling --example heap_phases -- --exercise-oom
+    cargo test --features heap-profiling --doc
+    cargo clippy --lib --example heap_phases --features heap-profiling -- -D warnings
+
+heap-oracle output:
+    cargo build --example heap_phases --features heap-profiling
+    python3 -B examples/check_heap_oracle.py {{output}}

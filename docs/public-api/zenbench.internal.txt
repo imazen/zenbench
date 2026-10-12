@@ -10,19 +10,20 @@
 ## summary
 #
 #   free functions                              4
-#   inherent methods                           15
-#   trait roster entries (type × trait)        11
+#   inherent methods                           16
+#   trait roster entries (type × trait)        14
 #
 # per-module pub lines:
-#   (root)                            7
+#   (root)                            8
 #   charts                            1
 #   criterion_compat                  1
 #   daemon                            1
 #   platform                          9
 
-## items (19 lines)
+## items (20 lines)
 
 pub fn BenchmarkMode::assert_fields_are_eq(&self)
+pub fn HeapError::assert_fields_are_eq(&self)
 pub fn RoundSample::assert_fields_are_eq(&self)
 pub fn Verdict::assert_fields_are_eq(&self)
 pub fn charts::ChartOrientation::assert_fields_are_eq(&self)
@@ -42,10 +43,13 @@ pub fn platform::ThreadQosState::assert_fields_are_eq(&self)
 pub fn platform::TopologyKind::assert_fields_are_eq(&self)
 pub fn postprocess_result(&SuiteResult)
 
-## trait impls (11 types)
+## trait impls (14 types)
 
 Aggregation: TrivialClone
 BenchmarkMode: TrivialClone
+HeapError: TrivialClone
+HeapMeasurement: TrivialClone
+HeapSnapshot: TrivialClone
 Verdict: TrivialClone
 charts::ChartOrientation: TrivialClone
 criterion_compat::BatchSize: TrivialClone
