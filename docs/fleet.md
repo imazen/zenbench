@@ -35,7 +35,7 @@ identity must include the intended machine/testbed, CPU domain and planned
 replicate. Retry attempts remain separate evidence. Do not collapse measurements
 across machines or select the fastest retry. See the
 [heap and fleet contract](heap-and-fleet-design.md) for the measurement semantics
-and remaining implementation gates.
+and the implemented scope and remaining deployment validation.
 
 ## One observation per job
 

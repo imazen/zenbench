@@ -1,9 +1,12 @@
 # IQA heap measurement and fleet integration
 
-Status: proposed implementation contract, based on source review on 2026-10-12.
-No peak-heap backend, deployment bundle command, or benchmark fleet job is added
-by this document. The existing timing, pair and cooperative-admission commands
-remain available. See [the methodology](../METHODOLOGY.md) for timing inference.
+Status: implementation and measurement contract, reviewed on 2026-10-12.
+Zenbench implements the all-thread requested-heap backend, portable bundles,
+fresh-child observations and compact exports described below. The zenmetrics
+[integration](https://github.com/imazen/zenmetrics/pull/69) adds benchmark jobs,
+worker execution, evidence recovery and retention. See [heap profiling](heap-profiling.md)
+and [fleet commands](fleet.md) for usage, and [the methodology](../METHODOLOGY.md)
+for timing inference. Deployment to a production fleet is a separate validation gate.
 
 ## What exists
 
@@ -12,7 +15,11 @@ traffic. It does not track concurrent live bytes or opaque Rayon workers. Its
 bytes-per-iteration result is not peak heap. Instrumentation contributes to
 timed execution when installed; a universal overhead number is not established.
 
-At zenmetrics revision `2f2c113527f08847a517f91d6e17e7f8e34dbe76`, the
+The separate opt-in [HeapProfiler](../src/heap.rs) tracks live requested bytes
+across Rust threads and provides resettable phase watermarks without resetting
+live allocations. Use a dedicated memory binary; keep latency uninstrumented.
+
+The earlier baseline, before this integration, was zenmetrics revision `2f2c113527f08847a517f91d6e17e7f8e34dbe76`, the
 [CPU measurement script](https://github.com/imazen/zenmetrics/blob/2f2c113527f08847a517f91d6e17e7f8e34dbe76/scripts/cpu_metrics_1t8t.sh)
 runs each selected large-image metric under `/usr/bin/time -v`. Its
 [driver](https://github.com/imazen/zenmetrics/blob/2f2c113527f08847a517f91d6e17e7f8e34dbe76/benchmarks/heaptrack/drivers/cpu_profile/src/bin/new_metrics_wall.rs)
@@ -80,7 +87,7 @@ latency and memory builds.
 
 ## Heap backends and acceptance gates
 
-Start with a Linux external [heaptrack](https://github.com/KDE/heaptrack) adapter
+The runner provides a Linux external [heaptrack](https://github.com/KDE/heaptrack) adapter
 for whole-child requested-heap evidence and call stacks. Retain the trace outside
 Git, its hash, command and profiler identity. Preserve optimized SIMD paths and
 debug symbols. Verify interception for the actual allocator/build; direct mappings,
@@ -88,9 +95,9 @@ custom arenas and device allocations require separately declared coverage.
 Do not claim phase-specific heap from a whole-process summary. Phase integration
 needs its own tested protocol.
 
-A portable Rust-allocation backend would observe all threads at the global
-allocator boundary from process startup. It needs a coherent process-wide live
-ledger, phase high-water marks and explicit realloc/failure semantics. Never
+The portable Rust-allocation backend observes all threads at the global
+allocator boundary. One lock orders System allocation operations, the live
+ledger, snapshots and phase watermarks, with explicit realloc/failure semantics. Never
 reset the live count while older allocations remain; cross-thread frees must
 update the same ledger. Snapshot subtraction of thread-local counters cannot
 recover simultaneous peak liveness. An arbitrary set of relaxed counters cannot
@@ -100,8 +107,9 @@ Even a correctly ordered allocation-boundary ledger measures the instrumented
 execution and requested sizes. It cannot see a wrapped allocator's temporary
 old/new storage overlap inside realloc, nor promise an unperturbed physical peak.
 Serialization and tracing can change scheduling and therefore peak overlap.
-Audit a published backend before choosing it; this proposal grants no new unsafe
-exception. For example, current
+The approved unsafe exception only forwards GlobalAlloc operations to System;
+ledger and phase logic remain safe Rust. Published alternatives were audited;
+for example,
 [alloc_tracker process spans](https://docs.rs/alloc_tracker/0.7.12/alloc_tracker/)
 explicitly withhold operation peak memory, so that API alone does not satisfy
 the process-wide peak contract.
@@ -112,7 +120,13 @@ live allocations crossing phase boundaries; failed allocation/reallocation;
 realloc growth/shrinkage; zero allocation; retained reference state; and background
 harness activity. Use barriers and exact requested-size oracles, plus an independent
 heap profiler. Separately test native/C allocator coverage and explicit unsupported
-cases. Profiling duration/overhead and real IQA results have not been measured here.
+cases. The committed controls cover these Rust allocation cases, with impossible-size
+failure requests selected explicitly on 64-bit targets. Real IQA controls compare
+latency and memory builds across four metrics, cold/warm reference modes, one/two
+threads and packed/padded inputs. An independent Linux heaptrack control matched
+the IQA ledger's lifetime peak exactly at 694,091 requested Rust bytes. This is
+correctness evidence for that execution, not a general workload memory budget or
+an overhead measurement. See the [IQA validation record](https://github.com/imazen/zenmetrics/blob/ef725c6f513dc4bd58868cc925728486fccd75ff/docs/BENCHMARK_FLEET.md#validation-and-rollout).
 
 ## Fleet boundary
 
@@ -121,7 +135,7 @@ Zenmetrics already owns
 [content-addressed blobs](https://github.com/imazen/zenmetrics/blob/2f2c113527f08847a517f91d6e17e7f8e34dbe76/crates/zenfleet-core/src/content.rs),
 and the [worker/lease/ledger workflow](https://github.com/imazen/zenmetrics/blob/2f2c113527f08847a517f91d6e17e7f8e34dbe76/docs/RUNNING_JOBS.md).
 Keep deployment, host inventory, scheduling, credentials and uploading there.
-Zenbench should provide a versioned local measurement contract:
+Zenbench provides a versioned local measurement contract:
 
 - Machine-readable capabilities: executable/build identity, result/plan schemas,
   OS/architecture, topology and placement strength, installed profiler backends,
@@ -141,8 +155,8 @@ Zenbench should provide a versioned local measurement contract:
 - A compact selected table and a hash-addressed evidence manifest, with decode
   and comparison commands. Large heap traces belong in the existing object store.
 
-Zenmetrics needs a benchmark job kind/executor adapter, building on its existing
-program/data bundle machinery. Its job identity must include experiment and
+The zenmetrics integration adds a benchmark job kind/executor adapter using its
+existing content store and ledger. Its job identity includes experiment and
 planned replicate, requested machine/testbed or placement domain, and measurement
 mode/backend. A benchmark's repeated execution is intentional: deduplicating by
 program/input alone must not collapse a dozen computers or repeated processes
@@ -161,13 +175,23 @@ Aggregate within matching workload, hardware/CPU-cache class, build, thread and
 instrumentation contracts. Present cross-machine results as distinct strata.
 Use the existing ledger for fleet status and one selected campaign table in Git.
 
-## Implementation order
+## Implemented scope and remaining validation
 
-1. Typed memory evidence and a one-case fresh-child runner; whole-child heaptrack
-   and correctly named OS peaks first, with failure and ownership controls.
-2. Validated all-thread Rust heap tracking and explicit cold/prepared/warm phases.
-3. Capability probe, portable plan/bundle binding, progress and attempt contract.
-4. Zenmetrics benchmark executor integration and a CPU/OS/thread backend matrix.
+- `fleet-run` supports driver counters, whole-child Linux heaptrack and named
+  OS peaks on Linux, macOS and Windows. Heaptrack evidence is whole-process;
+  phase-specific external profiling, cgroup and GPU memory backends are absent.
+- Rust heap phases include pre-existing Rayon workers and retained allocations.
+  Native/C allocations bypassing the Rust allocator require external profiling.
+- Bundles bind inputs and executables by hash. Capability output does not certify
+  native execution: `native_arch_verified:false` requires an independent check.
+- The zenmetrics IQA driver covers decoded SDR RGB8 primary scores: cold cases
+  use its existing metric list, while warm cached-reference cases support SSIM2,
+  butteraugli, DSSIM and zensim. HDR, GPU and diffmap cases are outside this driver;
+  effective runtime SIMD tier is not observed.
+- Native adapter/worker controls passed on Linux, Windows x64/ARM64 and macOS
+  Intel/ARM64 in [CI](https://github.com/imazen/zenmetrics/actions/runs/38204891735).
+  A local Linux baked-image control also passed. These checks do not certify a
+  production worker's architecture, placement, resource budget or deployment.
 
 The default remains fast uninstrumented iteration. Memory measurement is explicit;
 changing a memory profile must not silently change the native latency baseline.
