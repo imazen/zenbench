@@ -128,3 +128,7 @@ opt-level = 3
 [[example]]
 name = "heap_phases"
 required-features = ["heap-profiling"]
+
+[[test]]
+name = "harness_arguments"
+harness = false

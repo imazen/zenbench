@@ -204,3 +204,56 @@ fn saved_evidence_is_readable_and_carries_working_commands() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("cannot read evidence"));
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn workflow_namespaces_retain_flat_command_compatibility() {
+    let top = cli().arg("--help").output().unwrap();
+    assert!(top.status.success());
+    let help = String::from_utf8(top.stdout).unwrap();
+    for family in ["data", "fleet", "jobs"] {
+        assert!(help.contains(family), "{help}");
+    }
+    assert!(!help.contains("  fleet-run "), "{help}");
+    for (canonical, legacy) in [
+        (vec!["data", "read"], "read"),
+        (vec!["data", "compare"], "compare"),
+        (vec!["data", "pair-diff"], "pair-diff"),
+        (vec!["data", "snapshot"], "snapshot"),
+        (vec!["data", "archive"], "archive"),
+        (vec!["data", "reanalyze"], "reanalyze"),
+        (vec!["data", "baseline"], "baseline"),
+        (vec!["fleet", "run"], "fleet-run"),
+        (vec!["fleet", "read"], "fleet-read"),
+        (vec!["fleet", "diff"], "fleet-diff"),
+        (vec!["fleet", "export"], "fleet-export"),
+        (vec!["fleet", "capabilities"], "capabilities"),
+        (vec!["fleet", "bundle"], "bundle"),
+        (vec!["fleet", "bundle-check"], "bundle-check"),
+        (vec!["jobs", "run"], "run"),
+        (vec!["jobs", "list"], "list"),
+        (vec!["jobs", "status"], "status"),
+        (vec!["jobs", "kill"], "kill"),
+        (vec!["jobs", "results"], "results"),
+        (vec!["jobs", "clean"], "clean"),
+    ] {
+        let grouped = cli().args(&canonical).arg("--help").output().unwrap();
+        let flat = cli().args([legacy, "--help"]).output().unwrap();
+        assert!(grouped.status.success(), "{canonical:?}: {grouped:?}");
+        assert!(flat.status.success(), "{legacy}: {flat:?}");
+        // Help descriptions and option definitions come from the same source.
+        let grouped = String::from_utf8(grouped.stdout).unwrap();
+        let flat = String::from_utf8(flat.stdout).unwrap();
+        assert_eq!(grouped.lines().next(), flat.lines().next());
+    }
+    let canonical = cli()
+        .args(["data", "read", "missing-cleanup-packet.json"])
+        .output()
+        .unwrap();
+    let legacy = cli()
+        .args(["read", "missing-cleanup-packet.json"])
+        .output()
+        .unwrap();
+    assert_eq!(canonical.status.code(), Some(2));
+    assert_eq!(canonical.status.code(), legacy.status.code());
+    assert_eq!(canonical.stderr, legacy.stderr);
+}

@@ -76,7 +76,7 @@ impl Default for BenchmarkPlan {
 
 impl BenchmarkPlan {
     pub(crate) fn resolve(mut self) -> Result<Self, String> {
-        let args: Vec<String> = std::env::args().skip(1).collect();
+        let args = harness_args();
         let value = |flag: &str, env: &str| -> Result<Option<String>, String> {
             let prefix = format!("--{flag}=");
             let values: Vec<_> = args
@@ -192,48 +192,73 @@ pub struct ExecutionRecord {
     pub timer_backend: String,
 }
 
-pub(crate) fn validate_harness_args(args: &[String]) -> Result<(), String> {
-    let valued = [
-        "mode",
-        "processes",
-        "rounds",
-        "margin",
-        "confidence",
-        "workload-id",
-        "scope",
-        "timeout",
-        "group",
-        "format",
-        "save-baseline",
-        "baseline",
-        "max-regression",
-        "best-of-passes",
-        "mean-of-passes",
-        "median-of-passes",
-        "best-of-processes",
-        "mean-of-processes",
-        "median-of-processes",
-        "cpu-policy",
-        "cpu-set",
-    ];
-    let mut seen = std::collections::HashSet::new();
-    let mut iter = args.iter();
-    while let Some(arg) = iter.next() {
-        if ["--bench", "--no-busy-gate", "--update-on-pass", "--dry-run"].contains(&arg.as_str()) {
-            continue;
-        }
-        if ["--cpu-policy", "--cpu-set"].contains(&arg.as_str()) {
-            if iter.next().is_none() {
-                return Err(format!("{arg} requires a value"));
+const VALUED_OPTIONS: &[&str] = &[
+    "mode",
+    "processes",
+    "rounds",
+    "margin",
+    "confidence",
+    "workload-id",
+    "scope",
+    "timeout",
+    "group",
+    "format",
+    "save-baseline",
+    "baseline",
+    "max-regression",
+    "best-of-passes",
+    "mean-of-passes",
+    "median-of-passes",
+    "best-of-processes",
+    "mean-of-processes",
+    "median-of-processes",
+    "cpu-policy",
+    "cpu-set",
+];
+
+/// Normalize only known valued options. Library consumers may have their own
+/// arguments; the main! entry point separately rejects unknown harness flags.
+pub(crate) fn normalize_harness_args(args: &[String]) -> Result<Vec<String>, String> {
+    let mut normalized = Vec::with_capacity(args.len());
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        if let Some(name) = arg.strip_prefix("--") {
+            if VALUED_OPTIONS.contains(&name) {
+                let value = args
+                    .next()
+                    .ok_or_else(|| format!("{arg} requires a value"))?;
+                if value.is_empty() || value.starts_with("--") {
+                    return Err(format!("{arg} requires a value"));
+                }
+                normalized.push(format!("{arg}={value}"));
+                continue;
             }
+        }
+        normalized.push(arg.clone());
+    }
+    Ok(normalized)
+}
+
+pub(crate) fn harness_args() -> Vec<String> {
+    normalize_harness_args(&std::env::args().skip(1).collect::<Vec<_>>()).unwrap_or_else(|error| {
+        eprintln!("[zenbench] {error}; use --help for benchmark options");
+        std::process::exit(2);
+    })
+}
+
+pub(crate) fn validate_harness_args(args: &[String]) -> Result<(), String> {
+    let args = normalize_harness_args(args)?;
+    let mut seen = std::collections::HashSet::new();
+    for arg in &args {
+        if ["--bench", "--no-busy-gate", "--update-on-pass", "--dry-run"].contains(&arg.as_str()) {
             continue;
         }
         let Some((name, value)) = arg.strip_prefix("--").and_then(|s| s.split_once('=')) else {
             return Err(format!(
-                "unknown benchmark argument {arg:?}; use --name=value for options"
+                "unknown benchmark argument {arg:?}; use --help for options"
             ));
         };
-        if !valued.contains(&name) || value.is_empty() {
+        if !VALUED_OPTIONS.contains(&name) || value.is_empty() {
             return Err(format!("unknown or empty benchmark option {arg:?}"));
         }
         if !seen.insert(name) {
@@ -294,6 +319,32 @@ mod tests {
             vec!["--processes=3", "--mean-of-processes=5"],
         ] {
             assert!(validate_harness_args(&args(&items)).is_err(), "{items:?}");
+        }
+    }
+
+    #[test]
+    fn separated_values_preserve_arguments_and_reject_duplicates() {
+        for name in VALUED_OPTIONS {
+            let normalized = normalize_harness_args(&[
+                format!("--{name}"),
+                "value with spaces=and equals".into(),
+            ])
+            .unwrap();
+            assert_eq!(
+                normalized,
+                [format!("--{name}=value with spaces=and equals")]
+            );
+        }
+        for args in [
+            vec!["--rounds"],
+            vec!["--rounds", "--dry-run"],
+            vec!["--rounds", "5", "--rounds=6"],
+            vec!["--cpu-policy", "auto", "--cpu-policy=unrestricted"],
+            vec!["--baseline", "before", "--save-baseline=before"],
+            vec!["--mode", ""],
+        ] {
+            let args: Vec<_> = args.into_iter().map(String::from).collect();
+            assert!(validate_harness_args(&args).is_err(), "{args:?}");
         }
     }
 

@@ -495,3 +495,15 @@ windows-arm-msrv-check:
 # Compare the supported native API with the published baseline, including heap additions.
 api-compatibility:
     cargo semver-checks check-release --baseline-version 0.1.10 --default-features --features async,cpu-time,criterion-compat,charts --current-features heap-profiling
+
+# Verify canonical task groups and retained flat command aliases.
+cli-workflows-check:
+    cargo test --test cli_evidence
+    cargo clippy --all-targets -- -D warnings
+
+# Exercise both spellings through main!, not just the normalization helper.
+harness-arguments-check:
+    cargo test --lib plan::
+    cargo test --test harness_arguments
+    cargo test --test harness_arguments --no-default-features
+    cargo clippy --all-targets --features criterion-compat -- -D warnings

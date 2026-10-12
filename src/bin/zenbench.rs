@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use std::path::{Path, PathBuf};
 use zenbench::daemon;
 
@@ -366,8 +366,96 @@ enum BaselineAction {
     },
 }
 
+// Canonical task families reuse the existing argument definitions and handlers.
+// Flat spellings remain accepted for scripts, but do not crowd first-use help.
+type CommandFamily = (
+    &'static str,
+    &'static str,
+    &'static [(&'static str, &'static str)],
+);
+const COMMAND_FAMILIES: &[CommandFamily] = &[
+    (
+        "data",
+        "Read, compare and retain benchmark evidence",
+        &[
+            ("read", "read"),
+            ("compare", "compare"),
+            ("pair-diff", "pair-diff"),
+            ("archive", "archive"),
+            ("snapshot", "snapshot"),
+            ("reanalyze", "reanalyze"),
+            ("baseline", "baseline"),
+        ],
+    ),
+    (
+        "fleet",
+        "Deploy verified bundles and retain individual observations",
+        &[
+            ("run", "fleet-run"),
+            ("read", "fleet-read"),
+            ("diff", "fleet-diff"),
+            ("export", "fleet-export"),
+            ("capabilities", "capabilities"),
+            ("bundle", "bundle"),
+            ("bundle-check", "bundle-check"),
+        ],
+    ),
+    (
+        "jobs",
+        "Manage exploratory background runs (legacy execution contract)",
+        &[
+            ("run", "run"),
+            ("list", "list"),
+            ("status", "status"),
+            ("kill", "kill"),
+            ("results", "results"),
+            ("clean", "clean"),
+        ],
+    ),
+];
+
+fn workflow_command() -> clap::Command {
+    let mut root = Cli::command();
+    for &(name, about, entries) in COMMAND_FAMILIES {
+        let mut family = clap::Command::new(name)
+            .about(about)
+            .subcommand_required(true)
+            .arg_required_else_help(true);
+        for &(canonical, legacy) in entries {
+            let command = root
+                .find_subcommand(legacy)
+                .expect("declared command")
+                .clone();
+            family = family.subcommand(command.name(canonical).hide(false));
+            root = root.mut_subcommand(legacy, |command| command.hide(true));
+        }
+        root = root.subcommand(family);
+    }
+    root
+}
+
+fn parse_workflow() -> Cli {
+    let mut args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    // This parser owns help and validates canonical paths using the same argument
+    // definitions as the legacy parser. Parsing never executes a command.
+    workflow_command().get_matches_from(&args);
+    for &(family, _, entries) in COMMAND_FAMILIES {
+        if args.get(1).is_some_and(|arg| arg == family) {
+            if let Some(&(_, legacy)) = entries
+                .iter()
+                .find(|(canonical, _)| args.get(2).is_some_and(|arg| arg == *canonical))
+            {
+                args.remove(1);
+                args[1] = legacy.into();
+            }
+            break;
+        }
+    }
+    Cli::parse_from(args)
+}
+
 fn main() {
-    let cli = Cli::parse();
+    let cli = parse_workflow();
 
     match cli.command {
         Commands::FleetRun(options) => {

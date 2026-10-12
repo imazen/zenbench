@@ -91,6 +91,12 @@ impl Engine {
     /// Run all benchmarks and return results.
     pub fn run(mut self) -> SuiteResult {
         crate::report::startup_guidance();
+        if let Some(filter) = crate::plan::harness_args()
+            .iter()
+            .find_map(|arg| arg.strip_prefix("--group=").map(String::from))
+        {
+            self.suite.set_group_filter(filter);
+        }
         let plan = self.suite.plan.clone().resolve().unwrap_or_else(|e| {
             eprintln!("[zenbench] invalid benchmark plan: {e}; use --help or zenbench guide");
             std::process::exit(2);
