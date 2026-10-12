@@ -99,6 +99,7 @@ mod tests {
             ),
         ] {
             let metric = Metric {
+                resolution: None,
                 extract: adapter,
                 stream: Default::default(),
                 unit: "ms".into(),
@@ -112,6 +113,7 @@ mod tests {
     #[test]
     fn invalid_samples_and_extra_metrics_never_fall_back_to_wall_time() {
         let metric = Metric {
+            resolution: None,
             extract: Extract::Prefix {
                 prefix: "t=".into(),
             },

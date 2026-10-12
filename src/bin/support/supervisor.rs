@@ -33,13 +33,33 @@ pub(super) fn run(
 }
 
 pub(super) fn run_controlled(
-    mut command: Command,
+    command: Command,
     budget: Duration,
     reservation: &mut crate::coordination::Reservation,
     scope: Option<&str>,
     logs: &[std::path::PathBuf],
     process_id: &mut Option<u32>,
     poll: &mut dyn FnMut() -> io::Result<()>,
+) -> io::Result<Outcome> {
+    run_observed(
+        command,
+        budget,
+        reservation,
+        scope,
+        logs,
+        process_id,
+        &mut |_| poll(),
+    )
+}
+
+pub(super) fn run_observed(
+    mut command: Command,
+    budget: Duration,
+    reservation: &mut crate::coordination::Reservation,
+    scope: Option<&str>,
+    logs: &[std::path::PathBuf],
+    process_id: &mut Option<u32>,
+    poll: &mut dyn FnMut(u32) -> io::Result<()>,
 ) -> io::Result<Outcome> {
     reservation.command(&mut command);
     reservation.retain_until_reaped();
@@ -60,7 +80,7 @@ pub(super) fn run_controlled(
     *process_id = Some(child.id());
     let start = Instant::now();
     loop {
-        let interruption = poll().err();
+        let interruption = poll(child.id()).err();
         let oversized = logs
             .iter()
             .any(|p| std::fs::metadata(p).is_ok_and(|m| m.len() > 64 * 1024 * 1024));

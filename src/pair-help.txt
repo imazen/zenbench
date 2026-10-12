@@ -42,7 +42,7 @@ blocks. This is an invocation count, not a runtime estimate. Every child is
 fresh; internal timing vectors stay clustered within that child. Each complete
 block contributes one log ratio of arithmetic invocation means. The report
 shows geometric mean latency change and between-block log-ratio dispersion.
-It does not report a confirmation interval or a performance acceptance verdict.
+Iterate reports exploratory estimates; Confirm adds fixed-block intervals.
 Positive latency change means slower. A/A is a diagnostic, not a bias correction.
 
 CPU policy remains fail-closed on asymmetric/unknown topology. First inspect
@@ -72,7 +72,21 @@ into version control, with a pointer to its packet. Packets include decode,
 export and comparison commands. Resume checks identities and retained artifact
 hashes; completed cases are reused and incomplete cases get a new full attempt.
 Failures and interrupted original attempts remain intact. Never overwrite an
-attempt directory. Exit 0 means execution completed only; failures/not-run return 2.
+attempt directory. Iterate exit 0 means execution completed only; failures/not-run return 2.
 
-External Confirm/Evidence and persistent workers are not implemented.
+For confirmation: zenbench pair plan.json --mode confirm
+Freeze blocks >= 5, aa=true, checked output, and metric.resolution (positive
+absolute timing-error bound in the extracted unit before divide_by). Add:
+  "confirmation": {"margin_pct":1.0,"control_margin_pct":1.0,
+    "family_confidence":0.95,"scope":"inputs-v1","accept":"non_inferiority"}
+accept: improvement | equivalence | non_inferiority (default).
+Bonferroni-adjusted t intervals use whole-block log ratios; declared timing
+error widens endpoints. All planned blocks, verified placement, strict sampled
+resources and A/A equivalence are required. Confirm exits 0 for acceptance,
+1 for regression, 2 for invalid/inconclusive/incomplete/not-run. No Confirm
+resume, outlier trimming, optional stopping or A/A bias subtraction.
+Short processes without a complete OS observation remain invalid; use a fixed
+longer internal work budget or Iterate. A/A cannot exclude candidate-only bias.
+Assumptions: independent approximately normal block log ratios; unchanged work.
+Persistent workers and numeric-axis regression fits are not implemented.
 Full contract: docs/external-process.md

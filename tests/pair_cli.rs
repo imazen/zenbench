@@ -379,3 +379,41 @@ fn json_and_command_correctness_contracts_are_enforced() {
         std::fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[test]
+fn confirmation_requires_frozen_contract_and_never_accepts_unverified_placement() {
+    let root = root();
+    let path = plan(&root, "candidate");
+    let missing = cli(&root)
+        .arg("pair")
+        .arg(&path)
+        .args(["--mode", "confirm", "--dry-run"])
+        .output()
+        .unwrap();
+    assert_eq!(missing.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("confirmation object"));
+    let mut p: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    p["blocks"] = json!(5);
+    p["metric"]["resolution"] = json!(0.001);
+    p["confirmation"] = json!({"margin_pct":1.0,"control_margin_pct":1.0,"family_confidence":0.95,"scope":"fixture"});
+    std::fs::write(&path, serde_json::to_vec(&p).unwrap()).unwrap();
+    let output = cli(&root)
+        .arg("pair")
+        .arg(&path)
+        .args(["--mode", "confirm", "--output"])
+        .arg(root.join("confirmed"))
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    let packet = read(&root, "confirmed");
+    assert_eq!(packet["mode"], "confirm");
+    assert_eq!(packet["invocations"].as_array().unwrap().len(), 15);
+    assert_eq!(packet["summaries"][0]["verdict"], "invalid");
+    assert!(
+        packet["summaries"][0]["validity_issues"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("unverified CPU placement"))
+    );
+    assert_eq!(packet["summaries"][0]["interval"]["blocks"], 5);
+}

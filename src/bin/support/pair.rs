@@ -1,4 +1,7 @@
 //! CLI-only fresh-process comparisons. A child invocation is one observation.
+mod analysis;
+mod interval;
+use analysis::{exit_code, summarize};
 mod metric;
 mod plan;
 use plan::{Arm, Case, Check, Plan, expand, resolve_path};
@@ -31,18 +34,26 @@ struct Invocation {
     observations: Vec<Value>,
     artifacts: BTreeMap<PathBuf, String>,
     correctness: Option<Value>,
+    #[serde(default)]
+    priority: Value,
 }
 #[derive(Serialize, Deserialize)]
 struct Packet {
     kind: String,
+    #[serde(default = "iterate")]
+    mode: String,
     schema: u32,
     fingerprint: String,
     plan: Plan,
     identities: Value,
+    #[serde(default)]
+    context: Value,
     seed: u64,
     schedule: Vec<Vec<Vec<usize>>>,
     invocations: Vec<Invocation>,
     summaries: Vec<Value>,
+    #[serde(default)]
+    decision: Value,
     complete: bool,
     placement: Value,
     elapsed_seconds: f64,
@@ -60,15 +71,27 @@ pub(crate) struct Options<'a> {
     pub mode: &'a str,
 }
 
+fn iterate() -> String {
+    "iterate".into()
+}
+
 pub(crate) fn run(options: Options<'_>) -> Result<i32, String> {
-    if options.mode != "iterate" {
-        return Err("external Confirm/Evidence is not implemented; pair supports exploratory --mode=iterate only".into());
+    if !matches!(options.mode, "iterate" | "confirm") {
+        return Err("pair mode must be iterate or confirm".into());
+    }
+    if options.mode == "confirm" && options.resume.is_some() {
+        return Err(
+            "confirmation cannot resume or pool attempts; run a fresh fixed experiment".into(),
+        );
     }
     let plan_file = options.plan.canonicalize().map_err(|e| e.to_string())?;
     let base = plan_file.parent().ok_or("plan has no parent directory")?;
     let mut plan: Plan =
         serde_json::from_slice(&read_limited(&plan_file)?).map_err(|e| e.to_string())?;
     plan.validate()?;
+    if options.mode == "confirm" && plan.confirmation.is_none() {
+        return Err("--mode=confirm requires a predeclared confirmation object in the plan".into());
+    }
     if let Some(filter) = options.case {
         plan.cases.retain(|c| c.id == filter);
     }
@@ -125,10 +148,12 @@ pub(crate) fn run(options: Options<'_>) -> Result<i32, String> {
         })
         .collect();
     let identity = json!({"files":identities,"inherited_env":recorded_env,"inherited_env_complete":plan.clean_env,"provenance_limit":"Only explicitly selected inherited environment values are retained. Shared libraries and undeclared runtime assets are not identified."});
-    let fingerprint = digest(
-        &serde_json::to_vec(&json!({"plan":plan,"identity":identity}))
-            .map_err(|e| e.to_string())?,
-    );
+    let fingerprint_record = if options.mode == "iterate" {
+        json!({"plan":plan,"identity":identity})
+    } else {
+        json!({"plan":plan,"identity":identity,"mode":options.mode})
+    };
+    let fingerprint = digest(&serde_json::to_vec(&fingerprint_record).map_err(|e| e.to_string())?);
     let placement = serde_json::to_value(zenbench::platform::check_cpu_placement()?)
         .map_err(|e| e.to_string())?;
     let mut prior = if let Some(path) = options.resume {
@@ -193,7 +218,7 @@ pub(crate) fn run(options: Options<'_>) -> Result<i32, String> {
         }
     }
     if options.dry_run {
-        println!("{}", serde_json::to_string_pretty(&json!({"fingerprint":fingerprint,"mode":"iterate","plan":plan,"identities":identity,"placement":placement,"seed":seed,"schedule":schedule,"launches":launches,"invocation_count":launches.len(),"output":output,"runtime_estimate":null,"inference":"exploratory; no acceptance decision"})).unwrap());
+        println!("{}", serde_json::to_string_pretty(&json!({"fingerprint":fingerprint,"mode":options.mode,"plan":plan,"identities":identity,"placement":placement,"seed":seed,"schedule":schedule,"launches":launches,"invocation_count":launches.len(),"output":output,"runtime_estimate":null,"inference":"exploratory; no acceptance decision"})).unwrap());
         return Ok(0);
     }
     let start = Instant::now();
@@ -216,19 +241,25 @@ pub(crate) fn run(options: Options<'_>) -> Result<i32, String> {
     eprintln!("[zenbench pair] attempt retained at {}", output.display());
     let mut packet = Packet {
         kind: "zenbench_pair".into(),
+        mode: options.mode.into(),
         schema: 1,
         fingerprint,
         plan,
         identities: identity,
+        context: json!({"testbed":zenbench::platform::detect_testbed(),"started_unix_ns":now().to_string(),
+            "runner_sha256":digest_file(&std::env::current_exe().map_err(|e|e.to_string())?)?,
+            "runner_version":env!("CARGO_PKG_VERSION"),
+            "supervisor_priority":priority(std::process::id()),"priority_policy":"inherited; programs must not change priority during timing"}),
         seed,
         schedule,
         invocations: Vec::new(),
         summaries: Vec::new(),
+        decision: Value::Null,
         complete: false,
         placement,
         elapsed_seconds: 0.0,
         resume_from: options.resume.map(Path::to_path_buf),
-        commands: json!({"decode":"zenbench read packet.json.gz --format json","compare":"zenbench pair-diff BEFORE.json.gz AFTER.json.gz","export":"zenbench read packet.json.gz --format csv"}),
+        commands: json!({"decode":"zenbench data read packet.json.gz --format json","compare":"zenbench data pair-diff BEFORE.json.gz AFTER.json.gz","export":"zenbench data read packet.json.gz --format csv"}),
     };
     // Planned experiment and complete order are durable before the first launch.
     write_json(&output.join("experiment.json"), &packet)?;
@@ -272,6 +303,7 @@ pub(crate) fn run(options: Options<'_>) -> Result<i32, String> {
                     observations: Vec::new(),
                     artifacts: BTreeMap::new(),
                     correctness: None,
+                    priority: Value::Null,
                 };
                 append(&mut journal, &event)?;
                 let attempt = invoke(
@@ -285,6 +317,7 @@ pub(crate) fn run(options: Options<'_>) -> Result<i32, String> {
                     start,
                     deadline,
                     &packet.placement,
+                    packet.mode == "confirm",
                     &mut event,
                 );
                 match attempt {
@@ -303,7 +336,14 @@ pub(crate) fn run(options: Options<'_>) -> Result<i32, String> {
                 append(&mut journal, &event)?;
                 let can_continue = event.continuation_safe;
                 packet.invocations.push(event);
-                if !can_continue {
+                if !can_continue
+                    || packet
+                        .invocations
+                        .iter()
+                        .map(|i| i.observations.len())
+                        .sum::<usize>()
+                        > 100_000
+                {
                     break 'experiment;
                 }
             }
@@ -332,17 +372,18 @@ pub(crate) fn run(options: Options<'_>) -> Result<i32, String> {
     }
     packet.summaries = summarize(&packet);
     packet.complete = (0..packet.plan.cases.len()).all(|i| case_complete(&packet, i));
+    packet.decision = decision(&packet);
     packet.elapsed_seconds = start.elapsed().as_secs_f64();
     save(&output.join("packet.json.gz"), &packet)?;
     fs::write(output.join("selected.csv"), csv(&packet)).map_err(|e| e.to_string())?;
     println!("{}", report(&packet));
     eprintln!(
-        "[zenbench pair] evidence: {}\n[zenbench pair] decode: zenbench read {} --format json\n[zenbench pair] selected export: {}",
+        "[zenbench pair] evidence: {}\n[zenbench pair] decode: zenbench data read {} --format json\n[zenbench pair] selected export: {}",
         output.join("packet.json.gz").display(),
         output.join("packet.json.gz").display(),
         output.join("selected.csv").display()
     );
-    Ok(if packet.complete { 0 } else { 2 })
+    Ok(exit_code(&packet))
 }
 
 fn env_key(key: &std::ffi::OsStr) -> OsString {
@@ -431,6 +472,7 @@ fn invoke(
     start: Instant,
     deadline: Duration,
     placement: &Value,
+    confirm: bool,
     event: &mut Invocation,
 ) -> Result<(), String> {
     let fields = fields(case, dir);
@@ -448,7 +490,6 @@ fn invoke(
         .stdin(Stdio::null())
         .stdout(File::create(dir.join("stdout.txt")).map_err(|e| e.to_string())?)
         .stderr(File::create(dir.join("stderr.txt")).map_err(|e| e.to_string())?);
-    event.observations.push(observation(monitor));
     let before = serde_json::to_value(zenbench::platform::check_cpu_placement()?)
         .map_err(|e| e.to_string())?;
     if &before != placement {
@@ -460,17 +501,71 @@ fn invoke(
         return Err("total deadline exhausted; invocation not started".into());
     }
     std::thread::sleep(settle);
+    event.observations.push(observation(monitor));
+    if start.elapsed() >= deadline {
+        return Err("total deadline exhausted during admission observation".into());
+    }
     let began = Instant::now();
     event.continuation_safe = false;
-    let result = super::supervisor::run(
-        command,
-        Duration::from_secs(arm.timeout_seconds).min(deadline.saturating_sub(start.elapsed())),
-        admission,
-        None,
-        &[dir.join("stdout.txt"), dir.join("stderr.txt")],
-        &mut event.process_id,
-    );
-    event.wall_seconds = began.elapsed().as_secs_f64();
+    let mut child_priority = Value::Null;
+    let done = std::sync::atomic::AtomicBool::new(false);
+    let child_pid = std::sync::atomic::AtomicU32::new(0);
+    let result = std::thread::scope(|scope| {
+        let observer = scope.spawn(|| {
+            use std::sync::atomic::Ordering;
+            let mut observations = Vec::new();
+            while confirm && !done.load(Ordering::Acquire) {
+                let pid = child_pid.load(Ordering::Acquire);
+                if pid == 0 {
+                    std::thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
+                let mut sample = observe(monitor, &[pid], "during");
+                // The worker may have exited during this OS counter window.
+                // Retain it, but do not mislabel unassignable CPU as foreign.
+                // A fixed fresh boundary window follows after the thread joins.
+                if observations.is_empty() {
+                    // sysinfo needs a prior process sample to attribute CPU.
+                    // Never interpret a newly discovered worker's zero delta
+                    // as proof that the first interval had no worker activity.
+                    sample["phase"] = json!("start_transition");
+                    sample["used_for_admission"] = json!(false);
+                }
+                if done.load(Ordering::Acquire) {
+                    sample["phase"] = json!("exit_transition");
+                    sample["used_for_admission"] = json!(false);
+                }
+                observations.push(sample);
+                if observations.len() >= 10000 {
+                    observations.push(json!({"phase":"observation_limit","clean":false,"used_for_admission":true}));
+                    break;
+                }
+            }
+            observations
+        });
+        let result = super::supervisor::run_observed(
+            command,
+            Duration::from_secs(arm.timeout_seconds).min(deadline.saturating_sub(start.elapsed())),
+            admission,
+            None,
+            &[dir.join("stdout.txt"), dir.join("stderr.txt")],
+            &mut event.process_id,
+            &mut |pid| {
+                if child_priority.is_null() {
+                    child_priority = priority(pid);
+                }
+                child_pid.store(pid, std::sync::atomic::Ordering::Release);
+                Ok(())
+            },
+        );
+        event.wall_seconds = began.elapsed().as_secs_f64();
+        done.store(true, std::sync::atomic::Ordering::Release);
+        event
+            .observations
+            .extend(observer.join().expect("resource observer panicked"));
+        result.map(|outcome| outcome.status)
+    });
+    event.priority = child_priority;
     event.observations.push(observation(monitor));
     let status = result.map_err(|e| e.to_string())?;
     event.continuation_safe = true;
@@ -535,9 +630,50 @@ fn invoke(
     }
     Ok(())
 }
+fn priority(pid: u32) -> Value {
+    #[cfg(unix)]
+    {
+        match Command::new("ps")
+            .args(["-o", "ni=", "-p", &pid.to_string()])
+            .output()
+        {
+            Ok(out) if out.status.success() => {
+                let text = String::from_utf8_lossy(&out.stdout);
+                match text.trim().parse::<i32>() {
+                    Ok(nice) => json!({"nice":nice,"source":"ps ni","qos_verified":false}),
+                    Err(_) => {
+                        json!({"unavailable":"process exited or priority could not be parsed"})
+                    }
+                }
+            }
+            _ => json!({"unavailable":"OS priority query failed"}),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        json!({"unavailable":"native priority query not implemented","policy":"inherited"})
+    }
+}
 fn observation(monitor: &zenbench::platform::SystemMonitor) -> Value {
-    let state = monitor.snapshot();
-    json!({"observed_unix_ns":now().to_string(),"cpu_load":state.cpu_load,"available_ram_bytes":state.available_ram_bytes,"heavy_process_count":state.heavy_process_count,"cpu_temp_c":state.cpu_temp_c,"cleanliness_certified":false})
+    observe(monitor, &[std::process::id()], "boundary")
+}
+fn observe(monitor: &zenbench::platform::SystemMonitor, workers: &[u32], phase: &str) -> Value {
+    let began = Instant::now();
+    let state = monitor.snapshot_excluding_processes(workers);
+    let config = zenbench::GateConfig::strict();
+    let clean = state.cpu_load.is_finite()
+        && state.cpu_load <= config.max_cpu_load
+        && state.heavy_process_count <= config.max_heavy_processes
+        && state.available_ram_bytes >= config.min_available_ram_bytes
+        && state
+            .cpu_temp_c
+            .is_none_or(|t| t.is_finite() && t <= config.max_cpu_temp_c.unwrap())
+        && began.elapsed() <= Duration::from_secs(2);
+    json!({"observed_unix_ns":now().to_string(),"sample_duration_ns":began.elapsed().as_nanos().min(u64::MAX as u128) as u64,
+        "phase":phase,"cpu_load":state.cpu_load,"available_ram_bytes":state.available_ram_bytes,
+        "heavy_process_count":state.heavy_process_count,"cpu_temp_c":state.cpu_temp_c,
+        "policy":"whole-host-strict-v1","used_for_admission":true,"clean":clean,"cleanliness_certified":false})
 }
 fn check_block(
     packet: &mut Packet,
@@ -640,51 +776,6 @@ fn case_complete(packet: &Packet, case: usize) -> bool {
         .collect();
     rows.len() == expected && rows.iter().all(|i| i.status == "completed")
 }
-fn summarize(packet: &Packet) -> Vec<Value> {
-    let mut summaries = Vec::new();
-    for (ci, case) in packet.plan.cases.iter().enumerate() {
-        for arm in 1..packet.plan.candidates.len() + 1 + usize::from(packet.plan.aa) {
-            let mut ratios = Vec::new();
-            for block in 0..packet.plan.blocks {
-                let rows: Vec<_> = packet
-                    .invocations
-                    .iter()
-                    .filter(|i| i.case == ci && i.block == block)
-                    .collect();
-                // An incomplete block is not paired, even when two arms survived.
-                if rows.len() != packet.plan.candidates.len() + 1 + usize::from(packet.plan.aa)
-                    || rows.iter().any(|i| i.status != "completed")
-                {
-                    continue;
-                }
-                let mean = |a| {
-                    let r = rows.iter().find(|i| i.arm == a).unwrap();
-                    r.values_ns
-                        .iter()
-                        .map(|v| v / r.values_ns.len() as f64)
-                        .sum::<f64>()
-                };
-                ratios.push(mean(arm).ln() - mean(0).ln());
-            }
-            let n = ratios.len();
-            let avg = if n == 0 {
-                None
-            } else {
-                Some(ratios.iter().sum::<f64>() / n as f64)
-            };
-            let spread = if n < 2 {
-                None
-            } else {
-                let avg = avg.unwrap();
-                Some(
-                    (ratios.iter().map(|r| (r - avg).powi(2)).sum::<f64>() / (n - 1) as f64).sqrt(),
-                )
-            };
-            summaries.push(json!({"case":case.id,"arm":packet.plan.candidates.get(arm-1).map(|a|a.id.as_str()).unwrap_or("__aa"),"complete_blocks":n,"planned_blocks":packet.plan.blocks,"mean_log_ratio":avg,"latency_change_pct":avg.map(|r|r.exp_m1()*100.0).filter(|v|v.is_finite()),"log_ratio_sd":spread,"inference":"exploratory","control_present":packet.plan.aa,"correctness_checked":!matches!(packet.plan.check,Check::Unchecked{..})}));
-        }
-    }
-    summaries
-}
 fn schedule(cases: usize, blocks: usize, arms: usize, seed: u64) -> Vec<Vec<Vec<usize>>> {
     let mut state = seed;
     let mut next = || {
@@ -783,11 +874,13 @@ fn load(path: &Path) -> Result<Packet, String> {
         return load_interrupted(path);
     }
     let bytes = packet_bytes(path)?;
-    let packet: Packet = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    let mut packet: Packet = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
     if packet.kind != "zenbench_pair" || packet.schema != 1 {
         return Err("unsupported external-process packet schema".into());
     }
     validate_packet(&packet)?;
+    packet.summaries = summarize(&packet);
+    packet.decision = decision(&packet);
     Ok(packet)
 }
 fn verify_artifacts(packet: &Packet) -> Result<(), String> {
@@ -800,22 +893,34 @@ fn verify_artifacts(packet: &Packet) -> Result<(), String> {
     }
     Ok(())
 }
+fn decision(packet: &Packet) -> Value {
+    json!({"accepted":packet.mode == "confirm" && exit_code(packet) == 0,
+        "exit_code":exit_code(packet),"mode":packet.mode,"model_conditional":true,
+        "accept":packet.plan.confirmation.as_ref().map(|c| &c.accept)})
+}
 fn csv(packet: &Packet) -> String {
     let quote = |v: &Value| format!("\"{}\"", v.as_str().unwrap_or("").replace('"', "\"\""));
     let mut out = String::from(
-        "case,arm,complete_blocks,planned_blocks,latency_change_pct,log_ratio_sd,inference,control_present,correctness_checked\n",
+        "case,arm,complete_blocks,planned_blocks,latency_change_pct,log_ratio_sd,inference,control_present,correctness_checked,lower_pct,upper_pct,verdict,ratio_median,ratio_min,ratio_mad\n",
     );
     for s in &packet.summaries {
         out.push_str(&format!(
-            "{},{},{},{},{},{},exploratory,{},{}\n",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
             quote(&s["case"]),
             quote(&s["arm"]),
             s["complete_blocks"],
             s["planned_blocks"],
             s["latency_change_pct"],
             s["log_ratio_sd"],
+            quote(&s["inference"]),
             s["control_present"],
-            s["correctness_checked"]
+            s["correctness_checked"],
+            s["interval"]["lower_pct"],
+            s["interval"]["upper_pct"],
+            quote(&s["verdict"]),
+            s["paired_ratio"]["median"],
+            s["paired_ratio"]["min"],
+            s["paired_ratio"]["mad"]
         ));
     }
     out
@@ -844,12 +949,15 @@ fn report(packet: &Packet) -> String {
         })
         .count();
     format!(
-        "zenbench_pair schema=1 inference=exploratory complete={} fingerprint={}\nplacement={} invocations_with_observed_cpu_load_above_5pct={}\n{}\n{failures}Positive change means slower. Dispersion is between blocks, not a confidence interval.\nAdmission does not certify clean resources. Exit 0 means execution completed only.",
+        "zenbench_pair schema=1 mode={} complete={} fingerprint={} decision={}\nplacement={} invocations_with_observed_cpu_load_above_5pct={}\n{}\n{failures}Positive change means slower. Intervals assume independent approximately normal block log ratios.\nIterate exit 0 means execution completed only; Confirm requires valid observations and A/A equivalence.\nDetails: {}",
+        packet.mode,
         packet.complete,
         packet.fingerprint,
+        decision(packet),
         packet.placement["status"],
         observed_busy,
-        csv(packet)
+        csv(packet),
+        serde_json::to_string(&packet.summaries).unwrap()
     )
 }
 pub(crate) fn read(path: &Path, format: &str) -> Result<String, String> {
@@ -905,6 +1013,12 @@ fn validate_packet(packet: &Packet) -> Result<(), String> {
         return Err("unsupported external-process packet schema".into());
     }
     packet.plan.validate()?;
+    if !matches!(packet.mode.as_str(), "iterate" | "confirm")
+        || (packet.mode == "confirm"
+            && (packet.plan.confirmation.is_none() || packet.resume_from.is_some()))
+    {
+        return Err("invalid retained confirmation contract".into());
+    }
     if packet.complete && !(0..packet.plan.cases.len()).all(|ci| case_complete(packet, ci)) {
         return Err("packet claims completion with missing or invalid invocations".into());
     }
@@ -984,5 +1098,168 @@ fn load_interrupted(path: &Path) -> Result<Packet, String> {
     validate_packet(&packet)?;
     packet.summaries = summarize(&packet);
     packet.complete = (0..packet.plan.cases.len()).all(|ci| case_complete(&packet, ci));
+    packet.decision = decision(&packet);
     Ok(packet)
+}
+
+#[cfg(test)]
+mod confirmation_tests {
+    use super::*;
+    fn packet() -> Packet {
+        let arm = |id| json!({"id":id,"program":"fixture","revision":"oracle"});
+        let plan: Plan=serde_json::from_value(json!({"schema":1,"baseline":arm("base"),"candidates":[arm("edit")],
+            "cases":[{"id":"one"}],"metric":{"extract":{"kind":"prefix","prefix":"TIME "},"unit":"ns","expected":2,"resolution":0.001},
+            "check":{"kind":"files","paths":["result.bin"]},"warmup":"fixture","blocks":5,
+            "confirmation":{"margin_pct":1.0,"control_margin_pct":1.0,"family_confidence":0.95,"scope":"oracle"}})).unwrap();
+        plan.validate().unwrap();
+        let mut packet = Packet {
+            kind: "zenbench_pair".into(),
+            mode: "confirm".into(),
+            schema: 1,
+            fingerprint: String::new(),
+            plan,
+            identities: Value::Null,
+            context: Value::Null,
+            seed: 1,
+            schedule: schedule(1, 5, 3, 1),
+            invocations: Vec::new(),
+            summaries: Vec::new(),
+            decision: Value::Null,
+            complete: true,
+            placement: json!({"status":"enforced_uniform"}),
+            elapsed_seconds: 0.0,
+            resume_from: None,
+            commands: Value::Null,
+        };
+        for block in 0..5 {
+            for (order, arm) in packet.schedule[0][block].iter().copied().enumerate() {
+                packet.invocations.push(Invocation {
+                    case: 0,
+                    block,
+                    arm,
+                    order,
+                    output: PathBuf::new(),
+                    status: "completed".into(),
+                    error: None,
+                    values_ns: if arm == 1 {
+                        vec![80.0, 100.0]
+                    } else {
+                        vec![90.0, 110.0]
+                    },
+                    wall_seconds: 0.0,
+                    exit_code: Some(0),
+                    process_id: Some(1),
+                    continuation_safe: true,
+                    observations: vec![
+                        json!({"phase":"boundary","clean":true,"used_for_admission":true,"policy":"whole-host-strict-v1"}),
+                        json!({"phase":"during","clean":true,"used_for_admission":true,"policy":"whole-host-strict-v1"}),
+                        json!({"phase":"boundary","clean":true,"used_for_admission":true,"policy":"whole-host-strict-v1"}),
+                    ],
+                    artifacts: BTreeMap::new(),
+                    correctness: Some(json!("same")),
+                    priority: Value::Null,
+                });
+            }
+        }
+        packet
+    }
+    fn analyze(p: &mut Packet) -> i32 {
+        p.summaries = summarize(p);
+        exit_code(p)
+    }
+    #[test]
+    fn fixed_block_decisions_and_indivisible_repetitions() {
+        let mut p = packet();
+        assert_eq!(analyze(&mut p), 0);
+        assert_eq!(p.summaries[0]["verdict"], "improvement");
+        assert_eq!(p.summaries[0]["interval"]["blocks"], 5);
+        assert_eq!(p.summaries[0]["interval"]["comparisons_in_family"], 2);
+        for i in &mut p.invocations {
+            if i.arm == 1 {
+                i.values_ns = vec![110.0, 130.0];
+            }
+        }
+        assert_eq!(analyze(&mut p), 1);
+        assert_eq!(p.summaries[0]["verdict"], "regression");
+        for i in &mut p.invocations {
+            if i.arm == 1 {
+                i.values_ns = vec![90.0, 110.0];
+            }
+        }
+        assert_eq!(analyze(&mut p), 0);
+        assert_eq!(p.summaries[0]["verdict"], "equivalent");
+    }
+    #[test]
+    fn incomplete_confirmation_contracts_are_refused_before_execution() {
+        for (pointer, value) in [
+            ("/blocks", json!(4)),
+            ("/aa", json!(false)),
+            ("/metric/resolution", json!(0)),
+            ("/confirmation/control_margin_pct", json!(0)),
+            ("/confirmation/scope", json!("")),
+            ("/confirmation/accept", json!("p_value")),
+            ("/confirmation/family_confidence", json!(1)),
+            ("/check", json!({"kind":"unchecked","reason":"exploration"})),
+        ] {
+            let mut value_plan = serde_json::to_value(packet().plan).unwrap();
+            *value_plan.pointer_mut(pointer).unwrap() = value;
+            let plan: Plan = serde_json::from_value(value_plan).unwrap();
+            assert!(plan.validate().is_err(), "accepted invalid field {pointer}");
+        }
+    }
+    #[test]
+    fn declared_acceptance_rule_is_not_replaced_by_significance() {
+        let mut p = packet();
+        p.plan.confirmation.as_mut().unwrap().accept = "equivalence".into();
+        assert_eq!(analyze(&mut p), 2); // An improvement does not establish equivalence.
+        p.plan.confirmation.as_mut().unwrap().accept = "improvement".into();
+        assert_eq!(analyze(&mut p), 0);
+        for i in &mut p.invocations {
+            if i.arm == 1 {
+                i.values_ns = vec![90.0, 110.0];
+            }
+        }
+        assert_eq!(analyze(&mut p), 2); // Equivalence does not establish improvement.
+    }
+    #[test]
+    fn failed_control_noise_and_missing_data_cannot_accept() {
+        let mut p = packet();
+        for i in &mut p.invocations {
+            if i.arm == 2 {
+                i.values_ns = vec![95.0, 115.0];
+            }
+        }
+        assert_eq!(analyze(&mut p), 2);
+        assert_eq!(p.summaries[0]["verdict"], "inconclusive");
+        let mut p = packet();
+        p.invocations[0].observations[1]["clean"] = json!(false);
+        assert_eq!(analyze(&mut p), 2);
+        assert_eq!(p.summaries[0]["verdict"], "invalid");
+        let mut p = packet();
+        p.invocations.pop();
+        p.complete = false;
+        assert_eq!(analyze(&mut p), 2);
+        assert_eq!(p.summaries[0]["complete_blocks"], 4);
+        let mut p = packet();
+        p.invocations[0].status = "failed".into();
+        assert_eq!(analyze(&mut p), 2);
+        assert_eq!(p.summaries[0]["complete_blocks"], 4);
+        let mut p = packet();
+        p.placement["status"] = json!("unrestricted");
+        assert_eq!(analyze(&mut p), 2);
+    }
+    #[test]
+    fn resolution_and_all_declared_cells_determine_family() {
+        let mut p = packet();
+        p.plan.metric.resolution = Some(2.0);
+        assert_eq!(analyze(&mut p), 2);
+        assert_eq!(p.summaries[0]["control_equivalent"], false);
+        let mut p = packet();
+        p.plan.cases.push(p.plan.cases[0].clone());
+        p.plan.cases[1].id = "missing".into();
+        p.complete = false;
+        assert_eq!(analyze(&mut p), 2);
+        assert_eq!(p.summaries[0]["interval"]["comparisons_in_family"], 4);
+        assert_eq!(p.summaries[2]["verdict"], "invalid");
+    }
 }

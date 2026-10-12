@@ -7,6 +7,8 @@ type Env = BTreeMap<String, Option<String>>;
 #[serde(deny_unknown_fields)]
 pub(super) struct Plan {
     pub schema: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirmation: Option<Confirmation>,
     pub baseline: Arm,
     pub candidates: Vec<Arm>,
     pub cases: Vec<Case>,
@@ -30,6 +32,22 @@ pub(super) struct Plan {
     pub settle_ms: u64,
     #[serde(default)]
     pub seed: Option<u64>,
+}
+/// Frozen before launching; changing any field changes the experiment identity.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Confirmation {
+    pub margin_pct: f64,
+    pub control_margin_pct: f64,
+    pub family_confidence: f64,
+    pub scope: String,
+    /// Accepted verdict family, frozen with the experiment (default non-inferiority).
+    #[serde(default = "non_inferiority")]
+    pub accept: String,
+}
+
+fn non_inferiority() -> String {
+    "non_inferiority".into()
 }
 fn blocks() -> usize {
     4
@@ -82,6 +100,9 @@ pub(super) struct Metric {
     pub expected: usize,
     #[serde(default = "one")]
     pub divide_by: f64,
+    /// Bound on absolute timing error in the extracted unit, before divide_by.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<f64>,
 }
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -189,6 +210,33 @@ impl Plan {
             }
         }
         self.metric.scale()?;
+        if self
+            .metric
+            .resolution
+            .is_some_and(|r| !r.is_finite() || r <= 0.0)
+        {
+            return Err("metric resolution must be finite and positive".into());
+        }
+        if let Some(c) = &self.confirmation {
+            if !matches!(
+                c.accept.as_str(),
+                "improvement" | "non_inferiority" | "equivalence"
+            ) || self.blocks < 5
+                || !self.aa
+                || matches!(self.check, Check::Unchecked { .. })
+                || self.metric.resolution.is_none()
+                || c.scope.trim().is_empty()
+                || !c.margin_pct.is_finite()
+                || !(0.0..100.0).contains(&c.margin_pct)
+                || !c.control_margin_pct.is_finite()
+                || !(0.0..100.0).contains(&c.control_margin_pct)
+                || c.control_margin_pct == 0.0
+                || !c.family_confidence.is_finite()
+                || !(0.5..1.0).contains(&c.family_confidence)
+            {
+                return Err("confirmation requires >=5 fixed blocks, A/A, checked output, positive metric resolution, scope, margin_pct in [0,100), control_margin_pct in (0,100), family_confidence in [0.5,1)".into());
+            }
+        }
         if self.metric.expected == 0 || self.metric.expected > 1_000_000 {
             return Err("expected metric cardinality must be 1..1000000".into());
         }
