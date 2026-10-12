@@ -500,3 +500,10 @@ api-compatibility:
 cli-workflows-check:
     cargo test --test cli_evidence
     cargo clippy --all-targets -- -D warnings
+
+# Exercise both spellings through main!, not just the normalization helper.
+harness-arguments-check:
+    cargo test --lib plan::
+    cargo test --test harness_arguments
+    cargo test --test harness_arguments --no-default-features
+    cargo clippy --all-targets --features criterion-compat -- -D warnings

@@ -70,7 +70,7 @@ pub use plan::{BenchmarkMode, BenchmarkPlan, ExecutionRecord};
 /// direct use — call via the macros instead.
 #[doc(hidden)]
 pub fn postprocess_result(result: &SuiteResult) {
-    let args: Vec<String> = std::env::args().collect();
+    let args = plan::harness_args();
     let format = args
         .iter()
         .find_map(|a| a.strip_prefix("--format=").map(String::from))
@@ -728,7 +728,7 @@ pub fn parse_pass_args() -> Option<(usize, Aggregation)> {
         ),
     ];
 
-    for arg in std::env::args() {
+    for arg in plan::harness_args() {
         let parsed: Option<(usize, Aggregation, &'static str)> =
             flags.iter().find_map(|(prefix, policy, name)| {
                 arg.strip_prefix(prefix)
@@ -788,7 +788,7 @@ pub fn parse_process_args() -> Option<(usize, Aggregation)> {
         ),
     ];
 
-    for arg in std::env::args() {
+    for arg in plan::harness_args() {
         let parsed: Option<(usize, Aggregation, &'static str)> =
             flags.iter().find_map(|(prefix, policy, name)| {
                 arg.strip_prefix(prefix)
@@ -867,8 +867,8 @@ fn run_processes_planned(
     // Build child argv: strip process flags and post-processing flags
     // (parent handles --format, --save-baseline, --baseline, --update-on-pass
     // on the aggregated result; children just measure and save JSON).
-    let child_args: Vec<String> = std::env::args()
-        .skip(1) // skip argv[0]
+    let child_args: Vec<String> = plan::harness_args()
+        .into_iter()
         .filter(|a| {
             !a.starts_with("--best-of-processes=")
                 && !a.starts_with("--mean-of-processes=")
@@ -1077,14 +1077,9 @@ macro_rules! main {
                 return;
             }
 
-            let group_filter: Option<String> = std::env::args()
-                .find_map(|a| a.strip_prefix("--group=").map(String::from));
             let passes = $crate::parse_pass_args();
 
             let closure = |suite: &mut $crate::Suite| {
-                if let Some(ref filter) = group_filter {
-                    suite.set_group_filter(filter.clone());
-                }
                 $( $func(suite); )+
             };
 
@@ -1106,14 +1101,9 @@ macro_rules! main {
                 return;
             }
 
-            let group_filter: Option<String> = std::env::args()
-                .find_map(|a| a.strip_prefix("--group=").map(String::from));
             let passes = $crate::parse_pass_args();
 
             let closure = |$suite: &mut $crate::Suite| {
-                if let Some(ref filter) = group_filter {
-                    $suite.set_group_filter(filter.clone());
-                }
                 $body
             };
 

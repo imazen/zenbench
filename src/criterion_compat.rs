@@ -483,12 +483,6 @@ macro_rules! criterion_main {
             }
             let mut suite = $crate::Suite::new();
 
-            let group_filter: Option<String> = std::env::args()
-                .find_map(|a| a.strip_prefix("--group=").map(String::from));
-            if let Some(ref filter) = group_filter {
-                suite.set_group_filter(filter.clone());
-            }
-
             $(
                 let criterion = $group();
                 suite.merge(criterion.into_suite());
