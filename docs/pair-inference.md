@@ -97,7 +97,8 @@ schedule 15. These are exact launch counts, not a runtime multiplier. Monitor,
 settle, checker, startup and cleanup costs are all retained in total elapsed time;
 outer invocation wall time is distinct from the internal metric. No general
 wall-time penalty is claimed from those counts. Codec acceptance measurements
-are reported separately with their actual commands and artifact identities.
+are reported in the [acceptance record](pair-acceptance.md) with their actual
+commands and artifact identities.
 
 The optional intercept/slope analysis over a numeric case axis is tracked
 separately in [issue 39](https://github.com/imazen/zenbench/issues/39). It does not

@@ -1,0 +1,195 @@
+{
+  "kind": "zenbench_pair_acceptance_evidence",
+  "schema": 1,
+  "date": "2026-10-12",
+  "source_commit": "ddfc0034b5638a8e17db9061047d62a629a8d94e",
+  "codec_adapter_note": "Encoder plan uses built-in file hashing; the independent audit also checks nonempty identical bytes. The recorded checker hash identifies the generator used for this attempt; adapter_audit_commit identifies the strengthened replay audit. Initial command-checker attempts are also retained.",
+  "codec_revisions": {
+    "profile_ivf": "444cb912",
+    "perf_encode": "224c6bbb",
+    "perf_c_encode": "9292ec8e"
+  },
+  "codec_artifact_hashes": {
+    "profile": "f1e42b49870df6472a8c2bc73a0ce2dfb1e83c4d9614cdc88b9e1d06e05d7d82",
+    "encode": "99c4375589f8adf148169ba953a9deb4693a080596ebc9c09018410546a277b1",
+    "c_encode": "b33b6fa27a961fbc9b309d0afb9ff7445c5aa2130358c5187d9ed4b56319280e",
+    "ivf": "2c97f4fb93f80b56bf16cd15d5e41673be9e2d36f64b66199ba0dfc284cf4f5d",
+    "yuv": "225bfc5a91601175af8ca27ca2742db9b7a494971c6662ab85112d52c348636a",
+    "checker": "a572edeaad71fa578e9648c372987c33ac31106f3acce262245967c6bab27464"
+  },
+  "hardware_performance_claim": false,
+  "records": [
+    {
+      "name": "decoder-protocol",
+      "runner_sha256": "864121ef5b195aeee0e127f75f92db297455098a4ae2876330e2487d91fd99ee",
+      "testbed": {
+        "arch": "x86_64",
+        "cpu_model": "Intel(R) Core(TM) Ultra 7 265K",
+        "logical_cores": 20,
+        "os": "linux",
+        "physical_cores": 20
+      },
+      "packet_sha256": "7469717cf979402869c6cc71a2ca5496e6fe441322671b614148ba0777be15aa",
+      "packet_bytes": 7932,
+      "selected_csv_bytes": 852,
+      "elapsed_seconds": 11.052939175,
+      "invocations": 24,
+      "cases": 2,
+      "blocks": 4,
+      "internal_values_per_invocation": 3,
+      "placement": "unrestricted",
+      "decision": {
+        "accept": null,
+        "accepted": false,
+        "exit_code": 0,
+        "mode": "iterate",
+        "model_conditional": true
+      },
+      "raw_packet": ".zenbench/validation/2026-10-12/codec-hashed-output/decoder/packet.json.gz",
+      "correctness": "positive matching frame/iteration counts and no decode errors; not pixel equivalence"
+    },
+    {
+      "name": "encoder-byte-identity",
+      "runner_sha256": "864121ef5b195aeee0e127f75f92db297455098a4ae2876330e2487d91fd99ee",
+      "testbed": {
+        "arch": "x86_64",
+        "cpu_model": "Intel(R) Core(TM) Ultra 7 265K",
+        "logical_cores": 20,
+        "os": "linux",
+        "physical_cores": 20
+      },
+      "packet_sha256": "0cbeec25e4dce11f3dca11e29724d95846c373b03b30b8efa4e1cb32643f4946",
+      "packet_bytes": 4420,
+      "selected_csv_bytes": 527,
+      "elapsed_seconds": 5.537227016,
+      "invocations": 12,
+      "cases": 1,
+      "blocks": 4,
+      "internal_values_per_invocation": 1,
+      "placement": "unrestricted",
+      "decision": {
+        "accept": null,
+        "accepted": false,
+        "exit_code": 0,
+        "mode": "iterate",
+        "model_conditional": true
+      },
+      "raw_packet": ".zenbench/validation/2026-10-12/codec-hashed-output/encoder/packet.json.gz",
+      "correctness": "SHA-256 equality of result.obu in every complete block"
+    },
+    {
+      "name": "quiet-arm-confirm-synthetic",
+      "runner_sha256": "e1db890e429da6de7a21f8834e43f5f99c5ebcbb921b157758cc47e74eff8842",
+      "testbed": {
+        "arch": "aarch64",
+        "cpu_model": "Neoverse-N1",
+        "logical_cores": 8,
+        "os": "linux",
+        "physical_cores": 8
+      },
+      "packet_sha256": "88bb6033fbe4845805c0a88a3b86a4f65142c445b225b61b979d2e2cd12b878a",
+      "packet_bytes": 5588,
+      "selected_csv_bytes": 477,
+      "elapsed_seconds": 19.460821696,
+      "invocations": 15,
+      "cases": 1,
+      "blocks": 5,
+      "internal_values_per_invocation": 1,
+      "placement": "uniform_hardware",
+      "decision": {
+        "accept": "improvement",
+        "accepted": true,
+        "exit_code": 0,
+        "mode": "confirm",
+        "model_conditional": true
+      },
+      "raw_packet": ".zenbench/validation/2026-10-12/arm-control/attempt/packet.json.gz",
+      "correctness": "synthetic identical output marker"
+    },
+    {
+      "name": "quiet-arm-iterate-synthetic",
+      "runner_sha256": "e1db890e429da6de7a21f8834e43f5f99c5ebcbb921b157758cc47e74eff8842",
+      "testbed": {
+        "arch": "aarch64",
+        "cpu_model": "Neoverse-N1",
+        "logical_cores": 8,
+        "os": "linux",
+        "physical_cores": 8
+      },
+      "packet_sha256": "8bce15b3fe5cddeadbe4d79179b19001791a685ffbdb95f65ca1e85324d992a8",
+      "packet_bytes": 3316,
+      "selected_csv_bytes": 416,
+      "elapsed_seconds": 10.703420015,
+      "invocations": 12,
+      "cases": 1,
+      "blocks": 4,
+      "internal_values_per_invocation": 1,
+      "placement": "uniform_hardware",
+      "decision": {
+        "accept": null,
+        "accepted": false,
+        "exit_code": 0,
+        "mode": "iterate",
+        "model_conditional": true
+      },
+      "raw_packet": ".zenbench/validation/2026-10-12/arm-control/iterate-attempt/packet.json.gz",
+      "correctness": "synthetic identical output marker"
+    }
+  ],
+  "shared_host_diagnostics": [
+    {
+      "packet_sha256": "86cc2110999ac0069c7fac81d8d63acc15178bed1598be09508286263fc795b7",
+      "elapsed_seconds": 16.708957841,
+      "complete": true,
+      "verdicts": [
+        "invalid",
+        "invalid"
+      ],
+      "reason": "foreign resource activity on shared development host"
+    },
+    {
+      "packet_sha256": "017b7f413270b65f47266dcafa32338c9862e1ba72b490982b5cf5643c201980",
+      "elapsed_seconds": 16.695939947,
+      "complete": true,
+      "verdicts": [
+        "invalid",
+        "invalid"
+      ],
+      "reason": "foreign resource activity on shared development host"
+    },
+    {
+      "packet_sha256": "79ba21d7025c369d13f8e1893cf39abc13f8b227d97d1b8fea32321ec3e5d314",
+      "elapsed_seconds": 16.686340273,
+      "complete": true,
+      "verdicts": [
+        "invalid",
+        "invalid"
+      ],
+      "reason": "foreign resource activity on shared development host"
+    }
+  ],
+  "commands": {
+    "decode": [
+      "zenbench",
+      "data",
+      "read",
+      "PACKET",
+      "--format",
+      "json"
+    ],
+    "compare": [
+      "zenbench",
+      "data",
+      "pair-diff",
+      "BEFORE",
+      "AFTER"
+    ],
+    "codec_reproduction": "just pair-codec-acceptance PROFILE ENCODE C_ENCODE INPUT NEW_OUTPUT PROFILE_REV ENCODE_REV C_REV"
+  },
+  "resource_wrapper": {
+    "codec": "run-heavy: done rc=0 17s | peak-RSS 0.06GiB | min-avail 26381MiB | peak-load 0.50",
+    "arm_confirm": "run-heavy: done rc=0 20s | peak-RSS 0.01GiB | min-avail 15010MiB | peak-load 0.32",
+    "arm_iterate": "run-heavy: done rc=0 10s | peak-RSS 0.01GiB | min-avail 15013MiB | peak-load 0.06"
+  },
+  "adapter_audit_commit": "ba4e279d56354b9ddb130b4cf7da9c9e778f9125"
+}

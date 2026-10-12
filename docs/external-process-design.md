@@ -217,8 +217,8 @@ deadline; unsupported cleanup must be documented or rejected, not claimed comple
 3. **Confirmation:** independent numerical oracle for block intervals and timer
    floors; null/known-effect controls; false-acceptance checks under drift,
    correlated blocks, order/carryover effects and incomplete/control-failing data.
-   Whole-process repetitions stay clustered. Confirm remains unavailable until
-   its analysis and validity gates are implemented together.
+   Whole-process repetitions stay clustered. Keep confirmation analysis and its
+   validity gates enabled together; neither can certify a result alone.
 4. **Busy-system evaluation:** isolated controlled experiments with foreign work
    on the selected CPU, SMT sibling, another cache domain and memory bandwidth.
    Measure misleading conclusions, inconclusive outcomes and wall time, including

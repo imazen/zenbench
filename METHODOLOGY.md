@@ -564,9 +564,9 @@ record that limitation.
 The external runner now supports serial randomized fresh-process blocks,
 per-arm environment manifests, metric adapters, correctness contracts, A/A,
 retained failures and artifact-checked resume. It reports one mean per child
-and descriptive paired-block log ratios. It does not perform external
-confirmation inference. In-process fresh-process confirmation still reruns one
-zenbench executable/configuration; `self-compare` still builds and runs two
+and descriptive paired-block log ratios. External Confirm adds fixed-block
+intervals, explicit acceptance rules and A/A equivalence. In-process fresh-process
+confirmation still reruns one zenbench executable/configuration; `self-compare` still builds and runs two
 revisions sequentially. These remain different measurement protocols.
 
 The issue's concrete use cases support the following design requirements:
