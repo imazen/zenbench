@@ -3,6 +3,20 @@ use crate::format::{format_ns, ns_unit, terminal_width};
 use crate::results::{BenchmarkResult, ComparisonResult, SuiteResult};
 use std::io::IsTerminal;
 
+/// Keep guidance visible to first-time callers without repeating it per pass
+/// or supervised child, or adding text to machine-readable stdout.
+pub(crate) fn startup_guidance() {
+    if std::env::var("ZENBENCH_SUBPROCESS").as_deref() == Ok("1") {
+        return;
+    }
+    static PRINTED: std::sync::Once = std::sync::Once::new();
+    PRINTED.call_once(|| {
+        eprintln!(
+            "[zenbench] Guides: zenbench guide | zenbench guide --topic simd | benchmark options: --help"
+        );
+    });
+}
+
 /// Report display style.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReportStyle {

@@ -419,6 +419,7 @@ review-check *test_args="--lib":
 workflow-check:
     cargo fmt -p zenbench -- --check
     cargo test --test cli_evidence
+    cargo test --test cpu_policy startup_guides_precede_refusal_once_and_stay_out_of_child_output
     ZENBENCH_MODE=invalid ZENBENCH_CPU_POLICY=invalid cargo test --bench sorting -- --help
     ZENBENCH_MODE=invalid ZENBENCH_CPU_POLICY=invalid cargo test --bench standalone_only -- -h
     cargo clippy --all-targets --all-features -- -D warnings

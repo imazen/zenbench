@@ -13,6 +13,16 @@ fn cli() -> Command {
 }
 
 #[test]
+fn bare_invocation_surfaces_guides_without_knowing_any_subcommands() {
+    let output = cli().output().unwrap();
+    let text = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(text.contains("zenbench guide"), "{text}");
+    assert!(text.contains("zenbench guide --topic simd"), "{text}");
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
 fn first_use_help_explains_workflows_without_requiring_a_valid_machine_plan() {
     for (args, required) in [
         (

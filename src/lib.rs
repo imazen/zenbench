@@ -752,6 +752,7 @@ pub fn parse_process_args() -> Option<(usize, Aggregation)> {
         print!("{}", include_str!("bench-help.txt"));
         std::process::exit(0);
     }
+    report::startup_guidance();
     plan::validate_harness_args(&args).unwrap_or_else(|e| {
         eprintln!("[zenbench] {e}; use --help for benchmark options and workflows");
         std::process::exit(2);
@@ -821,6 +822,7 @@ pub fn parse_process_args() -> Option<(usize, Aggregation)> {
 /// Composable with passes: `--best-of-processes=3 --best-of-passes=2`
 /// runs 3 OS processes, each doing 2 in-process passes. Total = 6 runs.
 pub fn run_processes(processes: usize, policy: Aggregation) -> SuiteResult {
+    report::startup_guidance();
     let plan = BenchmarkPlan::default().resolve().unwrap_or_else(|e| {
         eprintln!("[zenbench] invalid benchmark plan: {e}");
         std::process::exit(2);

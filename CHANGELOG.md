@@ -18,6 +18,7 @@
 - Strict Windows CPU placement now holds an inherited affinity-limited Job Object, preventing process-mask widening by benchmark code; actual-mask controls cover preexisting Rayon/ordinary threads and child processes (585b0f8d, 95e4042c).
 
 ### Added
+- Surface general and SIMD guide commands on benchmark startup, once before configuration validation; bare CLI invocation and benchmark help also show the entry points.
 - `zenbench guide --topic simd` and a source-linked archmage/magetypes optimization workflow drawn from zenav1-svt probes: dispatch boundaries, differential correctness, assembly inspection and application confirmation.
 - Offline `zenbench guide`, workflow-oriented command help, and benchmark `--help` before registration; source-revision, retained-binary, provenance and profiling guidance.
 - Iterate/Confirm/Evidence plans, dry-run inspection, fixed-process paired/Welch inference, separate versioned reanalysis, and retained experiment/attempt manifests. CLI/environment override suite defaults. Independent SciPy controls and fail-closed promotion tests cover the decision contract (dfc72892, c60b7b62, 0acfd44a).

@@ -6,6 +6,11 @@ and `filter` below with your benchmark target and group. The installed CLI and
 the benchmark executable have separate argument parsers: Cargo forwards benchmark
 arguments after `--`; a retained executable takes them directly.
 
+A bare `zenbench` invocation lists the commands and both guide entry points.
+Benchmark launches also print a short guide hint to stderr before configuration
+validation, once per process with supervised children suppressed. Structured
+result stdout stays separate; no first-use marker or user configuration is needed.
+
 | Question | Workflow | What it establishes |
 |---|---|---|
 | Which local edit looks promising? | Iterate; compare arms in one group | Exploratory paired measurements |

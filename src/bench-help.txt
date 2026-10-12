@@ -61,3 +61,4 @@ Commit selected summaries: zenbench snapshot FILE --output benchmarks/baseline.c
 Keep referenced raw objects in your artifact store; CSV alone cannot be compared.
 
 More offline guidance, retained builds and profiling limits: zenbench guide
+Archmage/magetypes optimization workflow: zenbench guide --topic simd

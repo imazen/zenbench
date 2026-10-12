@@ -19,6 +19,58 @@ fn child_command(executable: impl AsRef<std::ffi::OsStr>) -> Command {
 }
 
 #[test]
+fn startup_guides_precede_refusal_once_and_stay_out_of_child_output() {
+    if std::env::var_os("ZENBENCH_GUIDANCE_TEST_CHILD").is_some() {
+        // The deliberately invalid policy refuses both attempts before callbacks.
+        for _ in 0..2 {
+            let result = std::panic::catch_unwind(|| {
+                run_gated(GateConfig::disabled(), |suite| {
+                    suite.group("must-not-run", |group| {
+                        group.bench("work", |_| panic!("callback must not run"));
+                    });
+                });
+            });
+            let error = result.expect_err("invalid CPU policy was accepted");
+            let message = error.downcast_ref::<String>().unwrap();
+            assert!(message.contains("invalid CPU policy"), "{message}");
+        }
+        return;
+    }
+    for supervised in [false, true] {
+        let mut child = child_command(std::env::current_exe().unwrap());
+        child
+            .args([
+                "--exact",
+                "startup_guides_precede_refusal_once_and_stay_out_of_child_output",
+                "--nocapture",
+            ])
+            .env("ZENBENCH_GUIDANCE_TEST_CHILD", "1")
+            .env("ZENBENCH_MODE", "iterate")
+            .env("ZENBENCH_CPU_POLICY", "invalid-test-policy")
+            .env_remove("ZENBENCH_PIN")
+            .env_remove("ZENBENCH_CPU_SET")
+            .env_remove("ZENBENCH_SUBPROCESS");
+        if supervised {
+            child.env("ZENBENCH_SUBPROCESS", "1");
+        }
+        let output = child.output().unwrap();
+        let text = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(
+            text.matches("[zenbench] Guides:").count(),
+            usize::from(!supervised)
+        );
+        if !supervised {
+            assert!(text.contains("zenbench guide --topic simd"), "{text}");
+            assert!(
+                text.find("[zenbench] Guides:").unwrap() < text.find("invalid CPU policy").unwrap()
+            );
+        }
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("[zenbench] Guides:"));
+    }
+}
+
+#[test]
 fn fresh_processes_use_independent_execution_orders() {
     if std::env::var_os("ZENBENCH_ORDER_TEST_CHILD").is_some() {
         let result = run_gated(GateConfig::disabled(), |suite| {

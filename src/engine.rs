@@ -90,6 +90,7 @@ impl Engine {
 
     /// Run all benchmarks and return results.
     pub fn run(mut self) -> SuiteResult {
+        crate::report::startup_guidance();
         let plan = self.suite.plan.clone().resolve().unwrap_or_else(|e| {
             eprintln!("[zenbench] invalid benchmark plan: {e}; use --help or zenbench guide");
             std::process::exit(2);
