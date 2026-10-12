@@ -78,7 +78,9 @@ pub(crate) fn run(options: Options<'_>) -> Result<i32, String> {
     let inherited: BTreeMap<OsString, OsString> = if plan.clean_env {
         BTreeMap::new()
     } else {
-        std::env::vars_os().collect()
+        std::env::vars_os()
+            .map(|(key, value)| (env_key(&key), value))
+            .collect()
     };
     let mut arms: Vec<_> = plan.arms().cloned().collect();
     if plan.aa {
@@ -117,7 +119,7 @@ pub(crate) fn run(options: Options<'_>) -> Result<i32, String> {
             (
                 k.clone(),
                 inherited
-                    .get(&OsString::from(k))
+                    .get(&env_key(std::ffi::OsStr::new(k)))
                     .map(|v| v.to_string_lossy().into_owned()),
             )
         })
@@ -156,6 +158,7 @@ pub(crate) fn run(options: Options<'_>) -> Result<i32, String> {
     // Validate every expansion before admission. Dry-run carries exact argv/env
     // overrides; inherited secrets are never dumped.
     let mut launches = Vec::new();
+    let mut expanded_bytes = 0usize;
     for (case_index, case) in plan.cases.iter().enumerate() {
         for (block, order) in schedule[case_index].iter().enumerate() {
             for (position, &arm) in order.iter().enumerate() {
@@ -178,7 +181,14 @@ pub(crate) fn run(options: Options<'_>) -> Result<i32, String> {
                         ))
                     })
                     .collect::<Result<_, String>>()?;
-                launches.push(json!({"case":case.id,"block":block,"order":position,"arm":arms[arm].id,"program":arms[arm].program,"args":args,"cwd":arms[arm].cwd,"output":dir,"env_overrides":overrides,"timeout_seconds":arms[arm].timeout_seconds}));
+                let launch = json!({"case":case.id,"block":block,"order":position,"arm":arms[arm].id,"program":arms[arm].program,"args":args,"cwd":arms[arm].cwd,"output":dir,"env_overrides":overrides,"timeout_seconds":arms[arm].timeout_seconds});
+                expanded_bytes += serde_json::to_vec(&launch)
+                    .map_err(|e| e.to_string())?
+                    .len();
+                if expanded_bytes > 8 * 1024 * 1024 {
+                    return Err("expanded launch plan exceeds 8 MiB; select fewer cases".into());
+                }
+                launches.push(launch);
             }
         }
     }
@@ -335,6 +345,13 @@ pub(crate) fn run(options: Options<'_>) -> Result<i32, String> {
     Ok(if packet.complete { 0 } else { 2 })
 }
 
+fn env_key(key: &std::ffi::OsStr) -> OsString {
+    #[cfg(windows)]
+    if let Some(key) = key.to_str() {
+        return OsString::from(key.to_ascii_uppercase());
+    }
+    key.to_owned()
+}
 fn environment(
     inherited: &BTreeMap<OsString, OsString>,
     plan: &Plan,
@@ -347,7 +364,7 @@ fn environment(
         match value {
             Some(value) => {
                 env.insert(
-                    key.into(),
+                    env_key(std::ffi::OsStr::new(key)),
                     if substitute {
                         expand(value, fields)?
                     } else {
@@ -357,7 +374,7 @@ fn environment(
                 );
             }
             None => {
-                env.remove(&OsString::from(key));
+                env.remove(&env_key(std::ffi::OsStr::new(key)));
             }
         }
     }
@@ -372,7 +389,7 @@ fn executable(
         return resolve_path(cwd, name);
     }
     let path = env
-        .get(&OsString::from("PATH"))
+        .get(&env_key(std::ffi::OsStr::new("PATH")))
         .ok_or("bare executable requires PATH or an explicit path")?;
     for directory in std::env::split_paths(path) {
         let candidate = cwd.join(directory).join(name);
@@ -467,9 +484,13 @@ fn invoke(
     {
         return Err("CPU placement changed after invocation".into());
     }
-    let stdout =
-        String::from_utf8(read_limited(&dir.join("stdout.txt"))?).map_err(|e| e.to_string())?;
-    event.values_ns = metric::extract(&plan.metric, &stdout, event.wall_seconds * 1e9)?;
+    let metric_text = if matches!(plan.metric.extract, plan::Extract::Wall) {
+        String::new()
+    } else {
+        String::from_utf8(read_limited(&dir.join(plan.metric.stream.file()))?)
+            .map_err(|e| e.to_string())?
+    };
+    event.values_ns = metric::extract(&plan.metric, &metric_text, event.wall_seconds * 1e9)?;
     match &plan.check {
         Check::Files { paths } => {
             let mut hashes = BTreeMap::new();
@@ -485,8 +506,14 @@ fn invoke(
             }
             event.correctness = Some(json!(hashes));
         }
-        Check::Json { prefix, pointers } => {
-            let rows: Vec<_> = stdout
+        Check::Json {
+            prefix,
+            pointers,
+            stream,
+        } => {
+            let check_text = String::from_utf8(read_limited(&dir.join(stream.file()))?)
+                .map_err(|e| e.to_string())?;
+            let rows: Vec<_> = check_text
                 .lines()
                 .filter_map(|s| s.strip_prefix(prefix))
                 .collect();
@@ -727,8 +754,12 @@ fn read_limited(path: &Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 fn write_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
-    fs::write(path, serde_json::to_vec(value).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())
+    let partial = path.with_extension("json.partial");
+    let mut file = File::create_new(&partial).map_err(|e| e.to_string())?;
+    serde_json::to_writer(&mut file, value).map_err(|e| e.to_string())?;
+    file.sync_all().map_err(|e| e.to_string())?;
+    drop(file);
+    fs::rename(partial, path).map_err(|e| e.to_string())
 }
 fn append(file: &mut File, value: &impl Serialize) -> Result<(), String> {
     serde_json::to_writer(&mut *file, value).map_err(|e| e.to_string())?;
@@ -737,13 +768,15 @@ fn append(file: &mut File, value: &impl Serialize) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 fn save(path: &Path, packet: &Packet) -> Result<(), String> {
-    let file = File::create_new(path).map_err(|e| e.to_string())?;
+    let partial = path.with_extension("gz.partial");
+    let file = File::create_new(&partial).map_err(|e| e.to_string())?;
     let mut writer = flate2::write::GzEncoder::new(file, flate2::Compression::default());
     serde_json::to_writer(&mut writer, packet).map_err(|e| e.to_string())?;
     writer
         .finish()
         .and_then(|f| f.sync_all())
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    fs::rename(partial, path).map_err(|e| e.to_string())
 }
 fn load(path: &Path) -> Result<Packet, String> {
     if path.is_dir() {
@@ -788,6 +821,19 @@ fn csv(packet: &Packet) -> String {
     out
 }
 fn report(packet: &Packet) -> String {
+    let failures: String = packet
+        .invocations
+        .iter()
+        .filter_map(|event| {
+            event.error.as_ref().map(|reason| {
+                format!(
+                    "failure {}\n",
+                    json!({"case":event.case,"block":event.block,"arm":event.arm,
+                        "reason":reason,"output":event.output})
+                )
+            })
+        })
+        .collect();
     let observed_busy = packet
         .invocations
         .iter()
@@ -798,7 +844,7 @@ fn report(packet: &Packet) -> String {
         })
         .count();
     format!(
-        "zenbench_pair schema=1 inference=exploratory complete={} fingerprint={}\nplacement={} invocations_with_observed_cpu_load_above_5pct={}\n{}\nPositive change means slower. Dispersion is between blocks, not a confidence interval.\nAdmission does not certify clean resources. Exit 0 means execution completed only.",
+        "zenbench_pair schema=1 inference=exploratory complete={} fingerprint={}\nplacement={} invocations_with_observed_cpu_load_above_5pct={}\n{}\n{failures}Positive change means slower. Dispersion is between blocks, not a confidence interval.\nAdmission does not certify clean resources. Exit 0 means execution completed only.",
         packet.complete,
         packet.fingerprint,
         packet.placement["status"],

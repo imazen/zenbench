@@ -366,7 +366,7 @@ fn main() {
                 wait,
             });
             let code = result.unwrap_or_else(|e| {
-                eprintln!("[zenbench pair] not completed: {e}");
+                eprintln!("{}", serde_json::json!({"kind":"zenbench_pair_failure","schema":1,"reason":e,"exit_code":2}));
                 2
             });
             std::process::exit(code);

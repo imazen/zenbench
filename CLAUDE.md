@@ -219,6 +219,12 @@ Tested via WSL→PowerShell bridge (Windows cargo 1.92 nightly):
 
 ### Known Bugs (SPEEDQ)
 
+The external-pair subprocess fixture must start its line protocol with a newline.
+Single-threaded libtest (including the ARMv7 cross runner) prints an unterminated
+`test ... ` prefix; without that newline the first metric/check row is not a
+protocol row. Retained child stdout reproduced the missing-cardinality failure.
+The fixture now frames its output; extractor expectations and deadlines stay intact.
+
 2026-10-11: macOS ARM CI at fdb4a0f4 failed the unchanged no-default-feature
 `iter_deferred_drop_runs` timing assertion: deferred mean 656937 ns versus
 regular mean 170814 ns. The test excludes deferred deallocation but retains

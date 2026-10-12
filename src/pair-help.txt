@@ -51,6 +51,7 @@ ZENBENCH_CPU_POLICY=unrestricted explicitly permits unverified exploration only.
 Commands must stay in the foreground and join workers. Unix programs must not
 daemonize or leave their process group. No implicit shell is used.
 
+Metrics and JSON checks default to stdout; set stream="stderr" for diagnostic logs.
 Other extractors: tsv (prefix, zero-based column), json (prefix, JSON pointer),
 regex (pattern, capture index), wall (explicit only, unit ns, expected 1).
 Wall timing includes launch, polling and supervisor cleanup; use internal

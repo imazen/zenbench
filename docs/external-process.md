@@ -25,7 +25,9 @@ identities, schedule, placement and the invocation count before running anything
 
 The schema and an executable example are embedded in the
 [offline CLI guide](../src/pair-help.txt). Unknown schema versions and fields
-are errors. Arms have an executable, argv array, cwd, environment set/remove
+are errors. A plan is limited to 10,000 invocations, one million retained metric
+values and 8 MiB of expanded launch descriptions; select fewer cases for larger
+studies. Arms have an executable, argv array, cwd, environment set/remove
 operations, revision annotation and deadline. An environment value of `null`
 removes that key. Both arms derive from the same startup environment snapshot.
 `clean_env: true` instead starts with an empty environment. `record_env` names
@@ -50,12 +52,14 @@ or thread pools.
 ## Metrics, correctness and inference
 
 Extractors support prefix/value lines, TSV columns, JSON-line pointers, regular
-expression capture groups and explicitly selected outer wall time. Prefix/TSV
+expression capture groups and explicitly selected outer wall time. Metrics and
+JSON correctness checks independently select `stream: "stdout"` (default) or
+`stream: "stderr"`. Prefix/TSV
 matching is line-based. A JSON prefix is stripped before parsing that line;
-regular expressions run over the full captured stdout. `expected` is exact
+regular expressions run over the full selected stream. `expected` is exact
 cardinality. Missing, extra, malformed, zero, negative and nonfinite values fail
 the invocation. `unit` accepts ns/us/ms/s; `divide_by` is a positive, predeclared
-work normalization. Normalized vectors are retained, with original stdout.
+work normalization. Normalized vectors are retained, with original stdout/stderr.
 There is no fallback to another metric after extraction fails.
 
 The explicit wall metric includes process launch, completion polling and cleanup

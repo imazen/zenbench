@@ -75,11 +75,28 @@ pub(super) struct Case {
 #[serde(deny_unknown_fields)]
 pub(super) struct Metric {
     pub extract: Extract,
+    #[serde(default)]
+    pub stream: Stream,
     /// Units of the extracted value; normalization produces ns per work unit.
     pub unit: String,
     pub expected: usize,
     #[serde(default = "one")]
     pub divide_by: f64,
+}
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum Stream {
+    #[default]
+    Stdout,
+    Stderr,
+}
+impl Stream {
+    pub(super) fn file(&self) -> &'static str {
+        match self {
+            Self::Stdout => "stdout.txt",
+            Self::Stderr => "stderr.txt",
+        }
+    }
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -99,6 +116,8 @@ pub(super) enum Check {
     Json {
         prefix: String,
         pointers: Vec<String>,
+        #[serde(default)]
+        stream: Stream,
     },
     Command {
         program: PathBuf,
@@ -132,6 +151,15 @@ impl Plan {
             .is_none_or(|n| n > 100_000)
         {
             return Err("plan exceeds 100000 invocations".into());
+        }
+        let invocations =
+            self.blocks * self.cases.len() * (self.candidates.len() + 1 + usize::from(self.aa));
+        if invocations > 10_000
+            || invocations
+                .checked_mul(self.metric.expected)
+                .is_none_or(|n| n > 1_000_000)
+        {
+            return Err("plan exceeds 10000 invocations or 1000000 retained metric values; select fewer cases".into());
         }
         let mut ids = std::collections::BTreeSet::new();
         for arm in self.arms() {
@@ -214,6 +242,14 @@ impl Plan {
     }
 }
 fn validate_env(env: &Env) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let names: std::collections::BTreeSet<_> =
+            env.keys().map(|key| key.to_ascii_uppercase()).collect();
+        if names.len() != env.len() {
+            return Err("duplicate case-insensitive Windows environment keys".into());
+        }
+    }
     for (key, value) in env {
         if key.is_empty()
             || key.contains(['=', '\0'])
@@ -265,4 +301,21 @@ pub(super) fn resolve_path(base: &Path, path: &Path) -> Result<PathBuf, String> 
     base.join(path)
         .canonicalize()
         .map_err(|e| format!("{}: {e}", base.join(path).display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn substitution_is_literal_and_unknown_fields_are_errors() {
+        let fields =
+            BTreeMap::from([("input".into(), "two words; $(echo unused) ${nested}".into())]);
+        assert_eq!(
+            expand("--file=${input}", &fields).unwrap(),
+            "--file=two words; $(echo unused) ${nested}"
+        );
+        assert!(expand("${missing}", &fields).is_err());
+        assert!(expand("${input", &fields).is_err());
+        assert!(expand("bad\0argument", &fields).is_err());
+    }
 }

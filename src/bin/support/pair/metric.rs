@@ -100,6 +100,7 @@ mod tests {
         ] {
             let metric = Metric {
                 extract: adapter,
+                stream: Default::default(),
                 unit: "ms".into(),
                 expected: 2,
                 divide_by: 2.0,
@@ -114,6 +115,7 @@ mod tests {
             extract: Extract::Prefix {
                 prefix: "t=".into(),
             },
+            stream: Default::default(),
             unit: "ns".into(),
             expected: 1,
             divide_by: 1.0,

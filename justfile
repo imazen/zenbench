@@ -453,3 +453,6 @@ install-check:
     target/install-check/bin/zenbench --help
     target/install-check/bin/zenbench guide --topic pair
     target/install-check/bin/zenbench nice --help
+
+pair-cross cross="cross":
+    CROSS_CONTAINER_OPTS="--memory=6g --memory-swap=6g --cpus=2" ZENBENCH_CPU_POLICY=unrestricted {{cross}} test --target armv7-unknown-linux-gnueabihf --all-features --test pair_cli
