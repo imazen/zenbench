@@ -1,0 +1,73 @@
+{
+  "date": "2026-10-12",
+  "source_commit": "86ae07b0a77168b3ffb0eadd2704b7e0688d9fb6",
+  "source_verification": "Compilation inputs match the tested source tree byte-for-byte",
+  "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File examples/windows_native_check.ps1",
+  "raw_log_sha256": "8c6e394b8d226da24839f6288eaf31f921bcae42c8c11e02c9a38b74033dc17f",
+  "cpu": "Snapdragon X Elite X1E78100",
+  "os": "Windows 11 Pro 10.0.26200",
+  "rust_host": "aarch64-pc-windows-msvc",
+  "rust_version": "1.94.0",
+  "runner": {
+    "native_arch_verified": false,
+    "os": "windows",
+    "process_arch": "aarch64",
+    "reported_machine_arch": "arm64",
+    "sha256": "437a629daedca321c355ede56b0a3964620580a9973c8d421ba51aac78016a27",
+    "version": "0.1.10"
+  },
+  "topology": {
+    "classes": [
+      {
+        "cpus": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "logical_cpu_count": 4,
+        "name": "windows_efficiency0_l2bytes12582912",
+        "performance_rank": 0
+      },
+      {
+        "cpus": [
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11
+        ],
+        "logical_cpu_count": 8,
+        "name": "windows_efficiency1_l2bytes12582912",
+        "performance_rank": 1
+      }
+    ],
+    "diagnostic": null,
+    "kind": "asymmetric",
+    "source": "windows_native_topology"
+  },
+  "placement": {
+    "Err": "CPU placement refused: Asymmetric topology; the process is not confined to one known class. Classes: windows_efficiency0_l2bytes12582912=[0, 1, 2, 3]; windows_efficiency1_l2bytes12582912=[4, 5, 6, 7, 8, 9, 10, 11]; process boundary [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]; . Launch with `zenbench exec --cpu-policy performance PROGRAM -- ARGS`, or supply an enabled cpuset/process mask and --cpu-set=IDs. A group affinity mask and ZENBENCH_PIN are insufficient. Inspect `zenbench cpu-info` and `zenbench exec --help`. Exploratory opt-out: --cpu-policy=unrestricted (UNVERIFIED_UNRESTRICTED; cannot confirm or promote baselines)."
+  },
+  "controls": {
+    "heap_phases_and_failures": "passed",
+    "fleet_cli_and_os_memory": "passed",
+    "existing_rayon_and_descendant_confinement": "passed",
+    "independent_native_topology_oracle": "passed",
+    "auto_refusal_ranked_and_explicit_class_selection": "passed"
+  },
+  "build_envelope": {
+    "jobs": 1,
+    "priority": "idle",
+    "limit_bytes": 3221225472,
+    "peak_job_commit_bytes": 773992448
+  },
+  "limits": [
+    "No native latency or repeatability claim",
+    "Multiple processor groups remain unsupported",
+    "OS performance ranks are not measured speed ratios"
+  ]
+}

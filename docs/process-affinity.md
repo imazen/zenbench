@@ -344,3 +344,15 @@ transcript, and reports peak job commit bytes separately from heap measurements.
 PowerShell's execution-policy override applies only to the command's process;
 the recipe does not change the machine's policy. These are correctness controls,
 not a repeatability study or evidence of production enrollment.
+
+Windows ARM64 discovers every active core's Windows efficiency class and
+last-level data/unified cache size through `GetLogicalProcessorInformationEx`.
+It preserves intermediate performance ranks and unequal cache sizes. A missing
+or inconsistent core/cache inventory, multiple processor groups, oversized
+response or repeatedly changing query size refuses placement. Acquisition uses
+a scoped FFI exception; parsing and allocation/retry logic use safe Rust.
+
+Windows ARM64 CI compares the discovered classes against the independent native
+PowerShell oracle, then starts fresh processes for automatic policy, both ranked
+policies and every explicit class. Those controls create Rayon workers before
+placement and assert the actual masks after attempts to widen them.

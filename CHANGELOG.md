@@ -18,6 +18,7 @@
      Add items here as you discover them. Do NOT ship these piecemeal — batch them. -->
 
 ### Fixed
+- Windows ARM64 now discovers OS performance ranks and last-level cache sizes using a scoped native query with safe parsing; independent native CI verifies discovery and enforced class selection (9e6021a4, 86ae07b0).
 - Serialize completed reservation cleanup with admission scans to prevent Windows file-deletion races.
 - Measurement schedules now receive independent seeds across groups and fresh processes; recorded round orders preserve the realized schedule (b40ac4a3).
 - Strict Windows CPU placement now holds an inherited affinity-limited Job Object, preventing process-mask widening by benchmark code; actual-mask controls cover preexisting Rayon/ordinary threads and child processes (585b0f8d, 95e4042c).

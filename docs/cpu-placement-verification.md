@@ -362,3 +362,19 @@ build job at idle priority under a 3 GiB process-tree Job Object cap; Windows
 reported peak job commit of 2,675,781,632 bytes, a build-envelope counter rather
 than heap or RSS. A 2 GiB cap stopped compilation of the Windows API dependency,
 including when debug symbols and incremental state were disabled.
+
+### Native ARM64 discovery enabled
+
+At `86ae07b0`, the scoped Windows query and safe parser pass the independent
+native core/cache oracle on the same Snapdragon. Fresh-process controls pass
+automatic refusal of the mixed classes, performance/efficiency selection,
+every explicit class, and actual-mask checks after existing Rayon workers try
+to widen their masks. Heap/fleet and descendant-confinement controls also pass.
+The [enabled-backend evidence](../benchmarks/winarm_topology_enabled_2026-10-12.json)
+records exact source/binary identities and observations. These are functional
+controls; they do not measure native latency or repeatability. The bounded
+validation process tree reported peak job commit of 773,992,448 bytes.
+
+Native Windows ARM64 CI now requires those oracle and class-selection controls.
+All host test jobs also exercise malformed records, incomplete inventories,
+unequal cache sizes at equal performance rank, and the allocation/retry protocol.

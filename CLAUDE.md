@@ -355,3 +355,8 @@ CPU topology because Windows discovery only compiled the x86 CPUID path.
 The independent native oracle reports two efficiency classes and three shared
 L2 domains. Default placement correctly refuses the unknown result. Evidence:
 `benchmarks/winarm_native_controls_2026-10-12.json`.
+
+The approved Windows ARM64 topology backend now acquires the OS inventory and
+uses a bounds-checked parser shared with captured-buffer tests. Native CI checks
+core/cache discovery against the independent PowerShell oracle and exercises
+class selection and existing Rayon confinement. Multiple groups remain refused.

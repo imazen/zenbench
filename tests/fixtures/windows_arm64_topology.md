@@ -18,5 +18,7 @@ last-level cache. An additional mutation holds the performance ranks equal while
 changing one cache domain's size, verifying that cache asymmetry remains visible.
 Malformed lengths, duplicate cores, truncated records and multiple groups refuse.
 
-The parser is currently compiled only for tests. It does not connect an OS query
-or change production placement until the Windows FFI exception is approved.
+The parser is shared by host-independent tests and native Windows ARM64
+discovery. The approved FFI module only acquires an aligned byte buffer; checked
+slices parse it. Native CI compares discovery with the independent PowerShell
+oracle and exercises class selection and pre-existing Rayon worker confinement.
