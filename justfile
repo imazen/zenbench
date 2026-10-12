@@ -511,3 +511,34 @@ harness-arguments-check:
     cargo test --test harness_arguments
     cargo test --test harness_arguments --no-default-features
     cargo clippy --all-targets --features criterion-compat -- -D warnings
+
+# External fixed-block inference, independent numerical oracle, and process contracts.
+pair-confirm-check:
+    cargo test --bin zenbench
+    cargo test --test pair_cli
+    cargo clippy --all-features --all-targets -- -D warnings
+
+# Run the real decoder and Rust/C encoder adapter acceptance on prebuilt artifacts.
+# Revisions describe artifacts; this recipe never builds the codecs.
+pair-codec-acceptance profile encode cencode input output profile_rev encode_rev c_rev:
+    cargo build --bin zenbench
+    python3 examples/pair_codec_acceptance.py prepare --profile {{profile}} --encode {{encode}} --c-encode {{cencode}} --input {{input}} --output {{output}} --profile-rev {{profile_rev}} --encode-rev {{encode_rev}} --c-rev {{c_rev}}
+    ZENBENCH_CPU_POLICY=unrestricted target/debug/zenbench pair {{output}}/decoder.json --output {{output}}/decoder
+    ZENBENCH_CPU_POLICY=unrestricted target/debug/zenbench pair {{output}}/encoder.json --output {{output}}/encoder
+    python3 examples/pair_codec_acceptance.py audit {{output}}/decoder/packet.json.gz
+    python3 examples/pair_codec_acceptance.py audit {{output}}/encoder/packet.json.gz
+
+# Synthetic metrics test native admission/decision plumbing; not hardware speed.
+pair-native-control output:
+    python3 examples/pair_control.py {{output}}
+    target/debug/zenbench exec --cpu-policy performance target/debug/zenbench -- pair {{output}}/plan.json --mode confirm --output {{output}}/attempt
+
+# Linux CI/lab fallback when the user manager lacks delegated cpuset control.
+# Creates one memory-capped scope, then drops back to the invoking account.
+pair-native-control-scope plan output cpus:
+    sudo -n systemd-run --scope --quiet --property=AllowedCPUs={{cpus}} --property=MemoryMax=12G --property=MemorySwapMax=0 runuser -u "$(id -un)" -- target/debug/zenbench pair {{plan}} --mode confirm --output {{output}}
+
+pair-full-check:
+    ZENBENCH_CPU_POLICY=unrestricted ZENBENCH_NO_SAVE=1 cargo test --all-features
+    ZENBENCH_CPU_POLICY=unrestricted ZENBENCH_NO_SAVE=1 cargo test --no-default-features
+    just api-doc-check
