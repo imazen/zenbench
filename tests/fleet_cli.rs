@@ -13,17 +13,19 @@ fn cli() -> Command {
     }
 }
 fn root() -> PathBuf {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let p = std::env::current_exe()
         .unwrap()
         .parent()
         .unwrap()
         .join(format!(
-            "fleet-{}-{}",
+            "fleet-{}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
     std::fs::create_dir(&p).unwrap();
     p

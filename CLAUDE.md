@@ -219,6 +219,10 @@ Tested via WSL→PowerShell bridge (Windows cargo 1.92 nightly):
 
 ### Known Bugs (SPEEDQ)
 
+Windows CI observed identical clock readings in concurrent fleet CLI tests,
+colliding their scratch directories before any assertion ran. Fixture names
+now include a process-local atomic sequence as well as PID and timestamp.
+
 2026-10-12: Windows x64 and ARM64 integration runs failed admission with
 `Access is denied` while an earlier reservation completed. Cleanup deleted
 ticket/guard files outside the queue mutex while waiters could open them. Cleanup
