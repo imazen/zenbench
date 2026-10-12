@@ -1,0 +1,68 @@
+zenbench methodology guide
+
+CHOOSE THE CLAIM
+Iterate is the default: short in-process, randomized serial comparisons for
+edit feedback. Exit 0 means execution succeeded; local bootstrap intervals are
+exploratory. Confirm uses a fixed fresh-process plan (five processes by default),
+process-level intervals and a declared margin. Evidence adds a named study cell,
+not automatic publication readiness or fleet coverage.
+
+BUSY WORKSTATIONS
+Ordinary load observations do not stall every Iterate round. Keep them enabled
+for context; results can guide investigation without authorizing acceptance.
+The cooperative lock and named-rival scan can still wait. There is no bounded
+multi-agent reservation scheduler. --no-busy-gate is an explicit exploration-only
+escape, removing observations required for confirmation.
+
+Keep equivalent work, a small targeted group and nearby A/B samples. Inspect
+magnitude, drift and spread. An unstable/small result can remain unresolved.
+A/A controls diagnose noise; they do not prove interference affects both arms
+equally. SMT, caches, memory bandwidth and package power remain shared even with
+a CPU mask. Random order does not make arbitrary background load harmless.
+
+Preserve verified CPU-class placement even for busy iteration. Use cpu-info and
+exec --help; unrestricted is an exploratory opt-out, never a confirmation remedy.
+Confirm currently requires fresh clean whole-host observations, CPU load <=5%
+and zero foreign heavy processes. These conservative checks can reject a useful
+CPU partition, and cannot certify continuous quietness on selected cores. Freeze
+a candidate before scheduling a confirmation slot; retain unsuccessful attempts.
+Do not keep rerunning or adding samples until a desired result appears.
+
+WHAT THE NUMBERS MEAN
+The callback defines the timed work. Setup, allocation, teardown, dispatch,
+warmup, pooling and input reuse must match the intended application question.
+Black-box output does not replace correctness checks or inspecting optimized code.
+Warmup does not prove maximum frequency. Observed minimum is not universal speed.
+
+Confirm uses one untrimmed mean per arm per process, then log-ratio Student-t
+intervals within a binary or Welch log-latency intervals across saved populations.
+Bonferroni covers that comparison family, not all edits/cells in a study.
+Independent approximately normal process log values are assumptions, not automatic
+guarantees of fresh execution. Many rounds do not create independent processes.
+Invalid/inconclusive confirmation is exit 2, confirmed regression is exit 1.
+
+EXTERNAL BINARIES / DIFFERENT ENVIRONMENTS
+A first-class randomized two-binary/per-arm-environment runner is not implemented.
+Separate retained binaries can produce packets for compare; self-compare runs
+revisions sequentially. Neither implements external paired-block scheduling.
+Issue 29's proposed runner must preserve invocation boundaries for multiple
+internal timings, correctness checks, all failures and environment interventions.
+A/A's observed difference is a diagnostic, not a calibrated significance rule.
+
+COST AND REPRODUCIBILITY
+The retained Linux controls measured Iterate 0.766s and five-process Confirm
+3.828s, one invocation each. These are one fixture, excluding compilation and
+container launch, not estimates for your workload or a busy fleet. Measure your
+actual cells and account for warmup, admission, failed attempts and build time.
+Full evidence stays in ignored gzip objects; export selected stable CSV summaries.
+Read/reanalyze packets instead of rerunning solely to change presentation.
+Executable hashes identify bytes; runtime Git HEAD is not a build manifest.
+Retain build flags/toolchain, source state and input identity alongside evidence.
+
+The full paper provides equations, timing boundaries, measured-cost provenance,
+source references, limitations and the issue 29 design review:
+https://github.com/imazen/zenbench/blob/main/METHODOLOGY.md
+
+Commands: zenbench guide | zenbench guide --topic simd | benchmark --help
+
+Earlier entry point: https://github.com/imazen/zenbench/blob/main/docs/measurement-protocol.md

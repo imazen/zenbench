@@ -1,5 +1,8 @@
 zenbench workflow guide
 
+Measurement assumptions, busy workstations and external A/B:
+  zenbench guide --topic methodology
+
 EDIT / EXPLORE
   cargo bench --bench kernels -- --help
   cargo bench --bench kernels -- --group=filter

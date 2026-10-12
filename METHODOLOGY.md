@@ -1,1138 +1,869 @@
-# Methodology
+# Zenbench measurement protocol and its limits
 
-How zenbench measures, what it can and can't tell you, and why.
+This is the current methodology for the unreleased Iterate/Confirm/Evidence
+implementation, audited against commit `798315f6694a0123378e01eb024250e8db2ecc56`
+on 2026-10-12. It describes what the implementation measures, how decisions are
+made, and where an experiment still needs its owner's judgment. The source map
+at the end identifies the implementation behind each part of the protocol.
+Historical measurements below name their own revisions; they are not benchmarks
+of that audit commit or of a released version.
 
-## What we do
+For commands, start with [workflows](docs/benchmark-workflows.md),
+[mode configuration](docs/benchmark-modes.md), and `zenbench guide`.
+For SIMD development, use the [archmage/magetypes workflow](docs/simd-optimization.md).
 
-Zenbench interleaves benchmark execution: in each measurement round, every
-benchmark in a comparison group runs once, in shuffled order. This means
-round N of benchmark A and round N of benchmark B execute under nearly
-identical system conditions — same thermal state, same background load,
-same memory pressure. Paired statistical tests on the per-round differences
-have far more power to detect real changes than unpaired tests on
-sequentially-collected data.
+Contents: [question and units](#1-define-the-question-before-choosing-the-statistic),
+[modes](#2-three-modes-two-levels-of-inference),
+[placement and admission](#3-placement-warmup-and-admission),
+[measurement algorithm](#4-within-process-measurement-algorithm),
+[exploratory statistics](#5-exploratory-summaries),
+[confirmation equations](#6-fixed-process-confirmation-exact-estimand-and-decision),
+[busy workstations](#7-useful-measurements-on-a-busy-development-machine),
+[external A/B](#8-external-executables-and-environment-ab-issue-29),
+[evidence](#9-evidence-provenance-and-small-version-control-diffs),
+[measured cost](#10-measured-wall-time-and-storage-cost),
+[limitations](#11-threats-to-validity-and-what-remains-external),
+[references](#12-research-context-and-references).
 
-This design is informed by several papers and tools. Here's what we took
-from each, what we chose differently, and what we can't address.
+## Abstract
 
-## Influences and cross-reference
+Zenbench measures competing functions in randomized, serial rounds inside a
+process. This shortens the time between observations of competing implementations
+and makes round-paired diagnostics useful during optimization. It does not make
+the observations independent or remove all interference. The default Iterate
+mode prioritizes a short feedback loop and labels its comparisons exploratory.
+Confirm repeats a fixed experiment in fresh processes and bases acceptance on
+process-level uncertainty, a declared practical margin, complete retained samples,
+and placement/resource checks. Evidence uses the same protocol for a named study
+cell. Neither mode substitutes for workload correctness, representative inputs,
+build provenance, or an appropriate machine population.
 
-### Mytkowicz et al. — "Producing Wrong Data Without Doing Anything Obviously Wrong" (ASPLOS 2009)
+The October 2026 changes removed a blocking resource-counter refresh from each
+round, reduced exploratory defaults, introduced fixed-process confirmation, and
+retained losslessly compressed evidence separately from small Git summaries.
+An unchanged 200-round control went from 41.229 seconds with the old monitor to
+a 1.967-second median with the new monitor. A separate final-mode control took
+0.766 seconds in Iterate and 3.828 seconds in five-process Confirm. These are
+local measurements with different purposes, not a general speedup prediction.
 
-The paper that started the conversation. Mytkowicz showed that changing
-*linking order* or *environment variable size* — things nobody thinks
-about — can flip benchmark conclusions. A program linked one way is 8%
-faster; linked another way, 7% slower. Same source, same compiler, same
-flags.
+## 1. Define the question before choosing the statistic
 
-The root cause: caches and branch predictors are sensitive to code and
-data alignment. A single binary is one sample from the space of possible
-memory layouts.
+A benchmark needs an explicit estimand: the quantity the experiment intends to
+estimate. Zenbench's usual observation is elapsed nanoseconds divided by a batch's
+iteration count. It measures the callback's chosen boundary. That might be a hot
+kernel, a complete operation including allocation, a synchronization workload,
+or work submitted to a pool and awaited to completion. These are different
+questions, even when they call the same implementation.
 
-**What we took**: Randomized execution order per round, so no benchmark
-consistently benefits from running first or last.
+Define and retain:
 
-**What we can't do**: We don't randomize code layout, link order, or
-stack alignment. That requires runtime re-randomization (see STABILIZER
-below). A zenbench run measures one binary's layout. If you need
-layout-independent results, run the benchmark from multiple builds or use
-STABILIZER.
+- the semantic operation and correctness contract, input identities and weights;
+- included work: dispatch, setup, allocation, teardown, I/O and synchronization;
+- cache/reuse regime, pool size, concurrency and CPU/cache class;
+- compiler/build configuration and the executable bytes actually run;
+- baseline, candidate, comparisons of interest, practical margin and stopping plan.
 
-### Curtsinger & Berger — "STABILIZER" (ASPLOS 2013)
+Correctness comes first. A faster implementation that changes required output,
+quality, frame count or work performed is not an optimization under that contract.
+For approximate algorithms, predeclare the permitted error or quality constraint;
+byte equality is appropriate only when the contract requires it. The general
+closure API cannot verify these conditions automatically.
 
-STABILIZER re-randomizes code, stack, and heap layout at runtime, so
-repeated runs sample different layouts. The Central Limit Theorem then
-applies: the distribution of means converges to normal, enabling valid
-confidence intervals.
+Within a process, descriptive rows summarize round-level per-iteration latencies.
+Confirmation estimates a geometric ratio of process mean latencies, described in
+section 6. It does not estimate tail latency, a production request distribution,
+energy, or a universal speed of an algorithm. A hot repeated kernel and a service
+under concurrent requests require different experiments. Throughput labels are
+only as correct as the work count supplied by the benchmark owner.
 
-Their key finding: LLVM's -O3 vs -O2 performance difference is
-indistinguishable from random noise once layout bias is eliminated.
-Without randomization, a single binary's lucky alignment can make -O3
-look 8% faster.
+### Units of repetition
 
-**What we took**: The insight that 25+ runs are needed for stable
-distributions. Our minimum of 30 rounds before convergence checks
-reflects this.
+| Unit | Meaning | What it can expose |
+|---|---|---|
+| Iteration | One requested unit of callback work | Cost inside the chosen timing boundary |
+| Sample/batch | One timed batch, possibly many iterations | Timer amortization and short-term variation |
+| Round | One sample of every arm in shuffled order | Nearby comparisons under changing conditions |
+| Process | Fresh execution, containing warmup and rounds | Variation between executions of a fixed executable |
+| Build | A separately produced executable | Compiler, link and layout differences |
+| Study cell | Workload × machine/class × configuration | The declared scope of a claim |
 
-**What we can't do**: Runtime re-randomization requires instrumenting
-the binary. Zenbench measures the binary you give it, layout and all.
-This is a real limitation — your results include layout effects. For
-most comparative benchmarks (A vs B in the same binary), layout effects
-affect both sides similarly, so paired differences cancel them out.
-But absolute numbers ("this function takes 260ns") include layout luck.
+Many iterations in one process do not become many independent process samples.
+Many processes from one build do not measure variation between builds. Pooling
+hardware classes does not create a representative population unless that
+population and its weights were defined in advance.
 
-### Chen & Revels — "Robust Benchmarking in Noisy Environments" (2016)
+## 2. Three modes, two levels of inference
 
-Chen and Revels argue that the **minimum** is the best estimator of true
-function speed because measurement noise is strictly additive — system
-interrupts, cache misses from background processes, and timer jitter
-only add time, never subtract it. The minimum is the observation least
-contaminated by noise.
+| Mode | Default execution | Intended use | Acceptance meaning |
+|---|---|---|---|
+| Iterate | One process, up to 30 rounds per group, 100 ms warmup per arm | Edit, inspect assembly, compare local alternatives | Exit 0 means execution succeeded |
+| Confirm | Five fresh processes, fixed group rounds, normally 30 each | Evaluate a frozen candidate or save a baseline population | Process-level validity and margin decision |
+| Evidence | Confirm plus required scope identity | One cell of a reproducible study | Same inference; matrix coverage remains external |
 
-They also show that empirical timing distributions are heavy-tailed, so
-mean and median are both distorted. Their strategy is implemented in
-Julia's BenchmarkTools package.
+Confirm/Evidence require a caller-supplied workload ID, at least three processes,
+and at least two fixed rounds. Defaults are a 1% practical margin, 95% family
+confidence and a 300-second supervisor deadline. Five processes is a default
+budget, not a power guarantee. Two rounds is an accepted minimum, not a claim
+that every workload stabilizes after two rounds. A scope identifies a cell;
+it does not automatically run every architecture, cache class or corpus.
 
-**What we took**: We show `min` as a separate column — the fastest
-observed run, the floor. We also auto-scale iteration counts to keep
-each sample above timer resolution, matching their approach.
+The plan resolves CLI settings before environment settings before suite defaults.
+`--dry-run` prints the resolved plan, selected groups, placement, executable hash
+and data directory. Registration has already run, but benchmark callbacks have
+not. Budgets are not predictions of elapsed time.
 
-**Where we diverge**: We show both min and mean because they answer
-different questions:
+Exploration can be adaptive. Confirmation freezes the number of processes and
+rounds and retains every observation. It cannot reuse an Iterate packet as if
+it came from a fixed confirmation plan. Immediate-mode criterion compatibility
+also lacks the required process evidence. Legacy best-of repetition policies
+remain descriptive and cannot authorize baseline promotion.
 
-- **min**: "How fast can this function run?" — best case, closest to
-  true speed. Useful for small, deterministic functions.
-- **mean**: "How fast does it usually run?" — includes real-world
-  variance from memory allocation, cache behavior, etc. Useful for
-  capacity planning and functions with genuine performance variance.
+A useful development cycle is: establish correctness, explore cheaply, choose
+one candidate and a margin, freeze the experiment, then confirm on fresh data.
+Repeatedly looking at a confirmation and adding samples until it passes is a
+different statistical procedure; the current intervals do not support it.
 
-For paired comparisons, we use bootstrap CI on the paired differences,
-not the minimum. The minimum of a *difference* isn't as clean a concept
-as the minimum of a single measurement.
+## 3. Placement, warmup and admission
 
-**Caveat on min**: Tratt (2019) warns that for large benchmarks with
-genuine performance variance (garbage collection, thread scheduling,
-I/O), the minimum is misleading — it's an unrepeatable best case, not
-a representative measurement. Our `min` column is most useful for small,
-deterministic functions. If `min` and `mean` diverge significantly,
-the function has real variance and `mean` is the better reference.
+### CPU classes and process boundaries
 
-### Kalibera & Jones — "Rigorous Benchmarking in Reasonable Time" (ISMM 2013)
+By default, unknown or asymmetric CPU topology requires an explicit verified
+uniform placement. Hybrid performance/efficiency cores and unequal last-level
+cache capacities can change results. More cache does not imply that a class is
+faster for every workload. Run selected classes separately and retain their
+identities. `zenbench cpu-info` reports the observed topology.
 
-Kalibera and Jones model benchmarks as having hierarchical sources of
-variation: VM invocations, iterations within invocations, and runs
-within iterations. They show how to optimally distribute measurement
-effort across these levels to maximize precision per unit time.
+Thread affinity confines one thread. It does not retroactively configure an
+opaque Rayon pool. Strict placement therefore needs a process boundary:
 
-Their survey found 71% of benchmarking papers fail to report any measure
-of variation.
-
-**What we took**: We always report uncertainty — the 95% CI on paired
-differences, MAD for measurement spread, and footnotes for
-quality issues.
-
-**What we don't do**: We model a single level of variation (rounds
-within one process invocation). We don't capture cross-invocation
-variation from ASLR, JIT warmup, or OS state. For JIT-compiled
-languages this matters; for ahead-of-time compiled Rust it matters less,
-but ASLR still applies. If cross-invocation variance matters to you,
-run zenbench multiple times and compare results.
-
-### Tratt — "What Metric to Use When Benchmarking?" (2022)
-
-Tratt's key point: there is no universally correct metric. Different
-questions need different statistics.
-
-| Question | Best metric |
+| Platform | Current boundary and limitation |
 |---|---|
-| How fast *can* this run? | Minimum |
-| How fast *does* it usually run? | Median or mean |
-| How much total capacity do I need? | Mean |
-| Is A faster than B? | CI on paired differences |
+| Linux | An effective cgroup cpuset restricts the process's threads; the launcher can use a delegated controller or an existing suitable boundary. A `taskset` mask alone is insufficient to prevent a library widening its affinity. |
+| Supported Windows x86/x64 topology | An inherited affinity-limited Job Object constrains the process and descendants. Multiple processor groups and Windows ARM core-class discovery are not supported for strict class selection. |
+| macOS | Mach affinity tags and pthread QoS are advisory. They do not certify P/E placement; strict class binding is unsupported. |
 
-He also demonstrates that wall-clock time and CPU instructions can move
-in opposite directions (multithreaded grep: fewer wall-clock seconds,
-more instructions). The metric you choose determines the conclusion.
+Group thread-affinity constraints must fit within the process boundary. Zenbench
+applies them to its own workers and checks placement around rounds. Ordinary
+preexisting workers need the process boundary; already separate services need
+their own controls. A privileged actor changing containment between checks is
+outside the enforcement model.
 
-**What we took**: We report min and mean as separate columns, and the
-comparison uses bootstrap CI. The user picks what matters to them.
+A boundary is not a reservation: unrelated tasks can still use those CPUs, SMT
+siblings, caches, memory controllers and package power. Equal cache capacity
+also does not prove that threads share one LLC or NUMA domain. Explicit
+`unrestricted` permits exploration and records unverified placement; it cannot
+confirm a baseline. [Placement details and native controls](docs/process-affinity.md)
+describe the OS-specific evidence.
 
-### nanobench (Ankerl)
+### Warmup is a declared workload phase
 
-nanobench adds 0-20% random noise to iteration counts to prevent
-aliasing with periodic system events — timer interrupts (~1ms),
-scheduler quanta (~4ms), and similar. Without this, a benchmark that
-takes exactly one timer quantum per iteration will systematically
-measure the timer period, not the function.
+Before measurement, each arm repeatedly runs with one requested iteration until
+its warmup duration is reached. The default is 100 ms per arm. Iteration estimation
+then makes additional untimed calls. macOS also runs a separate 100 ms demand
+loop before calibration. None of these certify maximum frequency, thermal steady
+state, warmed external workers, or a workload-independent steady distribution.
+A callback longer than the requested duration can exceed that budget.
 
-**What we took**: ±20% iteration jitter per round, same rationale.
+Warmup changes the question being measured: caches, branch history, allocator
+state and data reuse can differ from a first request. Set a regime appropriate
+to deployment. The `cold_start` option requests one iteration and cache spoiling;
+it does not create a new process for every round or reset page cache, predictors,
+allocator, or external services. Explicit warmup still precedes sampling. The
+`cold_start_ns` field is the first iteration-estimation call **after** that warmup,
+not a certified cold-machine observation.
 
-### Google Benchmark
+### Resource observations
 
-Google Benchmark is the most widely used C++ microbenchmark library.
-Several design comparisons are worth understanding.
+The engine uses a background sampler, primed before warmup. Rounds read its latest
+observation without a counter-refresh sleep. The sample includes whole-host CPU
+load, available RAM, available temperature information and foreign heavy-process
+counts. CPU accounting excludes the benchmark owner and explicitly registered
+workers without counting Linux task entries twice. Foreign work remains visible.
+Generic `SystemMonitor` callers without that ownership contract retain their
+normal global-load behavior.
 
-**Interleaving**: Google Benchmark added random interleaving as an
-opt-in flag (`--benchmark_enable_random_interleaving`), reporting ~40%
-variance reduction. Their approach divides iterations into chunks and
-interleaves chunks from different benchmarks. In zenbench, interleaving
-is the core design — always on, at the round level, with full shuffle.
+Local defaults allow 20% CPU load, require 512 MiB available RAM, check 85 °C when
+a temperature is available, and allow one heavy foreign process. CI defaults are
+more permissive. Confirm tightens CPU load to at most 5%, heavy-process count to
+zero, and tolerated flagged observations to zero. Monitoring must stay enabled.
+An unknown/stale observation or any flagged round invalidates confirmation;
+observations older than one second are stale. A missing temperature sensor is
+not itself a flagged round: “clean” means the implemented available checks passed.
 
-**Iteration count**: Both auto-scale iterations to fill a time target.
-Google Benchmark targets `min_time` (default unspecified, typically
-~0.5s); zenbench targets ~10ms per sample. Our shorter target means
-more rounds for the same wall time, giving better paired statistics
-at the cost of more timer overhead per sample.
+Checks at round boundaries do not prove continuous quietness throughout an arm.
+Global CPU percentages can miss contention concentrated on one selected CPU and
+can flag unrelated activity elsewhere. A cooperative benchmark lock and a scan
+for known benchmark process names reduce accidental overlap; they do not detect
+all possible workloads. The named-rival scan can wait up to 30 seconds per group.
+Resource monitoring has its own CPU/cache cost even outside the timed callback.
 
-**Warmup**: Google Benchmark has an explicit warmup phase (disabled by
-default, configurable via `MinWarmUpTime`). Zenbench runs warmup
-implicitly during iteration estimation — the first few runs of each
-benchmark during calibration serve as warmup.
+## 4. Within-process measurement algorithm
 
-**Statistics**: Google Benchmark reports mean, median, stddev, and CV
-across repetitions. It does not compute bootstrap CI, paired tests,
-effect sizes, or drift detection. Comparison between benchmarks is
-done via external tooling (e.g., `compare.py`), not built in.
+For each selected, nonempty group:
 
-**DoNotOptimize vs black_box**: Google Benchmark's `DoNotOptimize`
-forces a value into a register/memory and acts as a memory barrier.
-Rust's `std::hint::black_box` is the equivalent — both prevent the
-compiler from optimizing away benchmark code.
+1. Establish and verify placement. Start the group wall clock, perform benchmark
+   admission and prime background monitoring.
+2. Warm each arm, then estimate its iteration count. Estimation considers timer
+   resolution, the default 1 ms sample target, and a 5 ms floor when fewer than
+   20 iterations would fit the target. Counts are clamped to the group's limits.
+   These are heuristics; they do not impose an exact duration on each sample.
+3. Use the lower median of arm estimates as the common group count. Each normal
+   round jitters this count by an integer percentage from −20 through +20; every
+   arm in that round uses the same count, at least one. Different arm costs mean
+   different sample durations even with equal counts.
+4. Shuffle arm order using Fisher–Yates and a process/group-specific random seed.
+   Each arm runs serially. Keep the realized order and actual iteration count.
+5. Record the latest resource observation. Allocate round bookkeeping before
+   starting benchmark timers. Apply optional cache spoiling/stack jitter, run
+   each callback, and retain both raw and compensated elapsed nanoseconds.
+6. Verify placement again, update limits/convergence, and retain the round even
+   if its resource observation is flagged. There is no clean-round replacement
+   sampling in confirmation.
 
-**What we do differently**:
+Iteration estimation itself can affect state. A group containing very different
+workloads can create very unequal sample lengths and carryover. Prefer groups
+that answer one comparison question. Random order balances order effects in
+expectation; short finite schedules need not balance them exactly. The realized
+schedule is retained, but there is no user-facing seed/replay guarantee for
+identical future timing conditions.
 
-| Feature | Google Benchmark | Zenbench |
+### Timing boundaries and overhead
+
+`Bencher::iter` times a repeated loop and black-boxes returned values; returned
+values are dropped inside the timed loop. Input opacity and semantic work remain
+the author's responsibility. Inspect optimized machine code when compiler
+elimination, specialization, dispatch or vectorization could change the question.
+
+`iter_deferred_drop` preallocates output storage, pushes outputs during timing,
+and destroys them afterward. The pushes and changed memory behavior still cost
+time. `with_input(...).run(...)` creates each input outside its individual timer
+and drops the returned output after that timer; destruction performed inside the
+callback remains included. It incurs per-operation timing overhead instead of
+one timer pair for the entire batch. The optional thread CPU-time diagnostic for
+this path spans a different boundary, including output teardown; it is not an
+interchangeable latency measurement.
+
+`bench_parallel` and `bench_contended` create workers before timing and measure
+coordinator wall time from release at a start barrier to an end barrier. They
+include scheduling/synchronization effects and do not provide instruction-level
+simultaneous starts: a worker may begin before the coordinator reads its clock.
+Use sufficiently substantial work. Thread creation and later joins are outside
+this interval but inside experiment wall time. For an existing Rayon/tokio pool,
+use a normal bench callback and wait for all measured work to finish. Nested
+zenbench workers plus an external pool change the concurrency experiment.
+
+With `precise-timing`, supported x86_64 uses serialized TSC reads and AArch64 uses
+the architectural counter; otherwise the implementation uses `Instant`.
+The calibrated counter is converted to nanoseconds. The x86 invariant-counter
+check and calibration do not measure instantaneous execution-core frequency.
+Calibration seeks agreement between successive counter/Instant ratios and can
+fall back to its last estimate. Timer backend and resolution are recorded;
+the execution record names the engine's selected backend, while the parallel/
+contended coordinator timers described above still use `Instant`. Consequently,
+that label is not proof that every callback used the same counter path. Raw
+counter values are not interchangeable with retired instructions or
+frequency-dependent CPU cycles. TSC_AUX is not retained as a migration trace.
+
+Separate built-in integer, sequential-read and pointer-chase calibration workloads
+run at startup unless disabled with `ZENBENCH_NO_CALIBRATE`. They are diagnostic
+context, not corrections applied to benchmark times. A 1 MiB read or 4 MiB chase
+can exercise cache rather than DRAM on a particular processor; their labels do
+not certify a particular hardware bottleneck or normalize unlike machines.
+
+The engine estimates loop overhead using the minimum of 200 empty-loop batches
+of 10,000 iterations. It subtracts the resulting per-iteration estimate and clamps
+each compensated batch to at least 1 ns. This is a model, not a measurement of
+each callback shape's exact overhead. Sub-nanosecond numbers are batch averages;
+they are not evidence that an individual operation was resolved below one timer
+tick. Raw and compensated samples allow inspection of subtraction and clamping.
+
+Cache spoiling is off by default. Its default 2 MiB buffer is touched at
+cache-line strides; that is not a guarantee of complete eviction on modern LLCs.
+Optional stack jitter changes a padded call-stack depth before callbacks. It
+neither randomizes code/heap layout nor implements STABILIZER. Optional
+`linear_sampling` cycles the batch multiplier from 0.2 to 2.0 over ten rounds and
+adds a descriptive OLS slope; confirmation still uses process mean latencies.
+
+Allocation profiling requires installing `AllocProfiler` as the allocator.
+Counter updates, including a shared relaxed atomic activity flag on successful
+allocations, are inside allocation paths and can perturb timings. Thread-local
+counts do not account for an opaque pool's allocations or peak live heap.
+Confirm native timing separately from allocation, instruction or tracing runs.
+Heaptrack and iai-callgrind are external diagnostic workflows, not integrated
+confirmation backends.
+
+### Limits and adaptive stopping
+
+Iterate defaults to a 10-second measurement budget and a 120-second group wall
+budget. The wall budget includes group admission/warmup; limits are checked
+between rounds and cannot interrupt a blocked callback. The measurement budget
+applies after the configured minimum rounds, initially five. Expensive callbacks
+can therefore exceed a nominal budget.
+
+Adaptive convergence is considered every ten completed rounds, starting at
+`max(min_rounds, 30)`. With the default 30-round cap, this cannot save rounds
+before that cap. Larger exploratory plans can stop when a streaming normal
+approximation considers all baseline comparisons sufficiently resolved and
+stable. Its default relative precision is 2%; a clearly directed effect larger
+than 10% of baseline additionally uses a half-width/effect criterion below 10%.
+A single-arm group uses relative standard error. This stopping heuristic is not
+the final bootstrap interval and is not a sequential confidence procedure.
+
+Confirm disables adaptive convergence. A budget ending a child before its fixed
+round count makes the attempt incomplete, rather than reducing the planned
+sample size. The supervisor enforces its deadline while waiting for children,
+including a blocked callback. It does not include Cargo compilation or kill
+arbitrarily detached descendants. Use foreground protocol execution for acceptance;
+[the workflow guide](docs/benchmark-workflows.md) describes the older daemon wrapper's
+wait/exit-code limitations.
+
+## 5. Exploratory summaries
+
+Per-arm descriptive statistics include arithmetic mean, median, minimum, maximum,
+sample variance, MAD and a bootstrap interval for the mean. The minimum is the
+smallest observed round average under this experiment's conditions. It is not a
+known intrinsic latency or a bound valid for another cache, frequency or input
+regime. The displayed MAD is the median absolute deviation multiplied by 1.4826,
+a normal-consistency scaling; it describes spread, not a confidence interval.
+
+Paired analysis divides each arm's elapsed time by that round's iteration count
+and forms candidate-minus-baseline differences. Tukey filtering operates on
+these differences, removing the corresponding pair together. The IQR has a 1 ns
+floor and fences at 1.5 IQR. Per-arm descriptive rows retain their full sample
+populations; the paired diagnostic can therefore summarize a different subset.
+Raw records preserve the original data.
+
+The paired bootstrap resamples the cleaned differences, normally 10,000 times,
+and reports the 2.5th/50th/97.5th percentiles of their resampled means. Percent
+change divides mean difference by the cleaned baseline mean. The `significant`
+flag requires the interval outside the configured noise band, normally ±1% of
+baseline, and rejects timer-resolution-limited differences. With a zero noise
+threshold it instead requires the interval to exclude zero. Wilcoxon signed-rank,
+Cohen's d and Spearman drift are diagnostics, not additional acceptance votes.
+
+These intervals do not account for arbitrary round correlation, adaptive stopping,
+selection among many edited candidates, or all comparisons across a campaign.
+Bootstrap resampling does not repair those design problems. An exploratory
+“significant” flag is not a Confirm verdict. Conversely, a wide interval does not
+show equivalence. Preserve the distinction in automation and reports.
+
+## 6. Fixed-process confirmation: exact estimand and decision
+
+Let `t[p,r,a]` be compensated elapsed nanoseconds for arm `a`, round `r`, process
+`p`, and `k[p,r]` the actual iteration count. Define:
+
+```text
+x[p,r,a] = t[p,r,a] / k[p,r]
+m[p,a]   = mean over retained rounds r of x[p,r,a]
+```
+
+Each round receives equal weight in this process mean; it is not total elapsed
+divided by total iterations. Every retained round contributes. There is no
+outlier trimming or selection of the fastest process for confirmation.
+
+### Arms in the same executable
+
+For `P` processes with both arms, form `z[p] = ln(m[p,candidate]) − ln(m[p,base])`.
+Use the arithmetic mean `mu` of `z`, sample standard deviation `s`, standard error
+`s / sqrt(P)` and Student-t degrees of freedom `P−1`. The paired unit is the
+process. Within-process interleaving helps each process comparison, but 150 rounds
+from five processes do not supply 150 process degrees of freedom.
+
+### Separate baseline and candidate populations
+
+For baseline log means `b[1..n]` and candidate log means `c[1..m]`, use a Welch
+interval:
+
+```text
+mu = mean(c) − mean(b)
+vb = sample_variance(b) / n
+vc = sample_variance(c) / m
+SE = sqrt(vb + vc)
+df = (vb + vc)^2 / (vb^2/(n−1) + vc^2/(m−1))
+```
+
+If the degrees-of-freedom denominator is zero, the implementation uses `n+m−2`.
+Both populations need at least three valid processes. Overlapping child run IDs
+are rejected: reusing the same evidence does not create fresh independent data.
+Historical baselines are not randomized contemporaneous A/B blocks.
+
+### Multiplicity, resolution and transformation
+
+For family confidence `C` and `F` comparisons, each interval uses
+`alpha = (1−C)/max(F,1)` and the two-sided t quantile at `1−alpha/2`.
+Within-suite `F` is the number of reported arm comparisons across the first
+child's groups. Default groups use all pairs through three arms and baseline-only
+comparisons above three arms, unless explicitly configured. Cross-baseline
+comparison uses the matched benchmark cases. This is Bonferroni control for that
+family under the model; it is not campaign-wide control over previous edits,
+hardware cells or future repeated looks.
+
+The log half-width is the larger of `t_critical × SE` and a timer floor. For each
+arm, the floor is the maximum across children of twice recorded timer resolution
+divided by the minimum round iteration count and the arm's descriptive mean.
+The two arm floors are added. This heuristic prevents a zero-width decision
+from identical quantized samples; it is not a complete calibration-error model.
+
+Transform the estimate and bounds to percentage latency change:
+
+```text
+estimate = 100 × expm1(mu)
+lower    = 100 × expm1(mu − half_width)
+upper    = 100 × expm1(mu + half_width)
+```
+
+Positive means slower. This geometric ratio differs from a ratio of pooled
+arithmetic display means. A percentage latency reduction is also not the same
+percentage throughput increase. Nonpositive/nonfinite process means and
+unrepresentable intervals cannot support a decision.
+
+### Margin and validity
+
+For a positive practical margin `M`, classification is ordered as follows:
+
+| Interval condition | Verdict |
+|---|---|
+| `lower > M` | Regression |
+| `upper < −M` | Improvement |
+| `lower >= −M` and `upper <= M` | Equivalent within the margin |
+| `upper <= M` | Non-inferior within the margin |
+| Otherwise | Inconclusive |
+
+Before inference, validity checks require complete fixed-round process packets,
+matching group identities/settings, workload identity, compatible testbed and CPU
+placement, known timer backend, and fresh clean resource observations. Each
+population's children must share its executable hash. A baseline and candidate
+may have different executable hashes—that is often the intervention. Their
+process counts can differ if each plan is valid. Record the candidate decision
+policy when comparing rather than assuming an old baseline's policy is reused.
+
+The benchmark macros and evidence comparison return 1 for a confirmed regression
+and 2 for invalid/inconclusive confirmation; runtime errors also return nonzero.
+A complete single-arm population can initialize a baseline without making a
+within-suite relative claim. Updating a baseline requires non-inferiority for
+**every** matched case; empty or changed inventories cannot silently promote.
+Low-level descriptive save APIs do not themselves certify this contract.
+
+### Statistical assumptions and validation
+
+The process intervals assume independent, approximately normal process log ratios
+(or independent log-latency populations for Welch). Fresh processes do not prove
+these assumptions. Persistent background work, shared thermal state, layout
+bias, or heavy-tailed process means can invalidate nominal coverage. The harness
+does not automatically test and repair those distributions. More repetitions
+alone do not remove systematic bias.
+
+Independent [SciPy interval fixtures](tests/fixtures/process_intervals.json)
+check numerical calculations. A [deterministic simulation](examples/coverage_oracle.py)
+uses 2,000 trials, five process log values, standard deviation 0.03 and one
+comparison. It records 97 null interval misses and 97 misses of an injected
+`ln(1.1)` effect; that effect excludes zero in 1,999 trials. The same generator
+with 0.9 serial correlation gives 1,193 null misses; taking repeated looks at
+sample sizes 3 through 20 gives 460. [Committed counts](tests/fixtures/process_coverage.json)
+are checked by the Rust implementation. These are model controls, not measured
+coverage or statistical power on arbitrary application workloads.
+
+## 7. Useful measurements on a busy development machine
+
+A workstation running many coding agents is a legitimate development environment.
+It is usually a poor place to demand that every small edit satisfy an idle-host
+publication protocol. Requiring global quietness for all feedback makes the
+workflow unusable; calling all noisy feedback confirmation makes it misleading.
+Keep the intent explicit and bound the time spent obtaining an answer.
+
+The current Iterate path takes background observations and continues through
+ordinary load rather than sleeping before every round. It retains flags and
+can provide useful directional evidence. It still has cooperative locking and
+the named-rival admission wait described above. It does **not** have a bounded,
+load-aware multi-agent reservation scheduler. `--no-busy-gate` is an explicit
+exploratory escape when those observations/waits are unsuitable; it removes the
+observations needed for confirmation. It is not the default recommendation.
+CPU-class uncertainty and ordinary background load are separate problems: keep
+verified class placement even for noisy iteration whenever available.
+
+Use a small targeted group, short in-process rounds, equivalent work and nearby
+A/B observations while editing. Inspect direction, magnitude, drift and spread;
+treat unstable or small changes as unresolved. Run A/A controls with the same
+paths and state transitions to find asymmetries. A control that looks quiet does
+not certify that the candidate responds identically to interference. Repeat
+correctness checks and examine generated code or profiler evidence before
+spending more measurement time. A quiet confirmation slot is most valuable after
+candidate selection, rather than after every intermediate edit.
+
+### What interference does to a paired result
+
+Nearby arms can share slowly changing conditions. If interference affects both
+similarly, a paired ratio can remove part of that common variation. A compiler
+job, however, can affect memory-bandwidth-heavy code differently from a compute
+kernel. An SMT sibling can contend for different execution resources. Unequal
+cache footprints can change carryover; AVX use can change the next arm's power
+state. Short spikes can hit only one arm. Pairing and randomization reduce some
+biases but cannot promise cancellation on a busy host.
+
+Useful next steps for this workload, **not implemented admission guarantees**:
+
+| Intent | Pragmatic behavior to aim for | Honest result |
 |---|---|---|
-| Interleaving | Opt-in, chunk-based | Always on, round-level |
-| Paired statistics | No | Bootstrap CI, Wilcoxon, Cohen's d |
-| Drift detection | No | Spearman correlation |
-| Resource gating | No | CPU, RAM, temp, process checks |
-| Auto convergence | No | CI-based adaptive stopping |
-| Cache firewall | No | Opt-in L2 spoiling |
-| Outlier handling | None built-in | IQR filtering on paired diffs |
-| Output | Console/JSON/CSV | Console + JSON + Markdown + CSV |
+| Edit feedback | Small bounded queue; serialize timing arms; continue with observations under ordinary load | Exploratory effect and noise diagnostics |
+| Local acceptance | Reserve a suitable CPU/cache domain where possible; keep interference diagnostics; fixed fresh plan | Current strict Confirm only if its checks pass |
+| Publication | Deliberately scheduled cells, controls, provenance, declared exclusions and independent repetitions | Evidence with explicit scope and limitations |
 
-**What Google Benchmark does that we don't yet**:
-- Asymptotic complexity analysis (Big O fitting across input sizes)
-- Manual timing mode (for GPU/custom hardware)
-- Custom counters (user-defined per-iteration metrics)
-- Memory manager integration for allocation tracking
-- PauseTiming/ResumeTiming within a benchmark
+A future admission policy should consider selected CPUs, SMT siblings, shared
+LLC/NUMA and memory/power contention instead of treating whole-host load as a
+complete certificate. Merely lowering a global threshold wastes idle partitions;
+merely raising it misses local interference. Such a policy needs controlled
+experiments with foreign work on selected cores, siblings, other cache domains
+and memory bandwidth. It must preserve a negative control that detects actual
+interference. The current <=5% Confirm threshold remains unchanged.
 
-Thread-aware benchmarking is implemented via `bench_contended()` and
-`bench_parallel()`. Complexity analysis and manual timing are the most
-valuable remaining gaps.
+Likewise, resource-friendly process priority is part of the experimental
+configuration, not a portable promise of equal scheduling. Keep both arms'
+priority/QoS identical and record it. Platform-dependent interactions between
+priority, core selection and scheduling require measurement; do not silently
+raise priority to defeat other agents. CPU reservations need cooperation from
+other workloads, not just affinity on the benchmark.
 
-### Criterion.rs
+An inconclusive result is useful: it says this experiment could not settle the
+chosen margin. Keep it and either stop pursuing the edit, diagnose the noise, or
+predeclare a new experiment with more suitable resources/budget. Do not discard
+unsuccessful attempts and retain only the first favorable rerun. CI completion
+and performance acceptance are separate statuses.
 
-Criterion (0.8.x) is the most widely used Rust benchmarking library.
-Its statistics are the most sophisticated of the established tools, but
-its execution model has fundamental limitations that interleaving
-addresses.
+## 8. External executables and environment A/B: issue 29
 
-**Statistics:**
+The [external-process implementation design](docs/external-process-design.md)
+turns this review into a delivery scope and acceptance gates. It is a proposal,
+not an available command.
 
-- **Bootstrap CI**: 100K resamples using `oorandom::Rand64` (seeded from
-  system time, non-reproducible). Percentile method — takes 2.5th and
-  97.5th percentiles of the bootstrap distribution. CIs are computed on
-  mean, median, stddev, MAD, and slope (in Linear sampling mode).
-- **Slope regression**: In Linear mode, iteration counts are
-  `[d, 2d, 3d, ..., 100d]`, enabling through-origin OLS regression
-  `time = slope × iterations`. The slope separates per-iteration time
-  from constant overhead (function call, timer, black_box). This is
-  criterion's strongest statistical feature — it answers "what does each
-  iteration cost?" rather than "what does each iteration plus overhead
-  cost?"
-- **Comparison**: Two-stage gate. First, Welch's t-test via mixed
-  bootstrap (pool both samples under H0, bootstrap the t-statistic,
-  compute p-value vs significance_level=0.05). Second, a ±1% noise
-  threshold — both gates must pass for a "regression/improvement"
-  verdict. This dual-gate design prevents both false positives (noise
-  threshold) and false negatives (statistical test).
-- **Two-sample bootstrap**: For relative change, uses a sqrt(N) chunking
-  optimization — one resample of A paired with sqrt(N) resamples of B
-  per chunk. Reduces total draws but introduces within-chunk correlation.
-- **Outlier classification**: Tukey's fences with 5 categories (low
-  severe, low mild, not an outlier, high mild, high severe). Mild at
-  1.5×IQR, severe at 3×IQR. **Outliers are reported but NOT removed** —
-  all statistics run on the full sample. This is more conservative than
-  our approach but means a single extreme outlier can dominate the mean.
-- **Effect size**: None. Reports percentage change with CI, but no
-  standardized metric (Cohen's d or similar).
-- **Drift detection**: None.
-- **Distribution fitting**: None. All inference is nonparametric via
-  bootstrap. KDE (Gaussian kernel, Silverman bandwidth) exists for
-  plotting only.
+[Issue 29](https://github.com/imazen/zenbench/issues/29) requests a serial paired
+runner for prebuilt executables with per-arm environments, internal metrics,
+correctness controls and resumable case grids. The same executable with different
+environment settings is a special case of that design. It matters when dispatch,
+pools, allocators or library configuration are initialized once per process.
+Environment changes can also change stack/data layout. Using identical executable
+bytes removes a build difference, but does not prove the only effect is the
+intended runtime switch. Controls should exercise the same launch shape and
+record that limitation.
 
-**Execution model:**
+**This runner is not implemented.** Current fresh-process confirmation reruns one
+zenbench executable/configuration. `self-compare` builds two revisions and runs
+them sequentially. Saved packets can be compared with Welch inference, but there
+is no automatic randomized external A/B schedule, per-arm environment manifest,
+metric extractor or paired-block inference for these invocations.
 
-- 3-second warmup (doubling iterations).
-- Linear or Flat sampling mode, auto-selected. Linear runs 100 samples
-  with iteration counts `[d, 2d, ..., 100d]` for OLS. Flat uses the
-  same iteration count for all samples (loses the slope estimate).
-- 5-second measurement time (default). Fixed sample count (100).
-- No interleaving. Samples are collected sequentially in one batch.
-- Stack alignment jitter (0.8.x): `alloca` shifts the stack by
-  `i % page_size` per sample, varying cache line alignment.
-- Quick mode: doubling strategy with stdev convergence check. Produces
-  only 2 data points — fast but statistically weak.
+The issue's concrete use cases support the following design requirements:
 
-**What we took**: Bootstrap CI (our 10K vs their 100K), Tukey's IQR
-method, the general approach of computing CIs on differences rather than
-individual benchmarks.
+- An arm consists of immutable executable identity, argv, cwd, explicit environment
+  set/unset operations, timeout, placement and declared metric units/boundary.
+  Compare the same binary under two environments without mutating the parent
+  process environment. Record shared configuration and the intentional difference;
+  avoid dumping secrets from the inherited environment into published artifacts.
+- Run arms serially in randomized nearby blocks. Record order, timestamps,
+  resource observations, settling policy and all failures. Two simultaneous
+  timing processes would create another contention experiment.
+- Retain every metric returned by an invocation, but preserve invocation and block
+  boundaries. Three internal passes from one child are not three independent
+  process repetitions. Choose the within-invocation summary and outer block
+  estimator before running; do not flatten vectors into a bootstrap population.
+- Check exit status, metric cardinality, units and finite positive values. Record
+  externally measured wall time separately from self-reported internal time.
+  A regex extracts a value; it does not prove that C and Rust binaries timed the
+  same work or excluded the same warmup.
+- Include A/A as a diagnostic control, preferably near the A/B observations, with
+  uncertainty and order information. `|AB−1| > |AA−1|` can be a named exploratory
+  heuristic; it is not a calibrated significance test or a sufficient acceptance
+  rule. A/A is itself noisy and may miss candidate-specific interference. Do not
+  subtract its observed bias automatically or use a lucky A/A to certify a run.
+- Correctness failure must remain visible as invalid performance evidence for
+  that contract. Retain measured values, artifacts and the failure; exclude the
+  cell from a “correct and faster” conclusion. A missing sample must not silently
+  reduce the planned repetitions.
+- Resume only against a matching experiment fingerprint: binaries, inputs, arm
+  environments, metric/check contracts, schedule and decision policy. Keep every
+  attempt and distinguish a later time block. Resumption across days introduces
+  another source of variation that an interval must account for.
 
-**Where we diverge**:
+For busy systems, interleaving is worth preserving at the **process** level as
+well as inside a process. The external runner should offer bounded exploratory
+feedback without pretending global load is harmless. Confirmation needs its own
+validated block-level analysis and contamination policy. Reusing the existing
+presentation/storage components is appropriate; reusing an in-process bootstrap
+without respecting process clusters is not sufficient.
 
-| Aspect | Criterion | Zenbench |
+The source review also shows that issue 29 describes a desired common protocol,
+not identical existing implementations. The inspected rav1d `ab_bench.py` alternates
+AB/BA deterministically and flattens returned passes into arm arrays. The inspected
+SVT `perf_ab.sh` randomizes per-round order and retains paired ratios, but its
+shell loop can omit missing metrics. These scripts provide concrete migration
+cases and failure controls, not a statistical oracle to copy verbatim. Their
+source identities are recorded under References. Optional size-axis fitting
+should remain separate from acceptance: a fitted intercept is not proof of
+fixed overhead without a suitable model, residual checks and input design.
+
+## 9. Evidence, provenance and small version-control diffs
+
+Raw data lives under `.zenbench/data/` or `ZENBENCH_DATA_DIR`, outside replaceable
+Cargo build output. Compressed content-addressed objects retain complete round
+and process boundaries. Small references locate objects and verify their hashes.
+Incomplete attempts, child packets and lifecycle manifests survive later failure.
+Publication writes the object before exposing a reference; corrupt or oversized
+packets fail loading instead of silently losing data. The encoded/decoded packet
+limit is 256 MiB; split larger studies into explicit suites/cells.
+
+Select stable CSV snapshots for Git rather than adding every run. A snapshot's
+size follows the benchmark inventory rather than round count. It includes context,
+evidence identity and commands for reading/comparing full packets. Gzip can be
+decoded independently; references and snapshots carry command argument arrays.
+A compact summary is not a replacement for the raw evidence or a valid input to
+process inference. Keep full objects in durable artifact storage with a backup
+and access plan. Zenbench does not upload, schedule a fleet, or garbage-collect
+unsuccessful runs.
+
+```sh
+zenbench read candidate.json.gz --format llm
+zenbench read candidate.json.gz --format json
+zenbench compare baseline.json.gz candidate.json.gz
+zenbench snapshot candidate.json.gz --output benchmarks/baseline.csv
+zenbench reanalyze candidate.json.gz --output analysis.json
+```
+
+Reanalysis writes a separate versioned decision artifact linked to the immutable
+evidence hash. It cannot change exploratory evidence into a fixed experiment.
+Named baseline updates preserve prior references. [Storage details](docs/result-storage.md)
+cover portability, retained attempts and historical format support.
+
+Executable SHA-256 identifies bytes run. Runtime Git HEAD identifies the current
+checkout, which can differ from the source used to build a retained executable.
+Automatic clean/dirty capture and a complete build manifest are not implemented.
+For defensible evidence, retain compiler/toolchain, target, profile, flags, features,
+lockfile/dependency identities, source revision and dirty patch/source snapshot,
+input hashes, environment interventions, pool sizes and allocator/profiler choices.
+Bind that manifest to the executable hash. Record power/NUMA/priority configuration
+when it matters; the current packet does not certify all of it.
+
+For a many-crate/many-machine study, define cells and scope first, compare like
+with like, and export selected stable summaries per scope. Do not average unlike
+hardware into a single speed claim by accident. Specify any cross-cell weighting
+and multiplicity policy separately. Reuse saved evidence for views and analysis;
+do not rerun an expensive experiment just to change its output format.
+
+## 10. Measured wall time and storage cost
+
+These measurements are from 2026-10-11 on a Linux Core Ultra 7 265K, inside Docker
+with a hard CPU-0 cpuset and a 2 GiB memory limit, nice 19, release/default features,
+and no custom RUSTFLAGS. The recorded toolchain was Rust 1.99.0/LLVM 23.1.1; the
+host used intel_pstate, powersave and balance_performance. Frequency was not
+measured or fixed. Driver wall time covers the executable invocation and its
+output, excluding compilation and container startup. All numbers below come from
+retained records; no multi-host calendar-time extrapolation is implied.
+
+### A. Removing the per-round monitor stall
+
+This fixture has two identical folds over 1,024 u64 values, 200 fixed rounds,
+and the original 500 ms warmup per arm.
+
+| Revision/monitor | Invocations | Wall seconds, median | Observed range |
+|---|---:|---:|---:|
+| Before, monitor enabled | 1 | 41.228751 | Single observation |
+| Before, monitor disabled | 1 | 1.565484 | Single observation |
+| After, monitor enabled | 3 | 1.967261 | 1.766872–1.967650 |
+| After, monitor disabled | 3 | 1.566121 | 1.565478–1.566181 |
+
+The before-enabled observation divided by the after-enabled median is 20.957440.
+This descriptive ratio is not a confidence interval from a randomized revision
+comparison. The equal-round ablation and source change identify a blocking
+counter refresh as the avoidable cost. All 600 after-enabled rounds retained fresh
+clean resource observations. Disabling monitoring was a diagnostic ablation;
+it is not an acceptable Confirm configuration.
+
+Sources: [before timings](benchmarks/defaults_cost_2026-10-11.summary.json),
+[before ablation](benchmarks/defaults_gate_ablation_2026-10-11.summary.json),
+[after timings](benchmarks/monitor_fixed_2026-10-11.summary.json),
+[before provenance](benchmarks/defaults_audit_2026-10-11.meta.json),
+[after provenance](benchmarks/monitor_fixed_2026-10-11.meta.json),
+[before archive](benchmarks/defaults_audit_2026-10-11.pointer.md),
+[after archive](benchmarks/monitor_fixed_2026-10-11.pointer.md).
+Source revisions were `98100750257a6fb3e5dc2c440cd143ae4281d7f9` and
+`a6179274d20420354c6f20571ddb9107feb5d023`.
+
+### B. New mode cost on a separate control
+
+The final protocol fixture compares one fold with deliberately repeated work.
+Default warmup is 100 ms per arm. Each mode below was invoked once.
+
+| Mode | Processes × rounds | Wall seconds | Outcome |
+|---|---:|---:|---|
+| Iterate | 1 × 30 | 0.765767 | Execution succeeded; exploratory |
+| Confirm | 5 × 30 | 3.827814 | Known regression detected, exit 1 |
+| Evidence | 5 × 30 | 3.875655 | Known regression detected, exit 1 |
+
+Confirm added 3.062047 seconds and cost 4.998666 times Iterate in this observation.
+Evidence added 3.109888 seconds and cost 5.061141 times Iterate. Those ratios are
+not default promises for long operations, many arms, external programs or busy
+machines. The old default's 41.218343-second median belongs to the identical-arm
+fixture and different warmup/round defaults; comparing it directly to 0.765767
+would conflate monitor, defaults and workload changes.
+
+One preceding Evidence attempt was refused after a child's observations flagged
+all 30 rounds; it remains archived. The successful control run does not erase
+that attempt. A one-second deadline control terminated after 1.017605 seconds
+with exit 2. No whole-study or compilation-speed claim follows from these controls.
+
+Source: [times and storage](benchmarks/modes_2026-10-11.summary.json),
+[provenance](benchmarks/modes_2026-10-11.meta.json),
+[all retained attempts and binary](benchmarks/modes_2026-10-11.pointer.md),
+revision `0acfd44aaa1d88c91a3bc37ab985c16fd58608ba`.
+
+### C. Storage measurements at the mode revision
+
+| Packet | Pretty JSON bytes | Gzip bytes | Selected CSV bytes | Reanalysis bytes |
+|---|---:|---:|---:|---:|
+| Iterate | 24,426 | 3,003 | 826 | 245 |
+| Confirm | 146,109 | 9,729 | 874 | 532 |
+| Evidence | 146,069 | 9,668 | 895 | 532 |
+
+These historical sizes precede the later embedded read/decode/compare commands;
+current sizes also depend on paths and metadata. They demonstrate the retained
+fixture's storage choices, not a universal compression ratio or a current byte
+budget. Independent replay checked the full round trip and reconstructed process
+intervals. A small CSV without its raw object cannot reproduce the inference.
+
+### Resource accounting and planning calendar time
+
+Recorded wrapper lines for the cited runs:
+
+```text
+original audit: run-heavy: done rc=0 2972s | peak-RSS 0.03GiB | min-avail 26737MiB | peak-load 0.75
+old ablation:  run-heavy: done rc=0 18s | peak-RSS 0.03GiB | min-avail 26833MiB | peak-load 0.43
+monitor fix:   run-heavy: done rc=0 10s | peak-RSS 0.03GiB | min-avail 26797MiB | peak-load 0.36
+mode control:  run-heavy: done rc=0 11s | peak-RSS 0.10GiB | min-avail 26797MiB | peak-load 1.22
+```
+
+RSS here covers the Docker client (and Python replay for the mode control), not
+a measured payload peak. The separate 2 GiB container limit is a cap, not usage.
+The original audit wrapper covered a larger campaign than the selected table rows.
+
+Experiment wall time includes admission, process launch, warmup, estimation,
+sampling, monitor lifecycle, analysis and persistence. Summing timed batches alone
+misses most of these on small workloads. The supervisor records aggregate elapsed
+time rather than presenting one child's duration as the multi-process cost.
+An individual engine's `total_time` starts after startup calibration and excludes
+some final output/persistence work; use an external invocation clock for total
+user-visible cost, as the retained audit drivers do.
+
+To budget a real campaign, measure representative cells at their actual settings,
+record compilation separately, and retain queue/wait and failed-attempt time.
+Give exploration a bounded budget and schedule confirmation after candidate
+selection. Additional processes are useful when between-process variation matters;
+more rounds in one process cannot replace them. More repetitions also cannot fix
+biased placement or unequal work. There is no measured “dozen crates on a dozen
+computers” completion time in this record, and multiplying this fold control
+would not establish one.
+
+## 11. Threats to validity and what remains external
+
+| Threat | Current mitigation | Remaining responsibility/limitation |
 |---|---|---|
-| Bootstrap resamples | 100K, non-reproducible | 10K, deterministic seed |
-| CI method | Percentile | Percentile (same) |
-| Outlier handling | Classify but keep | IQR-remove from paired diffs |
-| Comparison test | Welch t-test (parametric) | Wilcoxon signed-rank (non-parametric) |
-| Practical significance | ±1% noise threshold | None (CI-only) |
-| Effect size | None | Cohen's d |
-| Drift detection | None | Spearman rank correlation |
-| Slope regression | OLS through origin (Linear mode) | None |
-| Interleaving | None | Always-on shuffle |
-| Resource gating | None | CPU/RAM/temp/process |
-| Convergence | Fixed 100 samples | Adaptive (CI width + stability) |
-| Stack jitter | alloca per sample | ±20% iteration jitter |
-
-**Key differences explained**:
-
-- *Outlier removal vs preservation*: Criterion keeps outliers so its
-  statistics reflect everything that happened. We remove IQR outliers
-  from paired differences before computing CI. Our approach gives tighter
-  intervals but could mask genuinely bimodal performance (a function
-  that's fast 90% of the time and slow 10% due to a cold cache path).
-  The raw data in JSON output preserves all measurements including
-  outliers.
-- *The effect of non-interleaving*: If system load changes during
-  measurement, earlier samples differ systematically from later ones.
-  Linear mode is especially exposed — later samples run more iterations
-  and are weighted differently in the regression.
-- *Slope regression is criterion's biggest strength*: See the "Gaps"
-  section below for why this matters and how we might address it.
-
-### Divan
-
-Divan (0.1.x) prioritizes ergonomics and low overhead over statistical
-depth. It's the fastest benchmarking framework to set up and the
-lightest at runtime.
-
-**Statistics:**
-
-Divan's statistics are minimal by design. The `StatsSet` struct has four
-fields: `fastest` (min), `slowest` (max), `median`, and `mean`. That is
-the entire statistical model. There is:
-
-- No confidence intervals (no bootstrap, no t-distribution, nothing)
-- No variance or standard deviation
-- No outlier detection or removal
-- No effect size measurement
-- No regression detection between runs
-- No historical comparison or baseline tracking
-- No p-values or hypothesis testing of any kind
-- No machine-readable output (no CSV, JSON, or HTML)
-
-This is a deliberate tradeoff: divan runs fast, reports clean numbers,
-and gets out of your way. If you need to know *whether a difference is
-real*, divan can't tell you.
-
-**Execution model:**
-
-Adaptive tuning via timer precision. Starts at `sample_size = 1` and
-doubles until each sample is ≥100× the timer's precision floor. Then
-collects 100 samples at that size. No explicit warmup — the tuning
-doublings serve that purpose (early small-batch runs are discarded).
-
-**Where divan excels:**
-
-- **Overhead compensation**: Explicitly measures and subtracts per-iteration
-  loop overhead and allocation-tracking overhead. This is more principled
-  than criterion's slope regression for isolating the benchmark from the
-  harness.
-- **DCE prevention**: Uses `asm!("")` fences (not just `compiler_fence`)
-  which LLVM cannot reason through at all. Stronger than `black_box`
-  alone.
-- **Deferred drop**: Outputs are written to `MaybeUninit` slots during
-  the timed loop; `Drop` runs only after timing ends. Prevents drop
-  cost from polluting measurements.
-- **Allocation profiling**: Built-in `AllocProfiler` wrapping
-  `GlobalAlloc` that counts allocs/deallocs/reallocs per benchmark.
-- **TSC timer**: Optional `rdtsc`/`rdtscp` with proper serialization
-  barriers and automatic frequency calibration.
-- **Multi-threaded benchmarks**: First-class via
-  `#[divan::bench(threads = [1,2,4,8])]` with barrier-synchronized start.
-- **Picosecond precision**: Internal `FineDuration` uses u128 picoseconds.
-
-**What we could learn from divan:**
-
-1. Overhead compensation — measuring and subtracting loop/timer overhead
-   rather than assuming it's negligible.
-2. Stronger DCE fences — `asm!("")` blocks prevent more optimizations
-   than `black_box` alone (though this requires `unsafe` or nightly).
-3. Deferred drop — excluding `Drop::drop` from timing for types with
-   expensive destructors.
-4. TSC support — hardware cycle counters for sub-nanosecond precision.
-
-### tango-bench
-
-tango-bench (0.7.x) is the only other Rust framework built around
-paired measurement, but takes a radically different architectural
-approach to achieve it.
-
-**The dylib trick:**
-
-tango loads two versions of the same benchmark into a single process
-simultaneously. You compile your benchmark, save the binary with
-`cargo-export`, modify your code, then run `cargo bench -- compare
-<saved-binary>`. The runner loads the old binary as a shared library via
-`libloading` (with ELF/PE binary patching for PIE/IAT issues). Both
-versions coexist in the same address space, sharing thermal state,
-frequency, scheduler timeslice, and cache hierarchy.
-
-This same-process approach eliminates the dominant noise source: inter-run
-system state variation. Both functions experience identical environmental
-conditions within each sample, not just similar conditions.
-
-**Interleaving:**
-
-Deterministic ABAB alternation — on every sample, the function pointers
-are swapped. This is not randomized (ours is). Periodic system effects
-with period 2 could systematically bias results, though the authors
-presumably chose deterministic alternation for reproducibility.
-
-Three sampler strategies for iteration count per sample: Flat (constant),
-Linear (sweep 1..N), and Random (default — random count each sample).
-The Random sampler decorrelates cache/alignment effects from measurement
-order, similar to our ±20% jitter.
-
-**Statistics:**
-
-Deliberately minimal. Z-test on paired differences with threshold
-z ≥ 2.6 (~99% significance) AND |diff/baseline| > 0.5% practical
-threshold. No bootstrap, no CIs, no effect size, no non-parametric
-tests. Welford's algorithm for streaming mean/variance. Optional Tukey
-IQR outlier removal (`--filter-outliers`).
-
-**Anti-bias techniques:**
-
-- Cache firewall (`--cache-firewall N`): reads N KiB of cache lines
-  between samples to force eviction.
-- Stack randomization (`--randomize-stack N`): `alloca`-based random
-  stack offset per sample.
-- System time bias detection: warns if kernel time > 5% of total CPU
-  time (via `getrusage`).
-- Warmup: `iterations/10` warmup before each sample.
-
-**Comparison with zenbench:**
-
-| Aspect | tango-bench | Zenbench |
-|---|---|---|
-| Pairing mechanism | Same-process dylib | Separate builds |
-| Interleaving | Deterministic ABAB | Randomized shuffle |
-| Statistics | Z-test only | Bootstrap CI + Wilcoxon + Cohen's d + Spearman |
-| Confidence intervals | None | 95% bootstrap |
-| Effect size | 0.5% practical threshold | Cohen's d |
-| Outlier handling | IQR (opt-in) | IQR (always, on paired diffs) |
-| Cache firewall | Opt-in, user-specified size | Opt-in, 2 MiB default |
-| Stack randomization | alloca per sample | None |
-| Iteration jitter | Random sampler (default) | ±20% per round |
-| Resource gating | System time bias warning | CPU/RAM/temp/process |
-| Cross-process coordination | None | File lock (fs4) |
-| Machine-readable output | None | JSON/CSV/LLM/Markdown |
-| Setup complexity | cargo-export + linker flags | Just `cargo bench` |
-
-**tango's unique advantage**: Same-process comparison is strictly more
-powerful than interleaving for noise reduction. Both functions share the
-exact same system state, not just similar state from the same time
-window. But the dylib approach requires special build steps and has
-platform-specific fragility (PIE patching on Linux, IAT patching on
-Windows).
-
-**tango's statistical tradeoff**: Deliberately minimal — you get
-"significant/not significant" but no confidence interval on the
-magnitude. No way to distinguish "1% ± 0.2%" from "1% ± 5%".
-
-## What we compute
-
-### Per-benchmark
-- **min**: Fastest observed per-iteration time (the floor)
-- **mean**: Arithmetic mean of per-iteration times across rounds
-- **median**: Middle value (robust to outliers)
-- **MAD**: Median absolute deviation, scaled by 1.4826 to estimate σ
-  for normal distributions. Robust to outliers — one 10x spike barely
-  moves it, unlike stddev which would be destroyed
-- **stddev/variance**: Classical spread metrics (in JSON, not displayed
-  — MAD is shown instead)
-
-### Per-comparison (paired)
-- **Bootstrap 95% CI**: 10K resamples of the paired round-by-round
-  differences. Percentile-based (2.5th, 50th, 97.5th), not parametric.
-  Captures asymmetry from right-skewed benchmark distributions.
-- **pct_change**: Sample mean of paired differences as % of baseline
-- **Cohen's d**: Standardized effect size (how many pooled-σ apart)
-- **Wilcoxon signed-rank p-value**: Non-parametric significance test
-- **Spearman drift correlation**: Detects thermal throttling or load
-  changes over time
-- **IQR outlier filtering**: Tukey's 1.5×IQR fences on paired diffs,
-  applied before CI computation
-
-### Display logic
-- **Significance**: Based on whether the 95% CI excludes zero, not on
-  p-value thresholds or arbitrary percentage cutoffs
-- **Color**: Green = CI entirely below zero (faster), Red = CI entirely
-  above zero (slower), Dim = CI crosses zero (uncertain)
-- **Footnotes**: Fire for CI crossing zero, tiny effect size (d < 0.2),
-  drift (Spearman r > 0.5), high CV (>20%), and sub-ns with near-zero
-  variance (likely optimized away)
-
-## What we can't check
-
-The resource gate monitors CPU load, free RAM, CPU temperature, and
-heavy processes before each measurement round. It cannot detect:
-
-- **Disk I/O pressure**: A backup or indexing job thrashing the disk
-  won't show up in CPU metrics
-- **Network activity**: Background downloads or NFS traffic
-- **CPU frequency scaling**: The governor may downclock mid-measurement
-  due to thermal or power limits. We detect *thermal drift* via Spearman
-  correlation, but not instantaneous frequency changes.
-- **VM/container scheduling**: Hypervisor preemption or cgroup throttling
-- **NUMA effects**: Memory placement on multi-socket systems
-- **SMT interference**: Work on a sibling hyperthread sharing L1/L2
-
-## Known limitations
-
-1. **Single-binary layout**: Results include code/data alignment effects
-   specific to this build. STABILIZER-level randomization isn't feasible
-   without runtime instrumentation.
-
-2. **Single-process variation**: We don't capture cross-invocation
-   variance from ASLR, kernel state, or process startup effects.
-
-3. **IQR filtering removes outliers**: Bimodal performance
-   (fast path vs slow path) will have the slow-path measurements
-   filtered. The CI reflects the fast-path distribution. Check the JSON
-   output if you suspect bimodal behavior.
-
-4. **Hot-loop bias**: When calls/sample > 1, the CPU's branch predictor
-   and instruction cache warm up. Results reflect best-case pipeline
-   state, not cold-call performance. The methodology line in output
-   shows the call count so you know what you're getting.
-
-5. **No instruction-level measurement**: We measure wall-clock time, not
-   CPU instructions. As Tratt showed, these can diverge for parallel or
-   I/O-heavy code.
-
-## Future work: pause/resume for I/O isolation
-
-The `with_input().run()` API excludes setup and teardown from timing,
-but there's no way to exclude work *within* the timed region. If your
-benchmark reads a file, processes it, and writes output, you currently
-time all three. Google Benchmark's `PauseTiming()`/`ResumeTiming()` lets
-you bracket the part you care about.
-
-The problem: timer calls have their own overhead (~20-50ns each). For a
-microsecond-scale benchmark, two pause/resume calls per iteration add
-measurable bias. Google Benchmark documents this caveat.
-
-A possible design for zenbench:
-
-```rust,ignore
-b.iter(|| {
-    let data = load_file();       // not timed
-    b.resume();
-    let result = process(&data);  // timed
-    b.pause();
-    write_output(&result);        // not timed
-    result
-});
-```
-
-This requires `Bencher` to carry timer state and accumulate only the
-resumed intervals. The overhead of two `Instant::now()` calls per
-pause/resume is unavoidable — document it and let users decide.
-
-An alternative: `with_input` already handles the common case (expensive
-setup, cheap teardown). For the "I/O sandwich" pattern, users can
-restructure:
-
-```rust,ignore
-b.with_input(|| load_file())
-    .run(|data| process(&data))
-// output is dropped outside timing
-```
-
-This doesn't cover mid-benchmark I/O exclusion but handles most cases
-without timer overhead.
-
-## Cold-start measurement
-
-### What we capture now
-
-During warmup, the very first single-iteration call for each benchmark
-is recorded as `cold_start_ns` in the JSON output. This is the coldest
-measurement we can get without process isolation — caches are cold,
-branch predictors haven't learned the function's patterns, TLBs aren't
-populated.
-
-It's not a *perfect* cold start: the binary is already loaded, page
-tables are set up, and earlier benchmarks in the group may have warmed
-shared caches. But it's the coldest data point available for free.
-
-### When cold start matters
-
-- **CLI tools**: First invocation performance is what users feel
-- **Serverless**: Lambda cold starts dominate tail latency
-- **Request handlers**: First request after deploy
-- **Infrequent code paths**: Error handlers, config parsers
-
-For these use cases, the hot-loop mean is misleading — nobody runs
-your CLI tool 10,000 times in a tight loop.
-
-### Future: dedicated cold-start mode
-
-True cold-start measurement would require:
-
-1. **Process isolation**: Run each sample in a fresh subprocess so
-   nothing carries over — no warm caches, no trained branch predictors,
-   no populated TLBs. High overhead (process spawn per sample) but
-   the only way to get a real cold start.
-
-2. **Cache firewall per sample**: Less extreme than process isolation.
-   Spoil L2/L3 between samples within the same process. Combined with
-   `iterations = 1`, this gives near-cold-start conditions without
-   subprocess overhead. Already partially supported via
-   `config().cache_firewall(true)`.
-
-3. **Separate reporting**: Cold-start results should be reported
-   alongside hot-loop results, not mixed. A table might show:
-   ```
-   │ benchmark │ cold │  min │  mean │
-   │ parse_cfg │ 45µs │ 12µs │ 14µs  │  ← cold is 3x hot
-   ```
-
-The `cold_start_ns` field in JSON output is the first step. A proper
-`config().cold_start(true)` mode that runs 1 iteration per sample with
-cache firewall and reports separately is future work.
-
-## Multithreaded benchmarking
-
-Three patterns, three APIs.
-
-### Pattern 1: Contended shared state — `bench_contended()`
-
-"How fast is this `Mutex<HashMap>` with 8 threads hammering it?"
-
-```rust,ignore
-group.bench_contended("mutex_map", 8,
-    || Mutex::new(HashMap::new()),       // setup: fresh state each sample
-    |b, shared, tid| {
-        b.iter(|| { shared.lock().unwrap().insert(tid, 42); })
-    },
-);
-```
-
-All threads barrier-synchronize before starting. Wall-clock time from
-barrier release to all threads completing. Thread creation/joining is
-excluded. Setup runs fresh each sample so lock state doesn't carry over.
-
-### Pattern 2: Independent parallel scaling — `bench_parallel()`
-
-"Does this work scale linearly with threads, or am I hitting
-memory bandwidth / cache contention / SMT limits?"
-
-```rust,ignore
-for threads in [1, 2, 4, 8] {
-    group.bench_parallel(format!("{threads}t"), threads, |b, _tid| {
-        b.iter(|| expensive_pure_computation())
-    });
-}
-```
-
-Same as `bench_contended` but no shared state. Each thread works
-independently. If 4 threads aren't 4x the throughput of 1 thread,
-you're hitting a scaling wall.
-
-### Pattern 3: Existing thread pools (rayon, tokio) — `bench()`
-
-"How fast is `par_sort()` / parallel pipeline / async handler?"
-
-```rust,ignore
-group.bench("par_sort", |b| {
-    b.with_input(|| (0..10_000).rev().collect::<Vec<i32>>())
-        .run(|mut v| { v.par_sort(); v })
-});
-```
-
-Just use regular `bench()`. Wall-clock timing already captures all
-threads' work. The thread pool persists across samples — this is
-realistic (your production rayon pool is warm too).
-
-**Do not** use `bench_parallel` or `bench_contended` for rayon/tokio
-code. Those APIs spawn their own threads, which compete with the
-existing pool for cores. The result is artificial contention that
-doesn't reflect production.
-
-### Rayon-specific guidance
-
-- **Thread pool lifetime**: Rayon's global pool initializes on first
-  use and persists for the process. This means the first sample pays
-  pool startup cost; subsequent samples reuse warm threads. This is
-  realistic — most production code uses a long-lived pool.
-
-- **Pool size**: Rayon defaults to `num_cpus` threads. If you're
-  benchmarking within a comparison group, all benchmarks share the
-  same pool size. To compare different pool sizes, configure rayon's
-  `ThreadPoolBuilder` in each benchmark's setup.
-
-- **cpu-time feature**: Thread-local CPU time only measures the
-  calling thread. For rayon benchmarks this severely undercounts
-  actual CPU usage. Use wall-clock time (the default) for parallel
-  workloads.
-
-- **Interaction with resource gating**: Rayon's threads show up as
-  CPU load in the gate check. The gate doesn't know they're part of
-  the benchmark, not background noise. For heavily parallel benchmarks,
-  consider `GateConfig::disabled()` or raising `max_cpu_load`.
-
-### Design notes
-
-- **Barrier-synchronized start**: Both `bench_contended` and
-  `bench_parallel` use `Barrier::new(threads + 1)` — the +1 is the
-  timing thread. All worker threads wait at the barrier, then the main
-  thread starts the timer and waits at the second barrier for completion.
-
-- **Interleaving works**: Threaded benchmarks are just `BenchFn`
-  closures. They run in their slot during the round shuffle like any
-  other benchmark. Threads are created and destroyed per sample.
-
-- **Thread creation overhead**: Each sample spawns and joins `N`
-  threads. This is excluded from timing (outside the barriers) but
-  adds wall-clock overhead between samples. For benchmarks where thread
-  creation cost matters, use rayon's persistent pool instead.
-
-### Future: automatic scaling analysis — `bench_scaling()`
-
-The `bench_parallel` loop (`for threads in [1, 2, 4] { ... }`) is
-boilerplate. Zenbench should handle this automatically:
-
-```rust,ignore
-group.bench_scaling("sqrt_work", |b, _tid| {
-    b.iter(|| expensive_computation())
-});
-// Automatically probes 1, 2, 4, ..., physical_cores, logical_cores
-```
-
-What it should report:
-
-```
-│ threads │     throughput │ scaling │ efficiency │
-│       1 │ 2.49 Gitems/s │   1.00x │       100% │
-│       2 │ 4.80 Gitems/s │   1.93x │        96% │  ← near-linear
-│       4 │ 7.10 Gitems/s │   2.85x │        71% │  ← diminishing
-│       8 │ 7.20 Gitems/s │   2.89x │        36% │  ← wasting cores
-│      16 │ 6.90 Gitems/s │   2.77x │        17% │  ← SMT hurts
-```
-
-Where:
-- **scaling** = throughput_N / throughput_1
-- **efficiency** = scaling / N × 100% (perfect = 100%)
-- Detect physical vs logical cores (SMT/HT) via `sysinfo`
-- Flag the sweet spot: best throughput-per-core
-- Flag when adding threads *hurts* (SMT contention)
-- Consider "CPU time waste" tolerance: 71% efficiency means 29%
-  of CPU time is coordination overhead, not useful work
-
-Design considerations:
-- Thread counts should include powers of 2 up to logical cores,
-  plus the physical core count if it's not a power of 2
-- Each thread count is a separate benchmark in the comparison group
-  so they get interleaved and compared properly
-- The single-thread run is the baseline for scaling metrics
-- Throughput must be set on the group for scaling to be meaningful
-- The gate needs thread-count awareness so it doesn't flag the
-  benchmark's own threads as "heavy processes"
-
-### Other future work
-
-- **Resource gating thread awareness**: The gate should know a
-  benchmark's thread count so it doesn't flag the benchmark's own
-  threads as "heavy processes."
-- **Process-level CPU time**: Aggregate CPU time across all threads
-  for efficiency analysis (CPU-seconds per wall-second).
-
-## Gaps and future statistical work
-
-A systematic comparison against criterion, divan, and tango-bench
-reveals concrete methodology gaps in zenbench. Ordered by impact.
-
-### Statistical gaps
-
-#### ✅ Overhead compensation — DONE
-
-`measure_loop_overhead()` runs 200 samples of 10K iterations of an
-empty `for i in 0..N { black_box(i); }` loop, takes the minimum as
-the per-iteration harness cost. Subtracted from all measurements.
-Stored in `SuiteResult.loop_overhead_ns` for transparency.
-
-#### ✅ Practical significance gate — DONE
-
-`GroupConfig::noise_threshold` (default 1%). Significance requires the
-95% CI to fall entirely outside ±threshold of baseline. Prevents
-"statistically significant but unmeasurably small" reports.
-
-#### ✅ Per-benchmark confidence intervals — DONE
-
-`MeanCi` struct: bootstrap 95% CI on each benchmark's mean, not just
-paired differences. Stored in `BenchmarkResult.mean_ci`. Reported in
-JSON, LLM, CSV output.
-
-#### ✅ Configurable bootstrap resamples — DONE
-
-`GroupConfig::bootstrap_resamples` (default 10K, minimum 100). Passed
-through to both `PairedAnalysis` and per-benchmark `MeanCi`.
-
-#### 1. Slope regression (MEDIUM — deferred)
-
-**What criterion does**: Linear sampling with OLS regression separates
-per-iteration cost from constant overhead. Most impactful for sub-100ns
-benchmarks.
-
-**Our mitigation**: Overhead compensation subtracts the loop+black_box
-cost directly. Precision-driven iteration estimation ensures enough
-iterations to amortize timer overhead. TSC timer reduces per-call cost.
-These three measures together address the same root problem that slope
-regression solves — the remaining gap is for benchmarks where the
-function call overhead itself (not loop/black_box) is significant
-relative to the measured time. For most practical benchmarks (> 10ns),
-the difference is negligible.
-
-**Status**: Not planned for 0.1. Overhead compensation + TSC + precision
-iteration estimation provide equivalent accuracy for > 10ns benchmarks.
-Slope regression would improve sub-10ns measurements.
-
-### Methodology gaps
-
-#### ✅ TSC / hardware timer — DONE
-
-`precise-timing` feature (default on). `rdtsc`/`rdtscp` on x86_64 with
-`lfence` serialization. `cntvct_el0` on aarch64 with `isb` barriers.
-Auto-calibration against `Instant` (convergence < 0.1%). Automatic
-fallback when TSC is non-invariant.
-
-#### ✅ Stack alignment jitter — DONE
-
-Safe recursive trampoline: `stack_jitter_call(func, bencher, depth)`.
-Each level adds a 64-byte `black_box`ed stack frame. Random 0..4096
-byte offset per sample per benchmark. On by default with
-`precise-timing`. Zero unsafe code.
-
-#### ✅ Deferred drop — DONE
-
-`Bencher::iter_deferred_drop()`: collects outputs in pre-allocated
-`Vec<O>` during the timed loop, drops after timing ends. `black_box`
-on the slice prevents LLVM from eliding writes.
-
-#### ✅ asm fences — DONE
-
-`asm!("")` barriers around all timing windows. Stronger than
-`compiler_fence(SeqCst)` — LLVM cannot reason through inline assembly.
-Applied in `iter()`, `iter_deferred_drop()`, `InputBencher::run()`,
-and `measure_loop_overhead()`.
-
-#### ✅ Allocation profiling — DONE
-
-`AllocProfiler` wrapping any `GlobalAlloc`. Thread-local `Cell<u64>`
-counters. Reports `allocs/iter`, `bytes/iter`, `reallocs/iter` in
-LLM, CSV, JSON output.
-
-#### 2. Explicit warmup phase (LOW)
-
-Rust is AOT-compiled (no JIT). Iteration estimation already runs each
-benchmark 5+ times, warming caches and branch predictors. `with_input()`
-separates setup from measurement. A time-based warmup phase would help
-benchmarks with large working sets (filesystem caches, database
-connections) but these are uncommon in microbenchmarking.
-
-**Status**: Low priority. `warmup_time` in `GroupConfig` is the planned
-API if needed.
-
-#### 3. Precision-driven iteration estimation — DONE (post-original-doc)
-
-Added after the initial gap analysis. Scales iteration count to
-`max(1000 × timer_resolution / per_iter_time, sample_target_ns / per_iter_time)`.
-Produces shortest possible samples that are still precise. Default
-`sample_target_ns` = 1ms caps noise exposure.
-
-### What we already do that others don't
-
-For completeness — areas where zenbench leads:
-
-- **Auto-convergence**: Unique. No competitor adapts measurement
-  duration to statistical certainty. Saves time on clean systems,
-  spends more on noisy ones.
-- **Resource gating**: Unique. CPU load, temperature, RAM, heavy
-  process monitoring before each round.
-- **Drift detection**: Unique. Spearman rank correlation catches
-  thermal throttling that sequential frameworks miss entirely.
-- **Non-parametric testing**: Wilcoxon signed-rank is more robust than
-  criterion's Welch t-test or tango's Z-test. No normality assumption.
-- **Cohen's d**: Only framework with a standardized effect size metric.
-- **Process coordination**: File lock prevents concurrent benchmarks
-  from corrupting each other's measurements.
-- **Interleaving + rich statistics**: tango interleaves but has minimal
-  stats. Criterion has rich stats but no interleaving. Zenbench has both.
-
-## Baseline persistence and CI regression testing
-
-The current process-level confirmation policy is documented in
-[benchmark modes](docs/benchmark-modes.md), including assumptions and independent
-SciPy controls. Earlier round-level analyses in this document describe exploratory
-inference; they do not authorize baseline promotion.
-
-Confirm/Evidence retain every fixed-plan child and raw round. Same-binary arms
-use independent process log ratios; historical baseline comparisons use Welch
-intervals on process log latencies. The practical margin and family confidence
-are recorded. No adaptive stopping or round trimming enters these decisions.
-CPU/resource uncertainty and incomplete inventories block promotion. Inconclusive
-intervals cannot update a baseline simply because regression is undetected.
-
-[Regression testing](REGRESSION-TESTING.md) owns CLI usage and exit semantics.
-[Storage](docs/result-storage.md) owns immutable gzip objects, versioned baseline
-references and compact selected Git snapshots. Reanalysis references the raw hash
-and never re-executes a benchmark. Historical comparisons do not replace randomized
-contemporaneous A/B blocks; `self-compare` remains exploratory.
-
-## Cross-machine comparability
-
-### The fundamental problem
-
-CI runners are not stable hardware. GitHub Actions runners use shared
-VMs with variable CPU allocation, noisy neighbors, and no guarantees
-about CPU model or frequency. Even self-hosted runners may be
-heterogeneous. A benchmark that takes 100ns on one runner might take
-130ns on another, and neither number is wrong.
-
-This means absolute times from different machines cannot be directly
-compared. But CI regression testing requires *some* form of
-cross-machine comparison, at least for trend tracking.
-
-### Approach 1: Relative benchmarking (PRIMARY — already implemented)
-
-The strongest approach: don't compare across machines. Run both old
-and new code on the same machine in the same CI job. The ratio
-(new/old) cancels out hardware differences.
-
-zenbench's `self-compare` already implements this via git worktrees.
-For PR regression testing, this is the recommended approach.
-
-**Limitation**: Requires building two versions, roughly doubling CI
-time. Cannot track absolute performance trends over time (only
-relative to the comparison point).
-
-### Approach 2: Calibration workloads (MEDIUM priority)
-
-Run a small set of known reference benchmarks alongside real
-benchmarks. Normalize real benchmark times by dividing by the
-corresponding calibration time from the same run.
-
-**Design:**
-
-```rust
-// Built-in calibration suite
-suite.calibrate(|cal| {
-    cal.integer_throughput();    // tight loop: adds, multiplies, branches
-    cal.memory_bandwidth();     // sequential memcpy, 1 MiB
-    cal.memory_latency();       // pointer-chasing, 4 MiB (L3-bound)
-    cal.branch_heavy();         // unpredictable branches
-});
-```
-
-The calibration runs before real benchmarks (excluded from gate waits
-since it's measuring the machine, not user code). Results are stored
-alongside the SuiteResult:
-
-```json
-{
-  "calibration": {
-    "integer_throughput_ns": 0.42,
-    "memory_bandwidth_gbps": 18.5,
-    "memory_latency_ns": 12.3,
-    "branch_heavy_ns": 8.7,
-    "cpu_model": "AMD EPYC 7763",
-    "logical_cores": 4
-  }
-}
-```
-
-**Normalization**: For each real benchmark, divide its mean time by
-the most relevant calibration metric. CPU-bound benchmarks normalize
-by `integer_throughput`; memory-bound by `memory_bandwidth`. The user
-tags each benchmark group with its dominant bottleneck, or zenbench
-auto-detects based on IPC heuristics (future work).
-
-**Pros**: Simple, fast (~100ms for calibration), gives approximate
-hardware-normalized scores. Useful for trend tracking.
-
-**Cons**: Different benchmarks scale differently across hardware. A
-single calibration factor is approximate. A CPU-bound calibration
-won't normalize a memory-bound benchmark correctly. Multiple
-calibration workloads help but don't eliminate the problem.
-
-### Approach 3: Testbed separation (MEDIUM priority)
-
-Tag each result with a hardware fingerprint: CPU model, cache sizes,
-core count, OS. Compare only within the same testbed. When hardware
-changes, start a new baseline.
-
-**Design:**
-
-```json
-{
-  "testbed": {
-    "cpu_model": "AMD EPYC 7763",
-    "cpu_family": 25,
-    "cache_l1d_kb": 32,
-    "cache_l2_kb": 512,
-    "cache_l3_kb": 32768,
-    "cores_physical": 2,
-    "cores_logical": 4,
-    "os": "linux",
-    "arch": "x86_64"
-  }
-}
-```
-
-Baseline comparisons refuse to compare across testbeds unless
-`--cross-testbed` is explicitly passed (which widens CIs per the
-variance inflation approach above).
-
-This is Bencher's approach. It's simple, correct, and conservative.
-The cost is losing historical comparison across hardware transitions.
-
-### Approach 4: Change point detection (FUTURE)
-
-For long-running time series (nightly benchmarks on main), use change
-point detection (E-Divisive algorithm) instead of point-to-point
-threshold comparison. CPD analyzes the entire history and detects
-*persistent shifts* in the distribution.
-
-**Why this matters for cross-machine**: When hardware changes, CPD
-produces a single change point. Threshold-based detection would fire
-on every benchmark. CPD handles it gracefully — one notification
-about the hardware transition, then it re-baselines automatically.
-
-**Design**: Store benchmark results as a time series (one point per
-commit on main). Run CPD as a post-processing step. Alert when a
-change point is detected that doesn't correspond to a known hardware
-transition.
-
-**Implementation**: Apache Otava's windowed t-test approach (not full
-E-Divisive permutation test) is the practical choice. The windowed
-variant is O(1) per new data point and needs ~30 historical points to
-be reliable.
-
-This is complementary to self-compare: self-compare catches
-regressions at PR time (blocking), CPD catches gradual drifts on main
-(advisory).
-
-### Approach 5: Instruction counting (OPTIONAL)
-
-Use Valgrind's Cachegrind/Callgrind to count executed instructions
-instead of measuring wall time. Instruction counts are nearly
-hardware-independent (< 0.001% variance across runs).
-
-**Integration**: This would be a separate mode, not a replacement for
-wall-clock benchmarking. Something like:
-
-```bash
-cargo bench -- --mode=cachegrind --bench my_bench
-```
-
-**Caveats**:
-- **Not all instructions cost the same.** Code that replaces 1000
-  scalar ops with 125 AVX2 ops looks *slower* by instruction count
-  despite being faster in wall time.
-- **Cache simulation is outdated.** Cachegrind's model doesn't match
-  modern CPUs (no prefetching, no OoO, simplified associativity).
-- **~20-50× slowdown.** Only practical for a subset of benchmarks.
-- **Linux only.** Valgrind doesn't run on Windows or macOS ARM.
-- **Not perfectly deterministic.** CodSpeed discovered that different
-  CPU models cause glibc's malloc to detect different CPU features,
-  changing code paths and producing different instruction counts for
-  the same binary.
-- **Cannot measure threading.** Valgrind serializes threads.
-
-This is useful as a *complementary signal* alongside wall-clock
-measurements, not as a replacement. iai-callgrind already does this
-well — integration or interop with iai-callgrind may be more practical
-than reimplementing.
-
-### Approach comparison
-
-| Approach | Cross-machine? | Accuracy | CI time | Complexity |
-|---|---|---|---|---|
-| Relative (self-compare) | N/A (same machine) | Excellent | 2× build | Already built |
-| Calibration workloads | Approximate | Good for similar HW | +100ms | Medium |
-| Testbed separation | No (avoids the problem) | Exact within testbed | None | Low |
-| Change point detection | Handles transitions | Good for trends | Post-processing | High |
-| Instruction counting | Yes | Misses SIMD/cache | 20-50× | Medium-High |
-
-### Remaining implementation priorities
-
-**Phase 1 — DONE:**
-- ✅ Named baseline save/load, exit codes, `--update-on-pass`
-- ✅ Noise threshold gate
-- ✅ Overhead compensation, TSC timer, asm fences, deferred drop
-- ✅ Stack alignment jitter, per-benchmark CIs, configurable resamples
-- ✅ Allocation profiling, precision-driven iteration estimation
-
-**Phase 2 — DONE:**
-- ✅ Cross-run variance inflation (pooled t-test gating)
-- ✅ Hardware fingerprint (Testbed struct in SuiteResult)
-- ✅ Testbed comparison guards (warn on CPU/platform change)
-- ✅ Calibration workloads (integer, memory BW, memory latency)
-- ✅ Slope regression (OLS, linear sampling mode)
-- ✅ Warmup phase (GroupConfig::warmup_time now functional)
-- ✅ Async support (iter_async with tokio block_on)
-- ✅ Criterion compat config forwarding (sample_size, measurement_time, etc.)
-
-**Phase 3 — Time series and change point detection (FUTURE)**:
-
-Design (not yet implemented):
-
-**Storage**: Append each run's per-benchmark means to
-`.zenbench/history/<group>__<bench>.csv`:
-```csv
-timestamp,git_hash,mean_ns,variance,n
-2026-03-24T12:00:00Z,abc1234,245.3,12.5,200
-2026-03-24T13:00:00Z,def5678,312.4,15.2,200
-```
-
-**Algorithm**: Windowed t-test (Apache Otava approach):
-- Window size: 30 data points (configurable)
-- For each new data point: split history at that point, compare
-  the 30-point window before vs the 30-point window after
-- Welch's t-test on the two windows; if t > 3.0 AND the shift
-  persists for 3+ consecutive commits → flag as change point
-- O(1) per new data point via running mean/variance
-
-**CLI**: `zenbench history analyze`
-- Scans all CSV files in `.zenbench/history/`
-- Reports change points with commit ranges and magnitude
-- Advisory only — doesn't block CI
-
-**Integration**:
-- `postprocess_result()` auto-appends to history CSV after each run
-- `zenbench history analyze` is the query tool
-- Complements `--baseline` (blocking point comparison) with
-  time-series trend detection (advisory drift detection)
-
-**Estimated scope**: ~400 lines (CSV append, windowed t-test, CLI)
-
-**Phase 4 — Instruction counting integration (FUTURE, OPTIONAL)**:
-- `--mode=cachegrind` for hardware-independent metrics
-- Interop with iai-callgrind output format
-
-## References
-
-- Mytkowicz, Diwan, Hauswirth, Sweeney. [Producing Wrong Data Without Doing Anything Obviously Wrong](https://dl.acm.org/doi/10.1145/1508284.1508275). ASPLOS 2009.
-- Curtsinger, Berger. [STABILIZER: Statistically Sound Performance Evaluation](https://people.cs.umass.edu/~emery/pubs/stabilizer-asplos13.pdf). ASPLOS 2013.
-- Chen, Revels. [Robust Benchmarking in Noisy Environments](https://arxiv.org/abs/1608.04295). IEEE HPEC 2016.
-- Kalibera, Jones. [Rigorous Benchmarking in Reasonable Time](https://kar.kent.ac.uk/33611/). ISMM 2013.
-- Tratt. [What Metric to Use When Benchmarking?](https://tratt.net/laurie/blog/2022/what_metric_to_use_when_benchmarking.html). 2022.
-- Tratt. [Minimum Times Tend to Mislead When Benchmarking](https://tratt.net/laurie/blog/2019/minimum_times_tend_to_mislead_when_benchmarking.html). 2019.
-- [nanobench documentation](https://nanobench.ankerl.com/reference.html) (Ankerl).
-- [Criterion.rs Analysis Process](https://bheisler.github.io/criterion.rs/book/analysis.html).
-- [Divan announcement and design philosophy](https://nikolaivazquez.com/blog/divan/).
-- [tango-bench: paired benchmarking via dylib loading](https://github.com/bazhenov/tango).
-- [Google Benchmark User Guide](https://google.github.io/benchmark/user_guide.html).
-- [Apache Otava: Change Point Detection for Performance Regressions](https://otava.apache.org/docs/math/). 8 years of optimization from MongoDB/DataStax.
-- [CodSpeed: Why glibc is faster on some GitHub Actions Runners](https://codspeed.io/blog/unrelated-benchmark-regression). Cross-machine instruction count pitfalls.
-- [iai-callgrind: Hardware-agnostic Rust benchmarking via Cachegrind](https://github.com/iai-callgrind/iai-callgrind).
-- [Bencher: Continuous Benchmarking](https://bencher.dev/docs/explanation/continuous-benchmarking/).
-- [Aakinshin: Performance Stability of GitHub Actions](https://aakinshin.net/posts/github-actions-perf-stability/). Measured up to 3× variance.
-- [rustc-perf: Instruction counts as primary metric](https://kobzol.github.io/rust/rustc/2023/09/23/rustc-runtime-benchmarks.html). SQLite also uses this approach.
+| Incorrect or unequal work | Named workloads, retained inventory, correctness guidance | Arbitrary closures have no automatic output oracle |
+| CPU/cache asymmetry | Topology admission, process boundary, scoped thread masks | Unsupported targets refuse; capacity is not complete domain identity |
+| Frequency and thermal history | Warmup, interleaving, available temperature observations | No proof of maximum clock or steady state; power limits and AVX history persist |
+| Other agents, IRQs, SMT and shared memory | Background observations, cooperative serialization, retained flags | No exclusive reservation or complete per-core interference detector |
+| Code/stack/heap layout | Fresh processes and optional stack jitter | One build is not a randomized layout population |
+| Optimizer elimination and specialization | Black-box output, assembly/differential workflow | Inputs, dispatch boundary, flags and semantic work need review |
+| Timer and harness perturbation | Batching, calibration, raw/compensated data, resolution floor | Overhead subtraction and calibration are approximate |
+| Temporal correlation and multiple looks | Fixed confirmation plan; process-level unit | Independence/log-normality not guaranteed; no sequential inference |
+| Candidate/corpus selection | Separate exploration and fresh confirmation; workload IDs | No automatic holdout design or study-wide multiplicity control |
+| Historical baseline drift | Testbed/config checks, independent-population interval | No contemporaneous randomized two-binary runner yet |
+| Missing/selected evidence | Complete attempts, validity checks, immutable objects | External artifact availability and disclosure remain necessary |
+| Cross-machine generalization | Explicit scope and per-cell records | No automatic fleet matrix or population-weighted inference |
+
+For a paper or release report, publish the question and scope, correctness
+contract, exact builds/inputs, placement/power context, timing boundary, complete
+sampling plan, estimand, interval/margin, exclusions and unsuccessful attempts,
+raw-data locator, decoding/reanalysis commands, and measured experiment cost.
+Explain what a reader can reproduce and what was not measured. A narrow interval
+and a green exit code cannot supply missing experimental design.
+
+## 12. Research context and references
+
+Mytkowicz, Diwan, Hauswirth and Sweeney, *Producing Wrong Data Without Doing Anything
+Obviously Wrong!* (ASPLOS 2009), demonstrate that apparently irrelevant setup
+choices can bias conclusions. The implication here is to treat layout/environment
+as experimental factors, rather than assume paired timing cancels them.
+[Author publication page](https://sape.inf.usi.ch/publications/asplos09.html),
+[DOI](https://doi.org/10.1145/1508244.1508275).
+
+Curtsinger and Berger, *STABILIZER: Statistically Sound Performance Evaluation*
+(ASPLOS 2013), repeatedly randomize code, stack and heap layouts to address layout
+bias. Zenbench does not implement that mechanism. Neither 30 rounds nor fresh
+execution alone establishes its distributional guarantees.
+[Author manuscript](https://people.cs.umass.edu/~emery/pubs/stabilizer-asplos13.pdf).
+
+Chen and Revels, *Robust Benchmarking in Noisy Environments* (HPEC 2016), discuss
+timer resolution, batching and non-ideal timing distributions. Their model
+motivates examining low observations, but does not justify treating every
+benchmark's minimum as universal true performance. Zenbench retains minima as
+diagnostics and uses a different process-mean estimand for confirmation.
+[Paper](https://arxiv.org/abs/1608.04295),
+[full text](https://arxiv.org/html/1608.04295v1).
+
+Kalibera and Jones, *Rigorous Benchmarking in Reasonable Time* (ISMM 2013), separate
+variation at iteration, execution and build levels and allocate repetition where
+uncertainty arises. Zenbench's fixed process protocol adopts the distinction
+between levels; it does not implement their full experimental-budget optimizer
+or reproduce their estimator.
+[Author repository and corrected manuscript](https://kar.kent.ac.uk/33611/).
+
+Primary operating-system documentation relevant to containment:
+[Linux cpuset controller](https://docs.kernel.org/admin-guide/cgroup-v2.html#cpuset),
+[Windows Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects),
+[Apple affinity API](https://developer.apple.com/library/archive/releasenotes/Performance/RN-AffinityAPI/).
+
+Issue 29 source review, observed 2026-10-12 (Git blob identities; resolve the paths
+again before relying on a later revision):
+
+- [rav1d-safe ab_bench.py](https://github.com/imazen/rav1d-safe/blob/7e48ed12501f208b5d4b155878c26a761f11b88e/scripts/perf/decoder_bench/ab_bench.py),
+  blob `33383d7ac457de6f23ca2fc6af35ef08d7f18745`.
+- [zenav1-svt perf_ab.sh](https://github.com/imazen/zenav1-svt/blob/bed839749c786ba35d751e18e2c382a65c2f8bc8/rust/tools/perf_ab.sh),
+  blob `04f9242865ba9b0e99dfccb3a4bc73ab086a863a`.
+
+## Appendix: implementation and validation map
+
+| Subject | Source/retained check |
+|---|---|
+| Plan defaults, validation, precedence | [plan.rs](src/plan.rs), [mode guide](docs/benchmark-modes.md) |
+| Supervisor, aggregation, macro exits | [lib.rs](src/lib.rs) |
+| Admission, warmup, batching, schedules, stopping | [engine.rs](src/engine.rs) |
+| Timing boundaries and threading APIs | [bench.rs](src/bench.rs), [timing.rs](src/timing.rs) |
+| Descriptive summaries, trimming and bootstrap | [stats.rs](src/stats.rs) |
+| Process estimand, intervals, compatibility and verdicts | [inference.rs](src/inference.rs), [baseline.rs](src/baseline.rs) |
+| Resource counters, ownership and freshness | [platform.rs](src/platform.rs), [monitor.rs](src/monitor.rs), [gate.rs](src/gate.rs) |
+| CPU controls and independent native observations | [placement documentation](docs/process-affinity.md) |
+| Storage, integrity, export and reanalysis | [storage.rs](src/storage.rs), [storage guide](docs/result-storage.md) |
+| Numeric estimator oracle | [SciPy generator](examples/inference_oracle.py), [interval fixtures](tests/fixtures/process_intervals.json) |
+| Coverage and excluded scenarios | [simulation generator](examples/coverage_oracle.py), [counts](tests/fixtures/process_coverage.json) |
+| Historical wall-time experiment | [audit driver](examples/audit_defaults.py), [defaults audit](docs/defaults-audit.md) |
+
+This document describes the audited implementation. Proposals in sections 7 and
+8 need their own implementation, independent controls and measured evaluation;
+they are not guarantees provided by the current CLI.
+
+## Earlier reading list
+
+These links preserve the earlier methodology's reading list. They are background
+references, not claims that Zenbench implements those tools or their guarantees.
+
+- [Producing Wrong Data Without Doing Anything Obviously Wrong](https://dl.acm.org/doi/10.1145/1508284.1508275)
+- [What Metric to Use When Benchmarking?](https://tratt.net/laurie/blog/2022/what_metric_to_use_when_benchmarking.html)
+- [Minimum Times Tend to Mislead When Benchmarking](https://tratt.net/laurie/blog/2019/minimum_times_tend_to_mislead_when_benchmarking.html)
+- [nanobench documentation](https://nanobench.ankerl.com/reference.html)
+- [Criterion.rs Analysis Process](https://bheisler.github.io/criterion.rs/book/analysis.html)
+- [Divan announcement and design philosophy](https://nikolaivazquez.com/blog/divan/)
+- [tango-bench: paired benchmarking via dylib loading](https://github.com/bazhenov/tango)
+- [Google Benchmark User Guide](https://google.github.io/benchmark/user_guide.html)
+- [Apache Otava: Change Point Detection for Performance Regressions](https://otava.apache.org/docs/math/)
+- [CodSpeed: Why glibc is faster on some GitHub Actions Runners](https://codspeed.io/blog/unrelated-benchmark-regression)
+- [iai-callgrind: Hardware-agnostic Rust benchmarking via Cachegrind](https://github.com/iai-callgrind/iai-callgrind)
+- [Bencher: Continuous Benchmarking](https://bencher.dev/docs/explanation/continuous-benchmarking/)
+- [Aakinshin: Performance Stability of GitHub Actions](https://aakinshin.net/posts/github-actions-perf-stability/)
+- [rustc-perf: Instruction counts as primary metric](https://kobzol.github.io/rust/rustc/2023/09/23/rustc-runtime-benchmarks.html)
