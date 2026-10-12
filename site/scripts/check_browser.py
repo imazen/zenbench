@@ -89,6 +89,14 @@ def main():
             page.goto(base + "guides/", wait_until="networkidle")
             page.locator('main a[href$="/getting-started/"]').first.click()
             page.wait_for_url(base + "getting-started/")
+            page.goto(base + "charts/", wait_until="networkidle")
+            for preview in page.locator("main img").all():
+                if not preview.evaluate("e => e.complete && e.naturalWidth > 0"):
+                    failures.append(f"{width}: chart preview did not load")
+            with page.expect_download() as download:
+                page.get_by_role("link", name="Download light SVG", exact=True).click()
+            if download.value.suggested_filename != "zenbench-light.svg":
+                failures.append(f"{width}: SVG download filename differs")
             # The theme's real copy button must preserve the displayed command.
             page.goto(base + "external-programs/", wait_until="networkidle")
             copy = page.locator("main .copy-code-button").first

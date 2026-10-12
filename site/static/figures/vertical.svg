@@ -1,0 +1,89 @@
+<svg width="600" height="450" viewBox="0 0 600 450" xmlns="http://www.w3.org/2000/svg">
+<rect x="0" y="0" width="600" height="450" fill="#FFFFFF"/>
+<text font-size="18" x="10" y="15" dy="15" font-weight="bold" dominant-baseline="middle" font-family="Roboto" fill="#464646">
+Illustrative data — latency
+</text>
+<text font-size="14" x="193.5" y="45" dy="10" dominant-baseline="middle" font-family="Roboto" fill="#464646">
+mean time (µs), lower is better
+</text>
+<g>
+<line stroke-width="2" x1="397" y1="25" x2="422" y2="25" stroke="#5470C6"/>
+<circle cx="409.5" cy="25" r="5.5" stroke-width="2" stroke="#5470C6" fill="#FFFFFF"/>
+<text font-size="14" x="425" y="29" font-family="Roboto" fill="#464646">
+baseline
+</text>
+</g>
+<g>
+<line stroke-width="2" x1="485" y1="25" x2="510" y2="25" stroke="#91CC75"/>
+<circle cx="497.5" cy="25" r="5.5" stroke-width="2" stroke="#91CC75" fill="#FFFFFF"/>
+<text font-size="14" x="513" y="29" font-family="Roboto" fill="#464646">
+candidate
+</text>
+</g>
+<g stroke="#E0E6F2" stroke-width="1">
+<line x1="35" y1="80" x2="580" y2="80"/><line x1="35" y1="135.8" x2="580" y2="135.8"/><line x1="35" y1="191.7" x2="580" y2="191.7"/><line x1="35" y1="247.5" x2="580" y2="247.5"/><line x1="35" y1="303.3" x2="580" y2="303.3"/><line x1="35" y1="359.2" x2="580" y2="359.2"/>
+</g>
+<g>
+
+<text font-size="14" x="7" y="85" font-family="Roboto" fill="#6E7079">
+4.8
+</text>
+<text font-size="14" x="19" y="140.8" font-family="Roboto" fill="#6E7079">
+4
+</text>
+<text font-size="14" x="7" y="196.7" font-family="Roboto" fill="#6E7079">
+3.2
+</text>
+<text font-size="14" x="7" y="252.5" font-family="Roboto" fill="#6E7079">
+2.4
+</text>
+<text font-size="14" x="7" y="308.3" font-family="Roboto" fill="#6E7079">
+1.6
+</text>
+<text font-size="14" x="7" y="364.2" font-family="Roboto" fill="#6E7079">
+0.8
+</text>
+<text font-size="14" x="19" y="420" font-family="Roboto" fill="#6E7079">
+0
+</text>
+</g>
+<g>
+<g stroke="#6E7079" stroke-width="1">
+<line x1="35" y1="415" x2="580" y2="415"/>
+<line x1="35" y1="415" x2="35" y2="420"/>
+<line x1="307.5" y1="415" x2="307.5" y2="420"/>
+<line x1="580" y1="415" x2="580" y2="420"/>
+</g>
+<text font-size="14" transform="translate(171,466) rotate(-1718)" text-anchor="middle" font-family="Roboto" fill="#6E7079">
+256 items
+</text>
+<text font-size="14" transform="translate(443,470) rotate(-1718)" text-anchor="middle" font-family="Roboto" fill="#6E7079">
+1024 items
+</text>
+</g>
+<rect x="40" y="331.2" width="129.8" height="83.8" fill="#5470C6" data-series="baseline" data-category="256 items" data-value="1.2"/>
+<rect x="312.5" y="80" width="129.8" height="335" fill="#5470C6" data-series="baseline" data-category="1024 items" data-value="4.8"/>
+<rect x="172.8" y="352.2" width="129.8" height="62.8" fill="#91CC75" data-series="candidate" data-category="256 items" data-value="0.9"/>
+<rect x="445.2" y="191.7" width="129.8" height="223.3" fill="#91CC75" data-series="candidate" data-category="1024 items" data-value="3.2"/>
+<text font-size="10" x="104.9" y="331.2" dx="-7.5" dy="-8" font-family="Roboto" fill="#464646">
+1.2
+</text>
+<text font-size="10" x="377.4" y="80" dx="-7.5" dy="-8" font-family="Roboto" fill="#464646">
+4.8
+</text>
+<text font-size="10" x="237.6" y="352.2" dx="-7" dy="-8" font-family="Roboto" fill="#464646">
+0.9
+</text>
+<text font-size="10" x="510.1" y="191.7" dx="-7.5" dy="-8" font-family="Roboto" fill="#464646">
+3.2
+</text>
+
+<!-- zenbench ±MAD data
+  256 items:
+    baseline: 1.20 ±0.09 µs
+    candidate: 0.90 ±0.07 µs
+  1024 items:
+    baseline: 4.80 ±0.36 µs
+    candidate: 3.20 ±0.24 µs
+-->
+</svg>

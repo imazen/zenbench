@@ -1,0 +1,22 @@
+{
+  "kind": "illustrative-chart-styles",
+  "measured": false,
+  "generator": "examples/chart_gallery.rs",
+  "command": "just chart-gallery NEW_DIRECTORY",
+  "renderer": "charts-rs 2.0.0",
+  "files": [
+    {
+      "file": "light.svg",
+      "sha256": "02a7f230216280981e2f354e2f52f173a52335fd1333365a0c01f677acfcb094"
+    },
+    {
+      "file": "dark.svg",
+      "sha256": "76e8ab7a59eec7bc1d7b06e1b95752350685214c1c08818e66ed279cbb3c0183"
+    },
+    {
+      "file": "vertical.svg",
+      "sha256": "bcbb879b8236d8efe3797b8b9791a51fbfa1a0074f68e42c0e7fedd5ecc9f447"
+    }
+  ],
+  "generator_commit": "193b6b2219ca"
+}

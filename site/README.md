@@ -37,3 +37,8 @@ suite decisions, external pair decisions and descriptive fleet observations clea
 The root `_index.md` sorts sidebar pages by weight. Use Zola `@/page.md` links for
 content pages/anchors; the build resolves and checks them. The small project
 navigation/header overrides retain the Goyo layout and native keyboard controls.
+
+The chart guide's downloadable SVGs are illustrative renderer output, not measured
+performance. Reproduce them with root `just chart-gallery NEW_DIRECTORY`; the
+small `static/figures/provenance.json` records their hashes. Browser checks load
+all previews and exercise the SVG download in addition to guide navigation.
