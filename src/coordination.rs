@@ -110,6 +110,15 @@ impl Reservation {
                 });
             }
         }
+        // Declare the reservation before the control handle: on an early
+        // return, the control lock must close before reservation cleanup tries
+        // to take it. Normal completion and queue scans share that mutex.
+        let mut reservation = Self {
+            root: root.clone(),
+            sequence: 0,
+            guard: None,
+            retain: false,
+        };
         let control = open(&root.join("queue.lock"))?;
         // The control mutex only protects small filesystem transactions. Its
         // acquisition is bounded too, including an abandoned/stalled client.
@@ -140,12 +149,8 @@ impl Reservation {
         };
         let record_path = root.join(format!("{sequence}.json"));
         fs::write(&record_path, serde_json::to_vec(&record)?)?;
-        let mut reservation = Self {
-            root,
-            sequence,
-            guard: Some(guard),
-            retain: false,
-        };
+        reservation.sequence = sequence;
+        reservation.guard = Some(guard);
         FileExt::unlock(&control)?;
         let mut announced = false;
         loop {
@@ -255,11 +260,29 @@ fn lock_until(file: &File, start: Instant, timeout: Duration) -> io::Result<()> 
 impl Drop for Reservation {
     fn drop(&mut self) {
         if self.guard.is_some() && !self.retain {
-            // A ticket number is never reused. Remove the record before closing
-            // the guard so a scanner cannot mistake completion for an orphan.
-            let _ = fs::remove_file(self.root.join(format!("{}.json", self.sequence)));
-            drop(self.guard.take());
-            let _ = fs::remove_file(self.root.join(format!("{}.guard", self.sequence)));
+            let cleanup = (|| -> io::Result<()> {
+                let control = open(&self.root.join("queue.lock"))?;
+                lock_until(&control, Instant::now(), Duration::from_secs(5))?;
+                // Windows rejects opening delete-pending files with AccessDenied.
+                // Serialize deletion with admission's record/guard scan, rather
+                // than interpreting that error as permission to start work.
+                match fs::remove_file(self.root.join(format!("{}.json", self.sequence))) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e),
+                }
+                // A ticket number is never reused. Remove the record before
+                // closing its guard so completion cannot look like an orphan.
+                drop(self.guard.take());
+                let _ = fs::remove_file(self.root.join(format!("{}.guard", self.sequence)));
+                Ok(())
+            })();
+            if let Err(error) = cleanup {
+                eprintln!(
+                    "[zenbench] admission cleanup failed; reservation {} retained: {error}",
+                    self.sequence
+                );
+            }
         }
     }
 }
@@ -316,6 +339,39 @@ mod tests {
         assert!(Reservation::at(root.clone(), "second", Duration::ZERO, false).is_err());
         drop(first);
         drop(Reservation::at(root.clone(), "third", Duration::ZERO, false).unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn completion_waits_for_the_admission_scan_mutex() {
+        let root = root("completion-scan");
+        let first = Reservation::at(root.clone(), "owner", Duration::ZERO, false).unwrap();
+        let control = open(&root.join("queue.lock")).unwrap();
+        FileExt::lock(&control).unwrap();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            drop(first);
+            finished_tx.send(()).unwrap();
+        });
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(matches!(
+            finished_rx.recv_timeout(Duration::from_millis(100)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ));
+        assert!(root.join("1.json").exists());
+        let guard = open(&root.join("1.guard")).unwrap();
+        assert!(matches!(
+            FileExt::try_lock(&guard),
+            Err(fs4::TryLockError::WouldBlock)
+        ));
+        drop(guard);
+        FileExt::unlock(&control).unwrap();
+        finished_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        handle.join().unwrap();
+        assert!(!root.join("1.json").exists());
+        assert!(!root.join("1.guard").exists());
+        drop(control);
         fs::remove_dir_all(root).unwrap();
     }
     #[test]

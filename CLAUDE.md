@@ -219,6 +219,13 @@ Tested via WSL→PowerShell bridge (Windows cargo 1.92 nightly):
 
 ### Known Bugs (SPEEDQ)
 
+2026-10-12: Windows x64 and ARM64 integration runs failed admission with
+`Access is denied` while an earlier reservation completed. Cleanup deleted
+ticket/guard files outside the queue mutex while waiters could open them. Cleanup
+now takes the same mutex, with a regression requiring the record and guard to
+remain live until a scanner releases it. Cleanup failures retain the running
+record and fail closed; no admission error is reinterpreted as permission.
+
 The external-pair subprocess fixture must start its line protocol with a newline.
 Single-threaded libtest (including the ARMv7 cross runner) prints an unterminated
 `test ... ` prefix; without that newline the first metric/check row is not a
