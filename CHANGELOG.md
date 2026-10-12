@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Add FIFO cooperative admission before benchmark warmup, inherited experiment reservations, and `zenbench nice` for background commands with bounded admission, priority and Linux memory scopes.
+
 - Deduplicate foreign Linux user-thread entries in heavy-process counts while retaining their global CPU contribution.
 - Add opt-in `ZENBENCH_GATE_TRACE` diagnostics for round verdicts and foreign heavy-process identities (a8986743).
 

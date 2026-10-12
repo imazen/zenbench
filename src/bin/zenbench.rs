@@ -4,12 +4,24 @@ use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
 use zenbench::daemon;
 
+#[allow(dead_code)]
+#[path = "../coordination.rs"]
+mod coordination;
+#[allow(dead_code)]
+#[path = "../paths.rs"]
+mod paths;
+mod support {
+    pub(super) mod nice;
+    pub(super) mod supervisor;
+}
+
 #[derive(Parser)]
 #[command(
     name = "zenbench",
     about = "Interleaved microbenchmarking harness",
     after_help = "Start here: zenbench guide (SIMD optimization: zenbench guide --topic simd)
 Measurement assumptions and busy systems: zenbench guide --topic methodology
+Queue background work: zenbench nice -- cargo build --release
 Quick edit loop: cargo bench --bench NAME -- --group=GROUP
 Before accepting a change: freeze inputs, then use --mode=confirm --workload-id=ID.
 Inspect asymmetric CPUs: zenbench cpu-info; choose a verified boundary with exec.
@@ -23,6 +35,30 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Queue a background command fairly with benchmarks, then run at low priority.
+    #[command(
+        after_help = "All participants must use the same ZENBENCH_COORDINATION_DIR for system-wide coordination.
+The default directory coordinates one user. Tasks run serially in FIFO order.
+Linux requires a systemd user scope for a hard RAM ceiling, with no swap.
+Unix commands must stay in the foreground and join their workers; no daemonization.
+Unwrapped tasks remain visible to benchmark resource checks.
+Example: zenbench nice --jobs 8 -- cargo build --release"
+    )]
+    Nice {
+        /// Maximum queue and resource admission wait in seconds.
+        #[arg(long, default_value_t = 300)]
+        wait: u64,
+        /// Maximum command runtime in seconds.
+        #[arg(long, default_value_t = 3600)]
+        timeout: u64,
+        #[arg(long)]
+        jobs: Option<usize>,
+        /// Linux hard ceiling; defaults to min(24 GiB, half physical RAM).
+        #[arg(long)]
+        memory_mib: Option<u64>,
+        #[arg(last = true, required = true, num_args = 1..)]
+        command: Vec<std::ffi::OsString>,
+    },
     /// Show workflows, CPU setup, exit meanings, provenance and profiling limits.
     Guide {
         /// Workflows, SIMD optimization, or measurement methodology and busy systems.
@@ -289,6 +325,27 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Nice {
+            wait,
+            timeout,
+            jobs,
+            memory_mib,
+            command,
+        } => {
+            let result = support::nice::run(
+                Path::new(&command[0]),
+                &command[1..],
+                wait,
+                timeout,
+                jobs,
+                memory_mib,
+            );
+            let code = result.unwrap_or_else(|e| {
+                eprintln!("[zenbench nice] not completed: {e}");
+                2
+            });
+            std::process::exit(code);
+        }
         Commands::Guide { topic } => print!(
             "{}",
             match topic.as_str() {
