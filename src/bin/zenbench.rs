@@ -25,6 +25,8 @@ mod support {
     version,
     about = "Interleaved microbenchmarking harness",
     after_help = "Start here: zenbench guide (SIMD optimization: zenbench guide --topic simd)
+Evidence commands: zenbench data --help. Deployment: zenbench fleet --help.
+Background jobs: zenbench jobs --help. Previous flat command spellings still work.
 Measurement assumptions and busy systems: zenbench guide --topic methodology
 Queue background work: zenbench nice -- cargo build --release
 Compare external programs/environments: zenbench pair --help
@@ -121,7 +123,8 @@ Example: zenbench nice --jobs 8 -- cargo build --release"
         after_help = "First run zenbench cpu-info. IDs must belong to one detected core/cache class.
 Linux needs a delegated cpuset controller or an existing matching hard cpuset.
 Windows uses an inherited Job boundary on supported topology. macOS class binding
-and Windows ARM/multiple-group classification are unsupported. Thread hints are
+and Windows multiple-group classification are unsupported. Native Windows ARM64
+uses OS core/cache classes within one processor group. Thread hints are
 insufficient for existing Rayon pools. Unrestricted permits exploration only.
 Example: zenbench exec --cpu-policy performance cargo -- bench --bench kernels -- --mode=iterate"
     )]
@@ -161,7 +164,7 @@ which cache class is faster. Run classes separately and keep results separate.
     /// Spawns `cargo bench --bench <name>` in the background and tracks it.
     /// Use --wait to block until the benchmark completes.
     #[command(
-        after_help = "For an exploratory background run: zenbench run kernels --cargo-args=\"-- --group=filter\"
+        after_help = "For an exploratory background run: zenbench jobs run kernels --cargo-args=\"-- --group=filter\"
 Track it with list/status/results. Use direct cargo bench or a retained executable
 for confirmation exit codes. This wrapper does not preserve the 0/1/2 decision
 contract; --wait's timeout does not bound the initial Cargo child wait.
@@ -967,8 +970,8 @@ fn cmd_run(
             } else {
                 // Drop child without waiting — zombie will be reaped when this process exits
                 drop(child);
-                eprintln!("[zenbench] use `zenbench status {run_id}` to check progress");
-                eprintln!("[zenbench] use `zenbench results {run_id}` when complete");
+                eprintln!("[zenbench] use `zenbench jobs status {run_id}` to check progress");
+                eprintln!("[zenbench] use `zenbench jobs results {run_id}` when complete");
             }
         }
         Err(e) => {

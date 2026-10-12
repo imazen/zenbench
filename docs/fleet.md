@@ -1,6 +1,6 @@
 # Fleet deployment
 
-`zenbench capabilities` emits schema-1 JSON with the installed executable's
+`zenbench fleet capabilities` emits schema-1 JSON with the installed executable's
 SHA-256, version, process architecture, reported machine architecture, CPU
 classes, and placement result. A failed placement check is retained as an error;
 a successful capability probe is not permission to measure. The reported machine
@@ -17,8 +17,8 @@ executables, libraries, symbols and inputs:
 ```
 
 ```sh
-zenbench bundle bundle-spec.json deployed-bundle
-zenbench bundle-check deployed-bundle
+zenbench fleet bundle bundle-spec.json deployed-bundle
+zenbench fleet bundle-check deployed-bundle
 ```
 
 Source paths resolve beside the specification. Destination paths are portable
@@ -56,10 +56,10 @@ The driver performs exactly `ZENBENCH_OPERATIONS` operations and writes JSON to
 ```
 
 ```sh
-zenbench fleet-run deployed-bundle --output attempts/unique-attempt \
+zenbench fleet run deployed-bundle --output attempts/unique-attempt \
   --experiment study-1 --machine cpu-testbed-1 --domain selected-class \
   --replicate 0 --attempt unique-attempt --wait 300 --cancel cancel.request
-zenbench fleet-read attempts/unique-attempt
+zenbench fleet read attempts/unique-attempt
 ```
 
 Output must be a new directory. The receipt binds bundle, runner, identities,
@@ -111,8 +111,8 @@ descriptive comparison of individual observations, never statistical confirmatio
 Use `zenbench pair` for latency comparisons with replicated timing evidence.
 
 ```sh
-zenbench fleet-diff attempts/before attempts/after
-zenbench fleet-export study.jsonl attempts/before attempts/after
+zenbench fleet diff attempts/before attempts/after
+zenbench fleet export study.jsonl attempts/before attempts/after
 ```
 
 The export creates a new JSONL file with one compact, readable record per attempt,

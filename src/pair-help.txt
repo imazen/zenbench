@@ -2,9 +2,9 @@ zenbench pair: prebuilt executable / environment A/B
 
   zenbench pair plan.json --dry-run
   zenbench pair plan.json --case small --output target/pair-edit
-  zenbench read target/pair-edit/packet.json.gz --format json
-  zenbench read target/pair-edit/packet.json.gz --format csv
-  zenbench pair-diff BEFORE.json.gz AFTER.json.gz
+  zenbench data read target/pair-edit/packet.json.gz --format json
+  zenbench data read target/pair-edit/packet.json.gz --format csv
+  zenbench data pair-diff BEFORE.json.gz AFTER.json.gz
   zenbench pair plan.json --resume target/pair-edit --output target/pair-next
 
 Use --wait SECONDS for bounded FIFO admission; the default reports not-run

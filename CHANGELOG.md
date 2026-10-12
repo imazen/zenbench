@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Group primary CLI help into `data`, `fleet`, and `jobs` workflows while retaining flat command spellings. Accept separated benchmark option values consistently. Recommend Confirm plus scope for study cells while retaining Evidence compatibility.
+- Align offline guides and methodology with native Windows ARM64 topology, implemented heap/fleet backends and exploratory two-program comparisons.
+
 - Restore published `BaselineComparison` construction and `ResourceGate` unwind traits; use `baseline::assess_baseline` for separate confirmation decisions.
 
 - Add exploratory `zenbench pair` for prebuilt executable/environment A/B, clustered internal timings, A/A controls, correctness contracts, retained evidence and checked resume.
@@ -44,11 +47,11 @@
 - Native Windows fresh-process repeatability controls for integer/cache/Rayon workloads, identical work, known work increments, independent QPC batches, and resource-limit readback (fc757037).
 - Native Windows process-mask oracle with preexisting managed thread/pool negative controls, verified worker/process restoration, and separate real hybrid P/E observations.
 - Repeatable SSH transport for the native Windows topology oracle using existing credentials, optional relay/jump hosts, and trusted host pins.
-- Read-only PowerShell native Windows core/cache/group topology oracle, executed by Windows x64/ARM CI; it does not change affinity or supply the Rust backend's missing ARM topology.
+- Read-only PowerShell native Windows core/cache/group topology oracle, executed by Windows x64/ARM CI; it does not change affinity or supply the Rust backend's topology. Native ARM64 discovery was added subsequently (9e6021a4).
 - Scoped macOS pthread QoS requests/readbacks and worker probe QoS records; separate 100 ms CPU warmup before probe samples and macOS startup calibration. Warmup and QoS do not certify core class or maximum frequency (cd44614f).
 - Observational CPU warmup probes callable on actual Rayon workers, fixed integer/cache batches and per-worker timing spread (7d15cacf); `cpu-info --probe` diagnoses new workers without certifying CPU placement (914111a9).
 - CPU topology/placement records, `Suite::cpu_policy`, `Suite::cpu_set`, and suite affinity defaults; per-row CPU evidence and incompatible-placement checks for aggregation/baselines (d151aac6).
-- `zenbench cpu-info` and `zenbench exec` verified launch control; Linux cpuset and supported Windows process-mask enforcement cover external pools. macOS class binding and Windows ARM/multiple processor groups fail closed (8e2d6334).
+- `zenbench cpu-info` and `zenbench exec` verified launch control; Linux cpuset and supported Windows process-mask enforcement cover external pools. macOS class binding and multiple processor groups fail closed; Windows ARM64 discovery was added subsequently (8e2d6334, 9e6021a4).
 - Scoped CPU affinity: `platform::pin_current_thread` / `AffinityGuard`, mask queries on Linux/Windows, `BenchGroup::affinity`, and cached `ZENBENCH_PIN` CPU lists/ranges. Group settings cover warmup, estimation, rounds, and zenbench-owned workers. macOS saves/restores an advisory Mach cache-sharing tag rather than binding CPU IDs; rejected hints return errors (ce74f0dc).
 
 ### Changed

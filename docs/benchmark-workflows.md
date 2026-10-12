@@ -6,7 +6,11 @@ and `filter` below with your benchmark target and group. The installed CLI and
 the benchmark executable have separate argument parsers: Cargo forwards benchmark
 arguments after `--`; a retained executable takes them directly.
 
-A bare `zenbench` invocation lists the commands and both guide entry points.
+A bare `zenbench` invocation lists nine primary task entries and the guide paths.
+`data` owns saved evidence; `fleet` owns deployment/observations; `jobs` contains
+the older background interface. All previous flat command spellings remain
+accepted for scripts. Benchmark options accept `--name=value` or `--name value`.
+See [migration and command contracts](cli-migration.md) for the complete mapping.
 Benchmark launches also print a short guide hint to stderr before configuration
 validation, once per process with supervised children suppressed. Structured
 result stdout stays separate; no first-use marker or user configuration is needed.
@@ -58,9 +62,9 @@ and distinguish any newly planned experiment from the original one.
 
 CPU admission comes first: `zenbench cpu-info`, then `zenbench exec --help`.
 Use detected core/cache classes, not assumed CPU numbers. Linux needs a hard
-cpuset; supported Windows topology uses a Job boundary. macOS advisory hints and
-Windows ARM/multiple-group topology cannot currently supply strict class
-confirmation. `unrestricted` is an explicit exploratory option. Run different
+cpuset; supported Windows x86/x64 and native ARM64 topology uses a Job boundary.
+macOS advisory hints and Windows multiple-group topology cannot currently supply
+strict class confirmation. `unrestricted` is an explicit exploratory option. Run different
 classes separately. For Rayon-managed work, use `bench()` and configure the pool
 size yourself; do not nest it in zenbench's parallel/contended pool APIs.
 See [placement](process-affinity.md) and [mode/inference limits](benchmark-modes.md).
@@ -90,7 +94,7 @@ For two already retained zenbench executables, a POSIX-shell example is:
 ```sh
 ZENBENCH_RESULT_PATH="$PWD/before.json.gz" ./builds/before/kernels --mode=confirm --workload-id=inputs-v1
 ZENBENCH_RESULT_PATH="$PWD/after.json.gz" ./builds/after/kernels --mode=confirm --workload-id=inputs-v1
-zenbench compare before.json.gz after.json.gz
+zenbench data compare before.json.gz after.json.gz
 ```
 
 Choose fresh output paths for each attempt. On asymmetric machines launch each
@@ -99,12 +103,14 @@ through the same verified `zenbench exec` configuration. In PowerShell, set
 does not make arbitrary command-line programs into zenbench benchmarks: these
 commands require benchmark binaries using the zenbench protocol.
 
-`compare` reads packets; it never executes binaries. A first-class two-binary
-runner remains a design opportunity. It should accept immutable executables,
-per-build manifests, common arguments/environment/inputs, and a predeclared
-randomized order with complete attempt retention. That would require its own
-cross-binary statistical design and validation. The existing sequential workflow
-does not claim to implement it.
+`zenbench data compare` reads suite packets; it never executes binaries.
+For separate programs or one program with different environment variables,
+use [`zenbench pair`](external-process.md). It randomizes fresh-process A/B
+blocks, retains correctness and A/A controls, and supports checked resume.
+Its comparisons remain exploratory: external Confirm/Evidence is not implemented.
+Use separate suite confirmation populations when a supported acceptance decision
+is needed, while retaining the limitation that historical controls are not
+contemporaneous randomized blocks.
 
 ## What identity is actually recorded?
 
@@ -157,9 +163,9 @@ Raw packets, child attempts and rounds stay in ignored `.zenbench/data` (or
 stable summary:
 
 ```sh
-zenbench read after.json.gz
-zenbench read after.json.gz --format json
-zenbench snapshot after.json.gz --output benchmarks/baseline.csv
+zenbench data read after.json.gz
+zenbench data read after.json.gz --format json
+zenbench data snapshot after.json.gz --output benchmarks/baseline.csv
 ```
 
 Commit the selected CSV and build-manifest pointers. Store full gzip evidence

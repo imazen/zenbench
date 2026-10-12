@@ -4,8 +4,9 @@ CHOOSE THE CLAIM
 Iterate is the default: short in-process, randomized serial comparisons for
 edit feedback. Exit 0 means execution succeeded; local bootstrap intervals are
 exploratory. Confirm uses a fixed fresh-process plan (five processes by default),
-process-level intervals and a declared margin. Evidence adds a named study cell,
-not automatic publication readiness or fleet coverage.
+process-level intervals and a declared margin. Add --scope to Confirm for a
+named study cell; Evidence remains a supported spelling. Neither certifies
+publication readiness or fleet coverage.
 
 BUSY WORKSTATIONS
 Ordinary load observations do not stall every Iterate round. Keep them enabled

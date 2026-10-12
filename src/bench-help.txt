@@ -8,13 +8,14 @@ exit 0 means execution succeeded, not that performance is confirmed.
 
   --help, -h                 Show this help before registering benchmarks
   --group=NAME               Select matching groups
-  --mode=iterate|confirm|evidence
+  --mode=iterate|confirm
                             Iterate: one process; group defaults 30 rounds,
                             100 ms warmup per arm. Explicit group settings apply.
                             Confirm: fixed rounds in five fresh processes.
-                            Evidence: Confirm protocol for one named matrix cell.
+                            Add --scope=ID for a named study cell.
+                            Legacy --mode=evidence still requires --scope.
   --workload-id=ID           Identify inputs/configuration; required to confirm
-  --scope=ID                 Name the hardware/workload cell; required for Evidence
+  --scope=ID                 Name the hardware/workload cell (optional in Confirm)
   --processes=N              Fresh confirmation processes (minimum 3; default 5)
   --rounds=N                 Override rounds per group per process
   --margin=PERCENT           Practical comparison margin (default 1)
@@ -34,7 +35,7 @@ CLI > environment > Suite defaults. Plan environment variables: ZENBENCH_MODE,
 ZENBENCH_PROCESSES, ZENBENCH_ROUNDS, ZENBENCH_MARGIN, ZENBENCH_CONFIDENCE,
 ZENBENCH_WORKLOAD_ID, ZENBENCH_SCOPE, ZENBENCH_TIMEOUT. Placement variables:
 ZENBENCH_CPU_POLICY, ZENBENCH_CPU_SET. ZENBENCH_PIN is a scoped thread hint,
-not a boundary for existing external pools. Most options require --name=value.
+not a boundary for existing external pools. Options accept --name=value or --name value.
 Legacy --best-of-passes=N, --mean-of-passes=N, --median-of-passes=N and the
 corresponding -of-processes flags are exploratory and cannot combine with Confirm.
 
@@ -56,8 +57,8 @@ zenbench exec --help. macOS hints cannot guarantee P/E selection. Explicit
 unrestricted is for exploration only and cannot authorize baseline promotion.
 
 Raw evidence stays in ignored .zenbench/data (ZENBENCH_DATA_DIR overrides).
-Read saved packets: zenbench read FILE. Diff: zenbench compare BEFORE AFTER.
-Commit selected summaries: zenbench snapshot FILE --output benchmarks/baseline.csv
+Read saved packets: zenbench data read FILE. Diff: zenbench data compare BEFORE AFTER.
+Commit selected summaries: zenbench data snapshot FILE --output benchmarks/baseline.csv
 Keep referenced raw objects in your artifact store; CSV alone cannot be compared.
 
 More offline guidance, retained builds and profiling limits: zenbench guide

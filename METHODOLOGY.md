@@ -92,13 +92,16 @@ Many processes from one build do not measure variation between builds. Pooling
 hardware classes does not create a representative population unless that
 population and its weights were defined in advance.
 
-## 2. Three modes, two levels of inference
+## 2. Two measurement intents and a retained scope spelling
 
 | Mode | Default execution | Intended use | Acceptance meaning |
 |---|---|---|---|
 | Iterate | One process, up to 30 rounds per group, 100 ms warmup per arm | Edit, inspect assembly, compare local alternatives | Exit 0 means execution succeeded |
 | Confirm | Five fresh processes, fixed group rounds, normally 30 each | Evaluate a frozen candidate or save a baseline population | Process-level validity and margin decision |
-| Evidence | Confirm plus required scope identity | One cell of a reproducible study | Same inference; matrix coverage remains external |
+| Evidence (compatibility spelling) | Confirm plus required scope identity | One cell of a reproducible study | Same inference; matrix coverage remains external |
+
+For new study cells, use Confirm with `--scope=ID`; Evidence retains the same
+protocol with mandatory scope. Preserve the recorded mode within an experiment.
 
 Confirm/Evidence require a caller-supplied workload ID, at least three processes,
 and at least two fixed rounds. Defaults are a 1% practical margin, 95% family
@@ -139,7 +142,7 @@ opaque Rayon pool. Strict placement therefore needs a process boundary:
 | Platform | Current boundary and limitation |
 |---|---|
 | Linux | An effective cgroup cpuset restricts the process's threads; the launcher can use a delegated controller or an existing suitable boundary. A `taskset` mask alone is insufficient to prevent a library widening its affinity. |
-| Supported Windows x86/x64 topology | An inherited affinity-limited Job Object constrains the process and descendants. Multiple processor groups and Windows ARM core-class discovery are not supported for strict class selection. |
+| Supported Windows x86/x64 and native ARM64 topology | An inherited affinity-limited Job Object constrains the process and descendants. ARM64 uses native OS core/cache classes. Multiple processor groups remain unsupported for strict class selection. |
 | macOS | Mach affinity tags and pthread QoS are advisory. They do not certify P/E placement; strict class binding is unsupported. |
 
 Group thread-affinity constraints must fit within the process boundary. Zenbench
@@ -290,12 +293,15 @@ allocations, are inside allocation paths and can perturb timings. Thread-local
 counts do not account for an opaque pool's allocations or peak live heap.
 Confirm native timing separately from allocation, instruction or tracing runs.
 
-The proposed [IQA heap and fleet contract](docs/heap-and-fleet-design.md)
-distinguishes live requested heap, allocation traffic and OS memory peaks. It
-specifies phase boundaries, all-thread validation and integration with the existing
-fleet scheduler; those memory backends are not yet implemented in zenbench.
-Heaptrack and iai-callgrind are external diagnostic workflows, not integrated
-confirmation backends.
+The implemented [heap profiler](docs/heap-profiling.md) records requested live
+Rust-global-allocator bytes across all threads and resettable phase peaks in a
+separate instrumented binary. [Fleet observations](docs/fleet.md) support driver
+memory records, OS peaks and Linux heaptrack, with correctness checks and retained
+attempts. These quantities remain distinct from allocation traffic and from each
+other. Allocation serialization perturbs timing. Iai-callgrind remains an external
+diagnostic workflow; memory and instruction diagnostics do not certify native
+latency or replace timing confirmation. The [heap/fleet design](docs/heap-and-fleet-design.md)
+records coverage boundaries and integration with the existing scheduler.
 
 ### Limits and adaptive stopping
 
@@ -631,11 +637,11 @@ and access plan. Zenbench does not upload, schedule a fleet, or garbage-collect
 unsuccessful runs.
 
 ```sh
-zenbench read candidate.json.gz --format llm
-zenbench read candidate.json.gz --format json
-zenbench compare baseline.json.gz candidate.json.gz
-zenbench snapshot candidate.json.gz --output benchmarks/baseline.csv
-zenbench reanalyze candidate.json.gz --output analysis.json
+zenbench data read candidate.json.gz --format llm
+zenbench data read candidate.json.gz --format json
+zenbench data compare baseline.json.gz candidate.json.gz
+zenbench data snapshot candidate.json.gz --output benchmarks/baseline.csv
+zenbench data reanalyze candidate.json.gz --output analysis.json
 ```
 
 Reanalysis writes a separate versioned decision artifact linked to the immutable
