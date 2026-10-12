@@ -84,6 +84,17 @@ pub(crate) fn relative(path: &Path) -> io::Result<()> {
         .ok_or_else(|| io::Error::other("bundle paths must be UTF-8"))?;
     if s.is_empty()
         || s.contains(['\\', ':'])
+        || s.split('/').any(|part| {
+            let stem = part.split('.').next().unwrap_or("").to_ascii_uppercase();
+            part.is_empty()
+                || part == "."
+                || part.ends_with(['.', ' '])
+                || matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+                || ["COM", "LPT"].iter().any(|prefix| {
+                    stem.strip_prefix(prefix)
+                        .is_some_and(|n| n.len() == 1 && matches!(n.as_bytes()[0], b'1'..=b'9'))
+                })
+        })
         || path
             .components()
             .any(|c| !matches!(c, Component::Normal(_)))
@@ -95,9 +106,20 @@ pub(crate) fn relative(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+fn metadata(path: &Path) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    File::open(path)?
+        .take(8 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > 8 * 1024 * 1024 {
+        return Err(io::Error::other("bundle metadata exceeds 8 MiB"));
+    }
+    Ok(bytes)
+}
+
 pub(crate) fn bundle(spec: &Path, output: &Path) -> io::Result<Value> {
     let spec_path = spec.canonicalize()?;
-    let spec: BundleSpec = serde_json::from_slice(&fs::read(&spec_path)?)?;
+    let spec: BundleSpec = serde_json::from_slice(&metadata(&spec_path)?)?;
     if spec.schema != 1 || spec.files.is_empty() || spec.target.trim().is_empty() {
         return Err(io::Error::other(
             "bundle requires schema 1, target and explicit files",
@@ -156,12 +178,24 @@ pub(crate) fn bundle(spec: &Path, output: &Path) -> io::Result<Value> {
 
 pub(crate) fn verify(root: &Path) -> io::Result<Bundle> {
     let root = root.canonicalize()?;
-    let manifest: Bundle = serde_json::from_slice(&fs::read(root.join("bundle.json"))?)?;
+    let manifest: Bundle = serde_json::from_slice(&metadata(&root.join("bundle.json"))?)?;
     if manifest.schema != 1 || manifest.files.is_empty() {
         return Err(io::Error::other("unsupported or empty bundle"));
     }
+    let mut names = std::collections::BTreeSet::new();
     for (name, artifact) in &manifest.files {
         relative(name)?;
+        let key = name.to_string_lossy().to_ascii_lowercase();
+        if key == "bundle.json" || !names.insert(key) {
+            return Err(io::Error::other("reserved or case-colliding bundle path"));
+        }
+        let mut prefix = root.clone();
+        for component in name.components() {
+            prefix.push(component);
+            if fs::symlink_metadata(&prefix)?.file_type().is_symlink() {
+                return Err(io::Error::other("bundle files must not traverse symlinks"));
+            }
+        }
         let file = root.join(name).canonicalize()?;
         if !file.starts_with(&root)
             || !file.is_file()
@@ -200,7 +234,18 @@ mod tests {
     use super::*;
     #[test]
     fn portable_paths_reject_escape_and_platform_ambiguity() {
-        for path in ["", "../data", "/data", "C:/data", "dir\\data"] {
+        for path in [
+            "",
+            "../data",
+            "/data",
+            "C:/data",
+            "dir\\data",
+            "bin/./data",
+            "bin//data",
+            "bin/CON.txt",
+            "bin/data.",
+            "bin/LPT1",
+        ] {
             assert!(relative(Path::new(path)).is_err(), "{path}");
         }
         assert!(relative(Path::new("bin/metric.exe")).is_ok());
