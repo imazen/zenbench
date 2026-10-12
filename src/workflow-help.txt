@@ -104,3 +104,10 @@ backends. Use separate profiling workloads/runs and retain their artifacts with
 binary/input identity. Profiler-instrumented timing is not a native timing baseline.
 
 Details: https://github.com/imazen/zenbench/blob/main/docs/benchmark-workflows.md
+
+SHARED WORKSTATIONS
+  zenbench nice -- cargo build --release
+  Background tasks and updated benchmarks share a FIFO admission queue.
+  For multiple accounts, configure the same ZENBENCH_COORDINATION_DIR.
+  Unwrapped work remains visible to benchmark resource checks.
+  See zenbench nice --help and docs/cooperative-scheduling.md for limits.
