@@ -1,7 +1,7 @@
 +++
 title = "Migrate existing benchmarks"
 description = "Keep familiar Criterion calls for exploration; use native groups for confirmation."
-weight = 10
+weight = 11
 +++
 
 Choose whether you need familiar Criterion calls for exploratory reporting or

@@ -1,7 +1,7 @@
 +++
 title = "Read example output"
 description = "Interpret descriptive rows and keep acceptance decisions separate."
-weight = 12
+weight = 13
 +++
 
 The terminal and JSON excerpts below are historical examples of report shape,

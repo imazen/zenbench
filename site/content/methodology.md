@@ -1,7 +1,7 @@
 +++
 title = "Understand the methodology"
 description = "Separate exploratory paired rounds from fixed-process acceptance."
-weight = 11
+weight = 12
 +++
 
 A benchmark measures the timing boundary you wrote. Setup, allocation, destruction,

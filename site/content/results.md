@@ -21,11 +21,19 @@ zenbench data read candidate-01.json.gz --format json
 ```
 
 Use a fresh output path for every attempt. `data read` accepts JSON, gzip JSON or
-an evidence reference and formats it as `llm`, `json`, `csv` or `md`. It does not
-run the benchmark. The same reader understands retained external pair packets.
+an evidence reference and formats it as `llm`, `json`, `csv`, `md` or suite `html`.
+It does not run the benchmark. The same reader understands retained external pair
+packets for the text formats.
 
 In PowerShell, set `$env:ZENBENCH_RESULT_PATH` before the executable invocation;
 see [retaining builds](@/iterate.md#keep-two-builds-and-rerun-without-compiling).
+
+## Export charts and reports
+
+[Charts for slides and reports](@/charts.md) covers SVG, fixed light/dark themes,
+vertical grouped bars and self-contained HTML. Export from retained native suite
+evidence with `zenbench data read candidate-01.json.gz --save-charts figures`;
+no new measurement is needed.
 
 ## Choose the correct comparison
 

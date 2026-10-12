@@ -1,7 +1,7 @@
 +++
 title = "Profile memory and CPU work"
 description = "Explain a timing change with a separate diagnostic run."
-weight = 8
+weight = 9
 +++
 
 Use profiling after you have a concrete question: did allocation traffic change,

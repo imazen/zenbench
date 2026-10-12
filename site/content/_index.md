@@ -19,6 +19,7 @@ keeps evidence, and records memory or fleet observations.
 - [Confirm an external program or environment change](@/external-confirmation.md)
 - [Choose CPUs and work on a shared machine](@/cpu-placement.md)
 - [Keep results and review a small diff](@/results.md)
+- [Export charts for slides and reports](@/charts.md)
 - [Investigate memory or CPU work](@/profiling.md)
 - [Run named study cells and fleet observations](@/fleet.md)
 

@@ -15,6 +15,7 @@ weight = 0
 | Can I accept a separate program or environment change? | [Confirm an external comparison](@/external-confirmation.md) | Fixed blocks, a timing error bound and a checked A/A decision |
 | Why does placement fail, or how do I measure Rayon? | [CPU placement and shared machines](@/cpu-placement.md) | One declared CPU class and an appropriate pool size |
 | How do I keep and compare results? | [Save and review evidence](@/results.md) | Full raw archives and one selected Git summary |
+| How do I make charts for slides? | [Charts for slides and reports](@/charts.md) | SVG exports, fixed light/dark themes and the right statistical caption |
 | Why did allocations, heap use or instructions change? | [Profile memory and CPU work](@/profiling.md) | Separate diagnostic artifacts tied to the measured build |
 | How do I repeat a study on multiple machines? | [Study cells and fleet observations](@/fleet.md) | Named cells, verified bundles and retained attempts |
 | Can I keep my Criterion benches? | [Migrate existing benchmarks](@/migration.md) | Exploratory compatibility or registered native groups |

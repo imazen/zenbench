@@ -1,7 +1,7 @@
 +++
 title = "Study cells and fleet observations"
 description = "Keep hardware/workload cells separate and retain every deployment attempt."
-weight = 9
+weight = 10
 +++
 
 Start here when a result must cover several machines, CPU classes, workloads or
