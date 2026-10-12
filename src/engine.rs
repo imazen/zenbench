@@ -184,6 +184,36 @@ impl Engine {
             })).expect("plan serializes"));
             std::process::exit(0);
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        let _admission = crate::coordination::Reservation::acquire("benchmark", plan.timeout)
+            .expect("benchmark admission failed");
+        // Acquire cross-process exclusive lock if configured. The lock
+        // file carries the project / binary / current benchmark / ETA so
+        // any waiting process can render an accurate "waiting on …"
+        // message.
+        let lock = self.lock_dir.as_ref().and_then(|dir| {
+            let lock_path = dir.join("zenbench.lock");
+            let initial_benchmark = self
+                .suite
+                .group_filter
+                .clone()
+                .or_else(|| self.suite.groups.first().map(|g| g.name.clone()))
+                .unwrap_or_default();
+            let cfg = crate::exclusive::AcquireConfig {
+                path: Some(lock_path),
+                benchmark: initial_benchmark,
+                activity: format!("{} groups queued", self.suite.groups.len()),
+                ..Default::default()
+            };
+            match crate::exclusive::Lock::acquire(cfg) {
+                Ok(l) => Some(l),
+                Err(e) => {
+                    eprintln!("[zenbench] warning: could not acquire exclusive lock: {e}");
+                    None
+                }
+            }
+        });
+
         // Standalone demand warmup precedes calibration/timing metrics. This
         // cannot certify frequency or warm opaque pools on other threads.
         #[cfg(target_os = "macos")]
@@ -276,33 +306,6 @@ impl Engine {
                 .save(path)
                 .unwrap_or_else(|e| panic!("cannot retain benchmark attempt: {e}"));
         }
-
-        // Acquire cross-process exclusive lock if configured. The lock
-        // file carries the project / binary / current benchmark / ETA so
-        // any waiting process can render an accurate "waiting on …"
-        // message.
-        let lock = self.lock_dir.as_ref().and_then(|dir| {
-            let lock_path = dir.join("zenbench.lock");
-            let initial_benchmark = self
-                .suite
-                .group_filter
-                .clone()
-                .or_else(|| self.suite.groups.first().map(|g| g.name.clone()))
-                .unwrap_or_default();
-            let cfg = crate::exclusive::AcquireConfig {
-                path: Some(lock_path),
-                benchmark: initial_benchmark,
-                activity: format!("{} groups queued", self.suite.groups.len()),
-                ..Default::default()
-            };
-            match crate::exclusive::Lock::acquire(cfg) {
-                Ok(l) => Some(l),
-                Err(e) => {
-                    eprintln!("[zenbench] warning: could not acquire exclusive lock: {e}");
-                    None
-                }
-            }
-        });
 
         let mut comparisons: Vec<ComparisonResult> = Vec::new();
         // Include pre-computed results from criterion-compat immediate mode

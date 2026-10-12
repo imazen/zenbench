@@ -313,6 +313,13 @@ impl ResourceGate {
             // concurrent bench under the same shell) are not ancestors
             // and are still detected.
             let mut scan_excluded = excluded_pids.clone();
+            #[cfg(not(target_arch = "wasm32"))]
+            for pid in crate::coordination::queued_pids(&sys) {
+                scan_excluded.push(pid);
+                if let Some(tasks) = sys.process(pid).and_then(|p| p.tasks()) {
+                    scan_excluded.extend(tasks.iter().copied());
+                }
+            }
             collect_ancestors(&sys, our_pid, &mut scan_excluded);
             // Linux refresh_processes also exposes task IDs. In particular,
             // our own "zenbench-exclusive-heartbeat" thread matches the rival
