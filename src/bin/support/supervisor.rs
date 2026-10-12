@@ -5,6 +5,13 @@ use std::io;
 use std::process::{Command, ExitStatus};
 use std::time::{Duration, Instant};
 
+pub(super) struct Outcome {
+    pub status: ExitStatus,
+    // Windows process-lifetime working-set and private-commit high-water marks.
+    // An unavailable counter retains its reason rather than becoming zero.
+    pub windows_peaks: Option<Result<(u64, u64), String>>,
+}
+
 pub(super) fn run(
     command: Command,
     budget: Duration,
@@ -22,6 +29,7 @@ pub(super) fn run(
         process_id,
         &mut || Ok(()),
     )
+    .map(|outcome| outcome.status)
 }
 
 pub(super) fn run_controlled(
@@ -32,7 +40,7 @@ pub(super) fn run_controlled(
     logs: &[std::path::PathBuf],
     process_id: &mut Option<u32>,
     poll: &mut dyn FnMut() -> io::Result<()>,
-) -> io::Result<ExitStatus> {
+) -> io::Result<Outcome> {
     reservation.command(&mut command);
     reservation.retain_until_reaped();
     let mut wrapped = StdCommandWrap::from(command);
@@ -77,6 +85,15 @@ pub(super) fn run_controlled(
             }));
         }
         if let Some(status) = child.try_wait()? {
+            #[cfg(windows)]
+            let windows_peaks = {
+                use std::os::windows::io::AsRawHandle;
+                Some(win32job::utils::get_process_memory_info(child.inner().as_raw_handle() as isize)
+                    .map(|c| (c.peak_working_set_size as u64, c.peak_pagefile_usage as u64))
+                    .map_err(|e| e.to_string()))
+            };
+            #[cfg(not(windows))]
+            let windows_peaks = None;
             #[cfg(unix)]
             {
                 // A foreground program must join its workers. Kill residual
@@ -91,7 +108,10 @@ pub(super) fn run_controlled(
             }
             cleanup_scope(scope)?;
             reservation.reaped();
-            return Ok(status);
+            return Ok(Outcome {
+                status,
+                windows_peaks,
+            });
         }
         std::thread::sleep(Duration::from_millis(10));
     }

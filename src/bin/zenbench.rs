@@ -12,6 +12,7 @@ mod coordination;
 mod paths;
 mod support {
     pub(super) mod fleet;
+    pub(super) mod fleet_report;
     pub(super) mod fleet_run;
     pub(super) mod nice;
     pub(super) mod pair;
@@ -44,6 +45,14 @@ enum Commands {
     FleetRun(support::fleet_run::Options),
     /// Decode a fleet attempt receipt without rerunning work.
     FleetRead { directory: PathBuf },
+    /// Compare verified fleet observations descriptively; refuse mismatched contracts.
+    FleetDiff { left: PathBuf, right: PathBuf },
+    /// Write small JSONL summaries for version control; retain raw evidence separately.
+    FleetExport {
+        output: PathBuf,
+        #[arg(required = true)]
+        directories: Vec<PathBuf>,
+    },
     /// Machine-readable runner identity, CPU placement and supported protocols.
     Capabilities,
     /// Copy explicitly listed executables, inputs and assets into a verified portable bundle.
@@ -374,6 +383,22 @@ fn main() {
                 std::process::exit(2);
             }
         },
+        Commands::FleetDiff { left, right } => match support::fleet_report::diff(&left, &right) {
+            Ok(value) => println!("{}", serde_json::to_string_pretty(&value).unwrap()),
+            Err(e) => {
+                eprintln!("cannot compare attempts: {e}");
+                std::process::exit(2);
+            }
+        },
+        Commands::FleetExport {
+            output,
+            directories,
+        } => {
+            if let Err(e) = support::fleet_report::export(&output, &directories) {
+                eprintln!("cannot export attempts: {e}");
+                std::process::exit(2);
+            }
+        }
         Commands::BundleCheck { directory } => match support::fleet::verify(&directory) {
             Ok(value) => println!("{}", serde_json::to_string_pretty(&value).unwrap()),
             Err(e) => {

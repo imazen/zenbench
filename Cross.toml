@@ -1,3 +1,10 @@
+# Native OS-memory tests require GNU time in the cross container too.
+[target.armv7-unknown-linux-gnueabihf]
+pre-build = ["mkdir -p /root/tmp && TMPDIR=/root/tmp apt-get update && TMPDIR=/root/tmp apt-get install -y time"]
+
+[target.i686-unknown-linux-gnu]
+pre-build = ["mkdir -p /root/tmp && TMPDIR=/root/tmp apt-get update && TMPDIR=/root/tmp apt-get install -y time"]
+
 # ARM user-mode emulation needs an explicit runner for test subprocesses too.
 # QEMU_LD_PREFIX is inherited from cross's linux-runner wrapper.
 [target.armv7-unknown-linux-gnueabihf.env]

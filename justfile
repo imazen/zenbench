@@ -477,3 +477,6 @@ heap-check:
 heap-oracle output:
     cargo build --example heap_phases --features heap-profiling
     python3 -B examples/check_heap_oracle.py {{output}}
+
+fleet-cross cross="cross":
+    CROSS_CONTAINER_OPTS="--memory=6g --memory-swap=6g --cpus=2" ZENBENCH_CPU_POLICY=unrestricted {{cross}} test --target armv7-unknown-linux-gnueabihf --test fleet_cli

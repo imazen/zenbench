@@ -37,7 +37,7 @@ pub(crate) fn capabilities() -> io::Result<Value> {
         "coordination":{"directory":crate::coordination::directory()?,"scope":"participants sharing this local directory"},
         "memory":{
             "heaptrack":{"implemented":cfg!(target_os="linux"),"recorder":tool("heaptrack"),"analyzer":tool("heaptrack_print"),"coverage":"intercepted allocations; whole child only","probe":"not_run"},
-            "os_peak":{"implemented":cfg!(target_os="linux"),"tool":tool("time"),"probe":"not_run"},
+            "os_peak":{"implemented":cfg!(any(target_os="linux",target_os="macos",windows)),"tool":if cfg!(windows) {Some(PathBuf::from("GetProcessMemoryInfo"))} else {Path::new("/usr/bin/time").is_file().then(||PathBuf::from("/usr/bin/time"))},"probe":"not_run"},
             "driver":{"implemented":true,"coverage":"declared by instrumented driver; not independently certified"}
         },
         "commands":{"compare":"zenbench pair --help","guide":"zenbench guide"}
