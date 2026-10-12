@@ -119,6 +119,8 @@ pub(crate) fn run(
         Duration::from_secs(timeout),
         &mut reservation,
         scope,
+        &[],
+        &mut None,
     )?;
     Ok(status.code().unwrap_or(1))
 }

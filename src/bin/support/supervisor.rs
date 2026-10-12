@@ -10,6 +10,8 @@ pub(super) fn run(
     budget: Duration,
     reservation: &mut crate::coordination::Reservation,
     scope: Option<&str>,
+    logs: &[std::path::PathBuf],
+    process_id: &mut Option<u32>,
 ) -> io::Result<ExitStatus> {
     reservation.command(&mut command);
     reservation.retain_until_reaped();
@@ -17,10 +19,17 @@ pub(super) fn run(
     #[cfg(unix)]
     wrapped.wrap(ProcessGroup::leader());
     #[cfg(windows)]
-    wrapped.wrap(JobObject);
+    let observer = {
+        let job = std::sync::Arc::new(win32job::Job::create().map_err(io::Error::other)?);
+        // JobObject pre_spawn suspends the process. The observer is attached
+        // first during wrap_child, before JobObject resumes the child.
+        wrapped.wrap(JobObserver(job.clone())).wrap(JobObject);
+        job
+    };
     // A wrapper can fail after spawn; retain admission if no child handle
     // is available to prove cleanup.
     let mut child = wrapped.spawn()?;
+    *process_id = Some(child.id());
     let start = Instant::now();
     loop {
         if let Some(status) = child.try_wait()? {
@@ -31,20 +40,34 @@ pub(super) fn run(
                 let _ = child.start_kill();
                 wait_group_empty(child.id(), Duration::from_secs(5))?;
             }
+            #[cfg(windows)]
+            {
+                child.start_kill()?;
+                wait_job_empty(&observer)?;
+            }
             cleanup_scope(scope)?;
             reservation.reaped();
             return Ok(status);
         }
-        if start.elapsed() >= budget {
+        let oversized = logs
+            .iter()
+            .any(|p| std::fs::metadata(p).is_ok_and(|m| m.len() > 64 * 1024 * 1024));
+        if start.elapsed() >= budget || oversized {
             child.start_kill()?;
-            child.wait()?;
+            child.inner_mut().wait()?;
+            #[cfg(windows)]
+            wait_job_empty(&observer)?;
             #[cfg(unix)]
             wait_group_empty(child.id(), Duration::from_secs(5))?;
             cleanup_scope(scope)?;
             reservation.reaped();
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
-                "child deadline exceeded; process group/job terminated",
+                if oversized {
+                    "child log limit exceeded; process group/job terminated"
+                } else {
+                    "child deadline exceeded; process group/job terminated"
+                },
             ));
         }
         std::thread::sleep(Duration::from_millis(10));
@@ -106,5 +129,44 @@ fn cleanup_scope(scope: Option<&str>) -> io::Result<()> {
             .args(["--user", "kill", "--signal=KILL", "--kill-whom=all", scope])
             .output()?;
         std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+// Independently query Job membership: the process wrapper's try_wait reports
+// the leader status, which alone does not prove its descendants have exited.
+#[cfg(windows)]
+#[derive(Debug)]
+struct JobObserver(std::sync::Arc<win32job::Job>);
+#[cfg(windows)]
+impl StdCommandWrapper for JobObserver {
+    fn wrap_child(
+        &mut self,
+        child: Box<dyn StdChildWrapper>,
+        _core: &StdCommandWrap,
+    ) -> io::Result<Box<dyn StdChildWrapper>> {
+        use std::os::windows::io::AsRawHandle;
+        self.0
+            .assign_process(child.inner().as_raw_handle() as isize)
+            .map_err(io::Error::other)?;
+        Ok(child)
+    }
+}
+#[cfg(windows)]
+fn wait_job_empty(job: &win32job::Job) -> io::Result<()> {
+    let start = Instant::now();
+    loop {
+        if job
+            .query_process_id_list()
+            .map_err(io::Error::other)?
+            .is_empty()
+        {
+            return Ok(());
+        }
+        if start.elapsed() >= Duration::from_secs(5) {
+            return Err(io::Error::other(
+                "Windows Job still active; reservation retained",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(10));
     }
 }
