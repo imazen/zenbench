@@ -129,7 +129,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.85.0
         with:
-          targets: x86_64-pc-windows-gnu
+          targets: x86_64-pc-windows-gnu, aarch64-pc-windows-msvc
       - uses: Swatinem/rust-cache@v2
       - name: Check MSRV compiles (default features)
         run: cargo check
@@ -141,5 +141,7 @@ jobs:
         run: cargo check --all-targets --features async,cpu-time,criterion-compat
       - name: Check Windows MSRV compiles (all 1.85 features, all targets)
         run: cargo check --locked --target x86_64-pc-windows-gnu --all-targets --features async,cpu-time,criterion-compat
+      - name: Check Windows ARM64 topology on MSRV
+        run: cargo check --locked --target aarch64-pc-windows-msvc --lib --no-default-features
       - name: Test on MSRV
         run: cargo test --lib

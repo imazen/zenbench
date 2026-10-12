@@ -488,3 +488,6 @@ windows-native-check:
 windows-topology-parser-check:
     cargo test --lib windows_topology
     cargo clippy --lib --tests -- -D warnings
+
+windows-arm-msrv-check:
+    cargo +1.85 check --locked --target aarch64-pc-windows-msvc --lib --no-default-features
