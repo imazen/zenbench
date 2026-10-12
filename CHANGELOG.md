@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### QUEUED BREAKING CHANGES
+
+## [0.1.11] - 2026-10-12
+
+### Changed
+
 - Group primary CLI help into `data`, `fleet`, and `jobs` workflows while retaining flat command spellings. Accept separated benchmark option values consistently. Recommend Confirm plus scope for study cells while retaining Evidence compatibility.
 - Align offline guides and methodology with native Windows ARM64 topology, implemented heap/fleet backends and exploratory two-program comparisons.
 
@@ -16,11 +22,9 @@
 
 - Resource admission accounts for explicitly registered launcher/worker CPU ownership; foreign work and global RAM/temperature gates remain visible. A private development example reuses engine paired statistics for external-worker rounds (cca46093fe78).
 
-### QUEUED BREAKING CHANGES
+### Behavior changes
 - Local default becomes exploratory Iterate (30 rounds, 100 ms warmup per arm); baseline CLI promotion requires explicit fixed-process confirmation and rejects unknown flags, incomplete cases and inconclusive evidence (c60b7b62, ec0246cb).
 - Default CPU admission now refuses asymmetric or unknown topology without verified uniform process placement. Explicit `unrestricted` policy permits unverified runs and labels every result row (d151aac6).
-<!-- Breaking changes that will ship together in the next minor release.
-     Add items here as you discover them. Do NOT ship these piecemeal — batch them. -->
 
 ### Fixed
 - Windows ARM64 now discovers OS performance ranks and last-level cache sizes using a scoped native query with safe parsing; independent native CI verifies discovery and enforced class selection (9e6021a4, 86ae07b0).
@@ -150,7 +154,8 @@
 ### Documentation
 - Added multi-process / multi-pass section to README; updated framework comparison table (4f3ea7b).
 
-[Unreleased]: https://github.com/imazen/zenbench/compare/v0.1.10...HEAD
+[Unreleased]: https://github.com/imazen/zenbench/compare/v0.1.11...HEAD
+[0.1.11]: https://github.com/imazen/zenbench/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/imazen/zenbench/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/imazen/zenbench/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/imazen/zenbench/compare/v0.1.7...v0.1.8
