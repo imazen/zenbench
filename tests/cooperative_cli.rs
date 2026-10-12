@@ -3,7 +3,14 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 fn cli(root: &std::path::Path) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_zenbench"));
+    let executable = env!("CARGO_BIN_EXE_zenbench");
+    let mut command = if let Some(runner) = std::env::var_os("ZENBENCH_AFFINITY_TEST_RUNNER") {
+        let mut command = Command::new(runner);
+        command.arg(executable);
+        command
+    } else {
+        Command::new(executable)
+    };
     command
         .env("ZENBENCH_COORDINATION_DIR", root)
         .env_remove("ZENBENCH_COORDINATION_LEASE");
