@@ -9,15 +9,15 @@ For Git, export a **selected snapshot to a stable filename**, updating that file
 when accepting a baseline. Do not export every iteration:
 
 ```sh
-zenbench snapshot .zenbench/data/runs/<id>.json --output benchmarks/baseline.csv
+zenbench data snapshot .zenbench/data/runs/<id>.json --output benchmarks/baseline.csv
 ```
 
 Read or compare retained evidence without running benchmarks:
 
 ```sh
-zenbench read .zenbench/data/runs/<id>.json --format llm
-zenbench read result.json.gz --format json
-zenbench compare baseline.json.gz candidate.json.gz
+zenbench data read .zenbench/data/runs/<id>.json --format llm
+zenbench data read result.json.gz --format json
+zenbench data compare baseline.json.gz candidate.json.gz
 ```
 
 `read` defaults to LLM-readable text and also accepts `json`, `csv`, and `md`.
@@ -74,7 +74,7 @@ be split into separate suites rather than silently truncate their measurements.
 historical JSON, gzip JSON, and evidence references. To compact an existing file:
 
 ```sh
-zenbench archive old-result.json --output old-result.json.gz
+zenbench data archive old-result.json --output old-result.json.gz
 ```
 
 Re-render/diff retained data instead of rerunning it. There is no automatic garbage
@@ -96,7 +96,7 @@ The regression preserves those exact floating-point values through load/archive.
 
 ## Analysis and baseline references
 
-`zenbench reanalyze INPUT --output analysis.json` recomputes the recorded fixed
+`zenbench data reanalyze INPUT --output analysis.json` recomputes the recorded fixed
 process policy from raw rounds. The separate artifact includes its policy version,
 evidence hash, validity issues and decisions. It does not change measurements or
 turn exploratory measurements into confirmation.

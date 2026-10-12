@@ -147,3 +147,21 @@ normal documentation review process.
 
 The assessment is: capabilities are mostly justified by current uses; the API
 and CLI are not yet minimal or coherent enough to freeze unchanged.
+
+## Cleanup following this review
+
+The compatibility repair restores the published `BaselineComparison` layout and
+`ResourceGate` unwind traits. Confirmation now uses a separate non-exhaustive
+`BaselineAssessment`; the same expanded-feature semver check passes all 202
+applicable checks. CI repeats that published-version comparison.
+
+CLI discovery now has nine primary entries, with data/fleet/jobs families and
+all flat commands retained. Benchmark options accept both value spellings.
+New guidance recommends Confirm with scope, retaining Evidence's API and recorded
+identity. Probe/QoS APIs remain because actual external-worker diagnostics use
+them; their observations still do not certify placement. Platform, heap and
+pair documentation has been reconciled with the implementations.
+
+See [migration and command contracts](../cli-migration.md). External pair
+confirmation remains an explicitly unimplemented capability; this cleanup does
+not claim to add a new statistical protocol or change legacy background exits.

@@ -9,9 +9,9 @@ plan and commands without needing this document installed.
 ```sh
 zenbench pair plan.json --dry-run
 zenbench pair plan.json --case small --output target/pair-edit
-zenbench read target/pair-edit/packet.json.gz --format json
-zenbench read target/pair-edit/packet.json.gz --format csv
-zenbench pair-diff target/pair-before/packet.json.gz target/pair-edit/packet.json.gz
+zenbench data read target/pair-edit/packet.json.gz --format json
+zenbench data read target/pair-edit/packet.json.gz --format csv
+zenbench data pair-diff target/pair-before/packet.json.gz target/pair-edit/packet.json.gz
 ```
 
 Select one relevant case during editing. The default is four blocks, one fresh
