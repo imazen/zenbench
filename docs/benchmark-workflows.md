@@ -107,10 +107,11 @@ commands require benchmark binaries using the zenbench protocol.
 For separate programs or one program with different environment variables,
 use [`zenbench pair`](external-process.md). It randomizes fresh-process A/B
 blocks, retains correctness and A/A controls, and supports checked resume.
-Its comparisons remain exploratory: external Confirm/Evidence is not implemented.
-Use separate suite confirmation populations when a supported acceptance decision
-is needed, while retaining the limitation that historical controls are not
-contemporaneous randomized blocks.
+Iterate is exploratory. `--mode confirm` evaluates a predeclared fixed-block
+contract with A/A equivalence, timing resolution, corrected intervals and strict
+resource observations. Use [the external confirmation guide](external-process.md#confirm-a-frozen-experiment)
+for the plan fields and acceptance exits. Historical suite populations remain a
+separate design from contemporaneous randomized external blocks.
 
 ## What identity is actually recorded?
 

@@ -11,7 +11,7 @@ Use `zenbench guide` first. Benchmark binaries accept both `--name=value` and
 | Local alternatives in a Rust suite | `cargo bench --bench NAME -- --mode iterate` | Execution completed; exploratory |
 | Frozen suite candidate | `cargo bench --bench NAME -- --mode confirm --workload-id ID` | Valid confirming decision; a single-arm population makes no relative claim |
 | Named study cell | Add `--scope HOST/CLASS/WORKLOAD` to Confirm | Same protocol, explicit scope; no fleet-wide certification |
-| Separate executables/environments | `zenbench pair PLAN.json` | Planned exploratory execution completed; no confirmation verdict |
+| Separate executables/environments | `zenbench pair PLAN.json` | Iterate: execution completed. Confirm: declared acceptance rule passed |
 | Compare saved suite evidence | `zenbench data compare BEFORE AFTER` | Every case establishes non-inferiority |
 | Compare saved external A/B packets | `zenbench data pair-diff BEFORE AFTER` | Descriptive comparison completed |
 | Compare fleet observations | `zenbench fleet diff BEFORE AFTER` | Compatible descriptive comparison completed |

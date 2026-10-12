@@ -29,6 +29,8 @@
 - Strict Windows CPU placement now holds an inherited affinity-limited Job Object, preventing process-mask widening by benchmark code; actual-mask controls cover preexisting Rayon/ordinary threads and child processes (585b0f8d, 95e4042c).
 
 ### Added
+- External `pair --mode confirm`: fixed-block log-ratio intervals with family correction, declared timing error, A/A equivalence, acceptance rules and strict sampled resource evidence. Iterate gains per-arm and paired-ratio min/median/MAD summaries; raw attempts remain separate from small exports.
+- Explicit supervised-worker resource snapshots without environment mutation (4d6f5979).
 - Opt-in `heap-profiling` system allocator records coherent process-wide requested live peaks and resettable phase watermarks, including existing Rayon pools and cross-thread frees; dedicated memory runs preserve allocation/reallocation failures.
 - Native Windows resident/private-commit and macOS resident high-water counters for fleet memory observations, with separate quantity labels and unavailable reasons.
 - Fresh fleet observations retain machine/domain/replicate/attempt identity, correctness checks, heartbeat/cancel receipts and separate Linux heaptrack/OS-resident evidence.

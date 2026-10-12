@@ -44,11 +44,11 @@ guarantees of fresh execution. Many rounds do not create independent processes.
 Invalid/inconclusive confirmation is exit 2, confirmed regression is exit 1.
 
 EXTERNAL BINARIES / DIFFERENT ENVIRONMENTS
-zenbench pair implements exploratory serial fresh-process A/B with per-arm
+zenbench pair implements serial fresh-process A/B with per-arm
 environments, timing vectors, correctness checks, A/A and retained failures.
 Use zenbench pair --help or zenbench guide --topic pair for a complete plan.
-Each invocation remains one process-level observation. External Confirm/Evidence
-is not implemented; A/A is a diagnostic, not a calibrated significance rule.
+Each invocation remains one process-level observation. External Confirm requires
+a frozen contract and A/A equivalence; observed A/A bias is never subtracted.
 
 COST AND REPRODUCIBILITY
 The retained Linux controls measured Iterate 0.766s and five-process Confirm
@@ -67,3 +67,8 @@ https://github.com/imazen/zenbench/blob/main/METHODOLOGY.md
 Commands: zenbench guide | zenbench guide --topic simd | benchmark --help
 
 Earlier entry point: https://github.com/imazen/zenbench/blob/main/docs/measurement-protocol.md
+
+External pair --mode confirm uses a frozen confirmation object, >=5 blocks,
+declared metric resolution, A/A equivalence and strict sampled resource checks.
+Read zenbench guide --topic pair before interpreting its acceptance exit.
+Persistent-worker timing and numeric-axis regression fits are not implemented.

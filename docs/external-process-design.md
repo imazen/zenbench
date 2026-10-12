@@ -1,9 +1,10 @@
 # Issue 29: external-process A/B implementation design
 
-**Status: exploratory CLI implemented; external confirmation remains proposed.**
-See the [implemented contract and limits](external-process.md). This design retains
-the acceptance gates for subsequent validation and external Confirm/Evidence.
-The CLI implementation introduces no public Rust API.
+**Status: exploratory and fixed-block confirmation implemented.**
+See the [implemented contract and limits](external-process.md), including explicit
+resolution, A/A equivalence, resource observations and acceptance rules. The
+original design below records the reasoning and acceptance gates; the implemented
+contract takes precedence where stricter (A/A required and no resume in Confirm).
 This specifies what to build for [issue 29](https://github.com/imazen/zenbench/issues/29),
 including one executable under different environments. The current
 [methodology](../METHODOLOGY.md) describes the existing in-process harness.

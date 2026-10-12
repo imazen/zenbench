@@ -546,9 +546,10 @@ and performance acceptance are separate statuses.
 ## 8. External executables and environment A/B: issue 29
 
 The [external-process implementation design](docs/external-process-design.md)
-sets the delivery scope and acceptance gates. The exploratory stage is available
-as [`zenbench pair`](docs/external-process.md); external Confirm/Evidence remains
-unavailable until its separate analysis and validity gates are verified.
+sets the delivery scope and acceptance gates. [`zenbench pair`](docs/external-process.md)
+supports exploratory Iterate and fixed-block Confirm. The separate
+[external inference validation](docs/pair-inference.md) specifies its unit of
+analysis, family correction, declared resolution, A/A equivalence and model limits.
 
 [Issue 29](https://github.com/imazen/zenbench/issues/29) requests a serial paired
 runner for prebuilt executables with per-arm environments, internal metrics,
