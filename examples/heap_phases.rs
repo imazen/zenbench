@@ -50,6 +50,10 @@ fn main() {
             );
             std::thread::spawn(move || {
                 ready.wait();
+                allocated.wait();
+                release.wait();
+                freed.wait();
+                finish.wait();
                 ready.wait();
                 let bytes = vec![2u8; 1024 * 1024];
                 std::hint::black_box(&bytes);
@@ -62,6 +66,12 @@ fn main() {
         })
         .collect();
     ready.wait();
+    // macOS initializes barrier synchronization storage on first contention.
+    // Include that storage in preparation, before the allocation-only phase.
+    allocated.wait();
+    release.wait();
+    freed.wait();
+    finish.wait();
     let phase = HeapPhase::begin().unwrap();
     ready.wait();
     allocated.wait();

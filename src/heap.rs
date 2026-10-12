@@ -55,6 +55,7 @@ pub struct HeapSnapshot {
 impl HeapSnapshot {
     /// Read the ledger under the same lock used by allocator operations.
     pub fn get() -> Result<Self, HeapError> {
+        initialize();
         let guard = LEDGER.lock();
         guard.snapshot()
     }
@@ -93,7 +94,8 @@ impl std::error::Error for HeapError {}
 
 /// Exclusive process-wide phase. Dropping it ends the phase without a result.
 ///
-/// Phase boundaries never allocate and never discard existing live bytes.
+/// First use probes the global allocator before entering the phase. Subsequent
+/// boundaries never allocate and never discard existing live bytes.
 /// Only one phase can be active, even across threads. Nested phases return an
 /// error. Memory retained from preparation remains in every subsequent watermark.
 #[must_use]
@@ -103,6 +105,7 @@ pub struct HeapPhase {
 }
 impl HeapPhase {
     pub fn begin() -> Result<Self, HeapError> {
+        initialize();
         let guard = LEDGER.lock();
         let entry = guard.snapshot()?;
         if LEDGER.phase_active.load(Ordering::Relaxed) {
@@ -186,6 +189,15 @@ impl Ledger {
     }
 }
 static LEDGER: Ledger = Ledger::new();
+// Some runtimes enter main without calling the Rust allocator. Probe before
+// taking the ledger lock: the allocator itself needs that same lock.
+fn initialize() {
+    if !LEDGER.installed.load(Ordering::Acquire) {
+        let probe = Box::new(0u8);
+        std::hint::black_box(&probe);
+        drop(probe);
+    }
+}
 struct Guard<'a>(&'a Ledger);
 impl Drop for Guard<'_> {
     fn drop(&mut self) {

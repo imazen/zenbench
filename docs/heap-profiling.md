@@ -28,7 +28,9 @@ memory can hide a later allocation in that difference. A second active phase is
 an error; dropping a phase releases it without returning a measurement.
 
 One lock orders the system allocation operation, its accounting and every
-snapshot/boundary. The lock and counters allocate nothing. Alloc/realloc failures
+snapshot/boundary. The lock and counters allocate nothing. First use makes and frees a one-byte probe before the
+snapshot or phase, to initialize accounting even when the runtime has not yet
+called the Rust allocator. Later boundaries need no probe. Alloc/realloc failures
 leave the live count unchanged; successful realloc changes the old size to the
 new size. `requested_bytes` is successful allocation sizes plus successful
 realloc new sizes, not net growth. Counter overflow/inconsistent accounting

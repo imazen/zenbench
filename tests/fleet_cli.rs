@@ -119,6 +119,10 @@ fn observation_bundle(root: &Path, backend: &str, kind: &str) {
         "--nocapture".into(),
     ];
     if let Some(runner) = std::env::var_os("ZENBENCH_AFFINITY_TEST_RUNNER") {
+        let runner = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+            .map(|dir| dir.join(&runner))
+            .find(|path| path.is_file())
+            .expect("test runner must be installed on PATH");
         files["runner"] = json!({"source":runner,"executable":true});
         program = "runner";
         args.insert(0, driver_name.into());
