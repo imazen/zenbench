@@ -21,6 +21,10 @@
 
 #[cfg(feature = "alloc-profiling")]
 mod alloc;
+#[cfg(feature = "heap-profiling")]
+mod heap;
+#[cfg(feature = "heap-profiling")]
+pub use heap::{HeapError, HeapMeasurement, HeapPhase, HeapProfiler, HeapSnapshot};
 pub mod baseline;
 mod bench;
 pub mod calibration;

@@ -1,5 +1,5 @@
 # zenbench public API — additions from non-default features
-# features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,precise-timing,wasm
+# features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,heap-profiling,precise-timing,wasm
 # (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
 # Encodings: crate-name prefix stripped; auto traits collapse to a
 # count + exceptions; trait impls collapse to one roster line per
@@ -10,24 +10,25 @@
 ## summary
 #
 #   pub modules                                 3
-#   pub types (struct/enum/trait/alias)        10
+#   pub types (struct/enum/trait/alias)        15
+#   pub consts/statics                          1
 #   pub macros                                  2
 #   free functions                              3
-#   inherent methods                           48
-#   struct fields                               5
-#   enum variants                               9
+#   inherent methods                           51
+#   struct fields                              18
+#   enum variants                              16
 #   re-exports                                  1
-#   trait roster entries (type × trait)        16
-#   auto-trait-complete types                   4
+#   trait roster entries (type × trait)        35
+#   auto-trait-complete types                   9
 #   auto-trait exceptions                       5
 #
 # per-module pub lines:
-#   (root)                           13
+#   (root)                           42
 #   charts                           10
 #   criterion_compat                 43
 #   wasm                             15
 
-## items (81 lines)
+## items (110 lines)
 
 pub mod charts
 pub enum charts::ChartOrientation
@@ -106,13 +107,47 @@ pub fn wasm::WasmInstance::raw_instance(&self) -> &wasmtime::runtime::instance::
 pub fn wasm::WasmInstance::typed_func<P, R>(&mut self, &str) -> core::result::Result<wasmtime::runtime::func::typed::TypedFunc<P, R>, wasmtime_internal_core::error::error::Error> where P: wasmtime::runtime::func::typed::WasmParams, R: wasmtime::runtime::func::typed::WasmResults
 pub macro criterion_group!
 pub macro criterion_main!
+#[non_exhaustive] pub enum HeapError
+pub HeapError::CounterOverflow
+pub HeapError::NotInstalled
+pub HeapError::PhaseAlreadyActive
 pub fn BenchGroup::current_subgroup(&self) -> core::option::Option<&alloc::string::String>
 pub fn Bencher::iter_async<O, F, Fut>(&mut self, &tokio::runtime::runtime::Runtime, F) where F: core::ops::function::FnMut() -> Fut, Fut: core::future::future::Future<Output = O>
+#[non_exhaustive] pub struct HeapMeasurement
+pub HeapMeasurement::allocations: u64
+pub HeapMeasurement::entry_live_bytes: u64
+pub HeapMeasurement::exit_live_bytes: u64
+pub HeapMeasurement::failed_requests: u64
+pub HeapMeasurement::peak_live_bytes: u64
+pub HeapMeasurement::reallocations: u64
+pub HeapMeasurement::requested_bytes: u64
+pub struct HeapPhase
+pub fn HeapPhase::begin() -> core::result::Result<Self, HeapError>
+pub fn HeapPhase::finish(self) -> core::result::Result<HeapMeasurement, HeapError>
+pub struct HeapProfiler
+pub const fn HeapProfiler::system() -> Self
+pub unsafe fn HeapProfiler::alloc(&self, core::alloc::layout::Layout) -> *mut u8
+pub unsafe fn HeapProfiler::alloc_zeroed(&self, core::alloc::layout::Layout) -> *mut u8
+pub unsafe fn HeapProfiler::dealloc(&self, *mut u8, core::alloc::layout::Layout)
+pub unsafe fn HeapProfiler::realloc(&self, *mut u8, core::alloc::layout::Layout, usize) -> *mut u8
+#[non_exhaustive] pub struct HeapSnapshot
+pub HeapSnapshot::allocations: u64
+pub HeapSnapshot::failed_requests: u64
+pub HeapSnapshot::lifetime_peak_bytes: u64
+pub HeapSnapshot::live_bytes: u64
+pub HeapSnapshot::reallocations: u64
+pub HeapSnapshot::requested_bytes: u64
+pub fn HeapSnapshot::get() -> core::result::Result<Self, HeapError>
 pub fn Suite::push_comparison(&mut self, ComparisonResult)
 pub fn SuiteResult::save_publication_charts(&self, impl core::convert::AsRef<std::path::Path>, &charts::ChartConfig) -> core::io::error::Result<()>
 
-## trait impls (7 types)
+## trait impls (12 types)
 
+HeapError: Clone, Copy, Debug, Display, Eq, Error, PartialEq
+HeapMeasurement: Clone, Copy, Debug, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+HeapPhase: Drop
+HeapProfiler: GlobalAlloc
+HeapSnapshot: Clone, Copy, Debug, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 alloc::string::String: From<criterion_compat::BenchmarkId>
 charts::ChartConfig: Clone, Debug, Default
 charts::ChartOrientation: Clone, Copy, Debug, Default, Eq, PartialEq
@@ -123,7 +158,7 @@ wasm::WasmBench: Clone
 
 ## auto traits
 
-4 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+9 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 criterion_compat::Bencher<'a>: !UnwindSafe
 criterion_compat::BenchmarkGroup<'a>: !RefUnwindSafe !Sync !UnwindSafe
 criterion_compat::Criterion: !RefUnwindSafe !Sync !UnwindSafe

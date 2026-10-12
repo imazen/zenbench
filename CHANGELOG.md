@@ -23,6 +23,7 @@
 - Strict Windows CPU placement now holds an inherited affinity-limited Job Object, preventing process-mask widening by benchmark code; actual-mask controls cover preexisting Rayon/ordinary threads and child processes (585b0f8d, 95e4042c).
 
 ### Added
+- Opt-in `heap-profiling` system allocator records coherent process-wide requested live peaks and resettable phase watermarks, including existing Rayon pools and cross-thread frees; dedicated memory runs preserve allocation/reallocation failures.
 - Native Windows resident/private-commit and macOS resident high-water counters for fleet memory observations, with separate quantity labels and unavailable reasons.
 - Fresh fleet observations retain machine/domain/replicate/attempt identity, correctness checks, heartbeat/cancel receipts and separate Linux heaptrack/OS-resident evidence.
 - CLI capability JSON identifies the installed runner and placement verdict; explicit portable bundles retain and verify executable/input hashes before deployment.

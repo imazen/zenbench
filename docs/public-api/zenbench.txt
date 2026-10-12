@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenbench.txt 752 lines (supported surface) | zenbench.features.txt 94 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,precise-timing,wasm) | zenbench.internal.txt 30 lines (30 hidden + 0 excluded-feature)
+# files: zenbench.txt 752 lines (supported surface) | zenbench.features.txt 128 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,heap-profiling,precise-timing,wasm) | zenbench.internal.txt 34 lines (34 hidden + 0 excluded-feature)
 
 ## summary
 #
