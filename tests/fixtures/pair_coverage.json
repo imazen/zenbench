@@ -1,0 +1,96 @@
+{
+  "oracle": "SciPy 1.18.1",
+  "seed": 290012,
+  "results": [
+    {
+      "model": "iid_null",
+      "blocks": 5,
+      "trials": 4000,
+      "ab_coverage": 3896,
+      "accepted_improvement": 0,
+      "accepted_regression": 0,
+      "control_equivalent": 3975
+    },
+    {
+      "model": "iid_slow",
+      "blocks": 5,
+      "trials": 4000,
+      "ab_coverage": 3912,
+      "accepted_improvement": 0,
+      "accepted_regression": 3978,
+      "control_equivalent": 3978
+    },
+    {
+      "model": "linear_drift",
+      "blocks": 5,
+      "trials": 4000,
+      "ab_coverage": 3753,
+      "accepted_improvement": 0,
+      "accepted_regression": 0,
+      "control_equivalent": 0
+    },
+    {
+      "model": "carryover",
+      "blocks": 5,
+      "trials": 4000,
+      "ab_coverage": 3816,
+      "accepted_improvement": 0,
+      "accepted_regression": 0,
+      "control_equivalent": 20
+    },
+    {
+      "model": "arm_correlated_confounder",
+      "blocks": 5,
+      "trials": 4000,
+      "ab_coverage": 354,
+      "accepted_improvement": 1430,
+      "accepted_regression": 1457,
+      "control_equivalent": 3987
+    },
+    {
+      "model": "iid_null",
+      "blocks": 20,
+      "trials": 4000,
+      "ab_coverage": 3895,
+      "accepted_improvement": 0,
+      "accepted_regression": 0,
+      "control_equivalent": 4000
+    },
+    {
+      "model": "iid_slow",
+      "blocks": 20,
+      "trials": 4000,
+      "ab_coverage": 3889,
+      "accepted_improvement": 0,
+      "accepted_regression": 4000,
+      "control_equivalent": 4000
+    },
+    {
+      "model": "linear_drift",
+      "blocks": 20,
+      "trials": 4000,
+      "ab_coverage": 3883,
+      "accepted_improvement": 0,
+      "accepted_regression": 0,
+      "control_equivalent": 1900
+    },
+    {
+      "model": "carryover",
+      "blocks": 20,
+      "trials": 4000,
+      "ab_coverage": 1839,
+      "accepted_improvement": 0,
+      "accepted_regression": 0,
+      "control_equivalent": 744
+    },
+    {
+      "model": "arm_correlated_confounder",
+      "blocks": 20,
+      "trials": 4000,
+      "ab_coverage": 115,
+      "accepted_improvement": 1567,
+      "accepted_regression": 1521,
+      "control_equivalent": 4000
+    }
+  ]
+}
