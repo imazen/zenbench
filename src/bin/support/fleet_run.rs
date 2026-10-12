@@ -507,6 +507,10 @@ pub(crate) fn read(directory: &Path) -> io::Result<Value> {
     }
     Ok(v)
 }
+fn state_json(s: &zenbench::platform::SystemState) -> Value {
+    json!({"cpu_load":s.cpu_load,"available_ram_bytes":s.available_ram_bytes,"total_ram_bytes":s.total_ram_bytes,"cpu_temp_c":s.cpu_temp_c,"heavy_process_count":s.heavy_process_count,"cleanliness_certified":false})
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -520,8 +524,4 @@ mod tests {
         assert!(stack_peak("").is_err());
         assert!(stack_peak("root 18446744073709551615\nother 1\n").is_err());
     }
-}
-
-fn state_json(s: &zenbench::platform::SystemState) -> Value {
-    json!({"cpu_load":s.cpu_load,"available_ram_bytes":s.available_ram_bytes,"total_ram_bytes":s.total_ram_bytes,"cpu_temp_c":s.cpu_temp_c,"heavy_process_count":s.heavy_process_count,"cleanliness_certified":false})
 }

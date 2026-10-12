@@ -106,8 +106,13 @@ fn fleet_driver_fixture() {
 }
 fn observation_bundle(root: &Path, backend: &str, kind: &str) {
     let driver = std::env::current_exe().unwrap();
-    let mut files = json!({"driver":{"source":driver,"executable":true}});
-    let mut program = "driver";
+    let driver_name = if cfg!(windows) {
+        "driver.exe"
+    } else {
+        "driver"
+    };
+    let mut files = json!({driver_name:{"source":driver,"executable":true}});
+    let mut program = driver_name;
     let mut args = vec![
         "--exact".to_string(),
         "fleet_driver_fixture".into(),
@@ -116,13 +121,7 @@ fn observation_bundle(root: &Path, backend: &str, kind: &str) {
     if let Some(runner) = std::env::var_os("ZENBENCH_AFFINITY_TEST_RUNNER") {
         files["runner"] = json!({"source":runner,"executable":true});
         program = "runner";
-        args.insert(0, "driver".into());
-    }
-    #[cfg(windows)]
-    {
-        files["driver.exe"] = files["driver"].take();
-        files.as_object_mut().unwrap().remove("driver");
-        program = "driver.exe";
+        args.insert(0, driver_name.into());
     }
     let os = if cfg!(target_os = "macos") {
         "darwin"

@@ -337,3 +337,8 @@ The CLI evidence integration test must honor `ZENBENCH_AFFINITY_TEST_RUNNER`
 like the existing CPU-policy subprocess tests. Directly launching its ARMv7
 executable under cross returned a launcher error rather than exercising the CLI.
 The expected CLI status and diagnostic remain unchanged.
+
+Fleet CLI verification must include binary test targets in clippy and Windows
+MSRV checks: checking only `--bin zenbench` missed test-module ordering and a
+Windows-only overwritten fixture variable. Both were corrected without changing
+assertions.

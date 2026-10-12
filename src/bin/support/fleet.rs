@@ -177,18 +177,6 @@ pub(crate) fn verify(root: &Path) -> io::Result<Bundle> {
     Ok(manifest)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn portable_paths_reject_escape_and_platform_ambiguity() {
-        for path in ["", "../data", "/data", "C:/data", "dir\\data"] {
-            assert!(relative(Path::new(path)).is_err(), "{path}");
-        }
-        assert!(relative(Path::new("bin/metric.exe")).is_ok());
-    }
-}
-
 pub(crate) fn tool(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
@@ -205,4 +193,16 @@ pub(crate) fn tool(name: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn portable_paths_reject_escape_and_platform_ambiguity() {
+        for path in ["", "../data", "/data", "C:/data", "dir\\data"] {
+            assert!(relative(Path::new(path)).is_err(), "{path}");
+        }
+        assert!(relative(Path::new("bin/metric.exe")).is_ok());
+    }
 }
