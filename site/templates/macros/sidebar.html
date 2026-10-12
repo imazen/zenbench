@@ -1,0 +1,20 @@
+{% import "macros/footer.html" as footer %}
+{% import "macros/desktopMenu.html" as desktop %}
+{% macro sidebar(config, lang, current_path, section, config_file=false) %}
+<label for="my-drawer-2" class="drawer-overlay" aria-label="Close navigation"></label>
+<div class="pt-4 w-68 h-[calc(100vh-4rem)] bg-base-100 text-base-content flex flex-col overflow-auto thin-scrollbar">
+    <button type="button" class="btn btn-ghost mx-2" onclick="document.getElementById('search-modal').click()">Search guides</button>
+    <nav aria-label="Guides" class="flex-grow">
+        <ul class="menu sidebar w-full">
+            {% set index = get_section(path="_index.md") %}
+            {% for guide in index.pages %}
+            {% if guide.extra.in_sidebar is not defined or guide.extra.in_sidebar %}
+            <li><a href="{{ guide.permalink | safe }}"{% if current_path == guide.path %} aria-current="page" class="rounded bg-gray-500/15"{% endif %}>{{ guide.title }}</a></li>
+            {% endif %}
+            {% endfor %}
+        </ul>
+    </nav>
+    <div class="flex w-full px-5 lg:hidden">{{ desktop::menu(config=config, lang=lang) }}</div>
+    {{ footer::footer(config=config) }}
+</div>
+{% endmacro sidebar %}

@@ -36,3 +36,29 @@ main.prose pre {
 main.prose .copy-code-button {
     visibility: visible;
 }
+
+.repository-icon {
+    display: inline-block;
+    width: 1.4rem;
+    height: 1.4rem;
+    background: currentColor;
+    mask-size: contain;
+    mask-position: center;
+    mask-repeat: no-repeat;
+    -webkit-mask-size: contain;
+    -webkit-mask-position: center;
+    -webkit-mask-repeat: no-repeat;
+}
+
+main.prose a {
+    text-decoration: underline;
+    text-underline-offset: 0.18em;
+}
+:is(header, #sidebar, .guide-toc) a:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+}
+#sidebar a:hover, .guide-toc a:hover {
+    text-decoration: underline;
+    background: color-mix(in srgb, currentColor 10%, transparent);
+}

@@ -1,0 +1,46 @@
+{% import "macros/utils.html" as utils %}
+{% macro toc(page, lang, config, config_file=false) %}
+{% if page.relative_path == "guides.md" %}
+<nav class="hidden lg:block" aria-label="Guide contents">
+    <div class="sticky top-20 px-4 py-2 border-l border-gray-500/15">
+        <h4 class="text-lg font-bold mb-1">GUIDES BY TASK</h4>
+        <ul class="menu menu-sm guide-toc">
+            {% set index = get_section(path="_index.md") %}
+            {% for guide in index.pages %}
+            {% if guide.relative_path != "guides.md" %}
+            <li><a href="{{ guide.permalink | safe }}">{{ guide.title }}</a></li>
+            {% endif %}
+            {% endfor %}
+        </ul>
+    </div>
+</nav>
+{% elif page.toc %}
+<div class="hidden lg:block" {% if page.extra.toc_expand %}data-toc-expand="true"{% endif %}>
+    <div class="sticky top-20 px-4 py-2 border-l border-gray-500/15">
+        <h4 class="text-lg font-bold mb-1">{{ utils::trans_or_default(key="toc_title", default="ON THIS PAGE", lang=lang, config=config, config_file=config_file) }}</h4>
+            <ul class="menu menu-sm toc-menu">
+            {% for h1 in page.toc %}
+                <li>
+                    {% if h1.children %}
+                    <details class="toc-details" {% if page.extra.toc_expand %}open{% endif %}>
+                        <summary>
+                            <a href="{{ h1.permalink | safe }}" class="toc-link">{{ h1.title }}</a>
+                        </summary>
+                        <ul>
+                            {% for h2 in h1.children %}
+                                <li>
+                                    <a href="{{ h2.permalink | safe }}" class="toc-link">{{ h2.title }}</a>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    </details>
+                    {% else %}
+                    <a href="{{ h1.permalink | safe }}" class="toc-link">{{ h1.title }}</a>
+                    {% endif %}
+                </li>
+            {% endfor %}
+            </ul>
+    </div>
+</div>
+{% endif %}
+{% endmacro toc %}

@@ -67,6 +67,28 @@ def main():
                     if toggle.get_attribute("aria-expanded") != "false":
                         failures.append(f"{width}: keyboard menu did not close {url}")
                 checks += 1
+            # Exercise navigation, not just link presence. The header must not
+            # intercept the guide list, including on narrow touch viewports.
+            page.goto(base + "guides/", wait_until="networkidle")
+            github = page.locator('header a[href="https://github.com/imazen/zenbench"]')
+            if github.count() != 1 or not github.is_visible():
+                failures.append(f"{width}: GitHub link is not directly visible in the header")
+            if width >= 1024:
+                page.locator('.guide-toc a[href$="/getting-started/"]').click()
+                page.wait_for_url(base + "getting-started/")
+            for destination in ("getting-started/", "iterate/", "results/"):
+                if width < 1024:
+                    page.get_by_role("button", name="Open navigation", exact=True).click()
+                link = page.locator(f'#sidebar a[href="{base}{destination}"]')
+                try:
+                    link.click(timeout=3000)
+                    page.wait_for_url(base + destination, timeout=3000)
+                except Exception as error:
+                    failures.append(f"{width}: guide link {destination} cannot navigate: {error}")
+                    page.goto(base + "guides/", wait_until="networkidle")
+            page.goto(base + "guides/", wait_until="networkidle")
+            page.locator('main a[href$="/getting-started/"]').first.click()
+            page.wait_for_url(base + "getting-started/")
             # The theme's real copy button must preserve the displayed command.
             page.goto(base + "external-programs/", wait_until="networkidle")
             copy = page.locator("main .copy-code-button").first

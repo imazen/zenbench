@@ -14,6 +14,10 @@
         <a href="{{ get_url(path="/", lang=lang) }}" class="btn btn-ghost normal-case text-xl">{{ config.extra.logo.text }}</a>
     </div>
     <div class="flex-none hidden lg:flex">{{ desktop::menu(config=config, lang=lang) }}</div>
+    <a href="https://github.com/imazen/zenbench" class="btn btn-ghost repository-link" aria-label="zenbench on GitHub">
+        <span class="repository-icon" aria-hidden="true" style="mask-image: url('{{ get_url(path="icons/github.svg") }}'); -webkit-mask-image: url('{{ get_url(path="icons/github.svg") }}')"></span>
+        <span>GitHub</span>
+    </a>
 </header>
 <script>
 (() => {
