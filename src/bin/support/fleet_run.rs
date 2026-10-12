@@ -225,6 +225,12 @@ fn execute(
         }
         std::thread::sleep(Duration::from_millis(100));
     }
+    if plan.backend == Backend::OsPeak && cfg!(unix) && !Path::new("/usr/bin/time").is_file() {
+        return Err(failure(
+            "unsupported",
+            "/usr/bin/time is required for OS resident high-water accounting",
+        ));
+    }
     let program = root.join(&plan.program);
     if plan.backend == Backend::Heaptrack {
         let mut identities = BTreeMap::new();
@@ -241,18 +247,25 @@ fn execute(
     let mut command = match plan.backend {
         Backend::Wall | Backend::Driver => Command::new(&program),
         Backend::OsPeak => {
-            if !cfg!(target_os = "linux") {
+            if cfg!(windows) {
+                Command::new(&program)
+            } else if cfg!(target_os = "linux") {
+                let mut c = Command::new("/usr/bin/time");
+                c.args(["-f", "%M", "-o"])
+                    .arg(output.join("max-rss-kib.txt"))
+                    .arg("--")
+                    .arg(&program);
+                c
+            } else if cfg!(target_os = "macos") {
+                let mut c = Command::new("/usr/bin/time");
+                c.arg("-l").arg(&program);
+                c
+            } else {
                 return Err(failure(
                     "unsupported",
-                    "OS peak adapter currently requires GNU time on Linux",
+                    "OS high-water backend unsupported on this OS",
                 ));
             }
-            let mut c = Command::new("/usr/bin/time");
-            c.args(["-f", "%M", "-o"])
-                .arg(output.join("max-rss-kib.txt"))
-                .arg("--")
-                .arg(&program);
-            c
         }
         Backend::Heaptrack => {
             if !cfg!(target_os = "linux") {
@@ -297,7 +310,8 @@ fn execute(
     receipt["process_id"] = json!(pid);
     receipt["wall_seconds"] = json!(begin.elapsed().as_secs_f64());
     receipt["resources_after"] = state_json(&monitor.snapshot());
-    let status = status.map_err(classify)?;
+    let outcome = status.map_err(classify)?;
+    let status = outcome.status;
     receipt["exit_code"] = json!(status.code());
     if !status.success() {
         return Err(failure("child_failed", format!("{status}")));
@@ -345,10 +359,44 @@ fn execute(
             memory = driver.memory;
         }
         Backend::OsPeak => {
-            let text = String::from_utf8(limited(&output.join("max-rss-kib.txt")).map_err(error)?)
-                .map_err(error)?;
-            let kib = text.trim().parse::<u64>().map_err(error)?;
-            memory.push(Memory {quantity:"resident_high_water".into(),bytes:Some(kib.checked_mul(1024).ok_or_else(||error("RSS overflow"))?),unavailable_reason:None,backend:"gnu_time_ru_maxrss".into(),backend_version:fleet::hash_file(Path::new("/usr/bin/time")).map_err(error)?,coverage:"OS wait resource accounting; not heap; descendant high-water accounting is not a simultaneous tree sum".into(),scope:"whole_child".into()});
+            if let Some(counters) = outcome.windows_peaks {
+                for (index, quantity, counter) in [
+                    (0, "resident_high_water", "PeakWorkingSetSize"),
+                    (1, "private_commit_high_water", "PeakPagefileUsage"),
+                ] {
+                    let (bytes, reason) = match &counters {
+                        Ok((rss, commit)) => (Some(if index == 0 { *rss } else { *commit }), None),
+                        Err(e) => (None, Some(e.clone())),
+                    };
+                    memory.push(Memory {quantity:quantity.into(),bytes,unavailable_reason:reason,backend:format!("GetProcessMemoryInfo/{counter}"),backend_version:sysinfo::System::long_os_version().unwrap_or_else(||"unknown Windows version".into()),coverage:"OS process-lifetime counter; excludes child processes; not requested heap".into(),scope:"whole_child".into()});
+                }
+            } else {
+                let (path, quantity, backend, bytes) = if cfg!(target_os = "linux") {
+                    let path = output.join("max-rss-kib.txt");
+                    let text = String::from_utf8(limited(&path).map_err(error)?).map_err(error)?;
+                    let kib = text.trim().parse::<u64>().map_err(error)?;
+                    (
+                        path,
+                        "resident_high_water",
+                        "gnu_time_ru_maxrss",
+                        kib.checked_mul(1024).ok_or_else(|| error("RSS overflow"))?,
+                    )
+                } else {
+                    let path = output.join("stderr.txt");
+                    let text = String::from_utf8(limited(&path).map_err(error)?).map_err(error)?;
+                    let values: Vec<_> = text
+                        .lines()
+                        .filter_map(|line| line.trim().strip_suffix(" maximum resident set size"))
+                        .collect();
+                    if values.len() != 1 {
+                        return Err(error("expected one macOS time resident high-water counter"));
+                    }
+                    let bytes = values[0].trim().parse::<u64>().map_err(error)?;
+                    (path, "resident_high_water", "macos_time_ru_maxrss", bytes)
+                };
+                receipt["os_counter_source"] = json!(path.file_name());
+                memory.push(Memory {quantity:quantity.into(),bytes:Some(bytes),unavailable_reason:None,backend:backend.into(),backend_version:fleet::hash_file(Path::new("/usr/bin/time")).map_err(error)?,coverage:"OS wait resource accounting; not heap; descendant high-water accounting is not a simultaneous tree sum".into(),scope:"whole_child".into()});
+            }
         }
         Backend::Heaptrack => {
             let traces: Vec<_> = fs::read_dir(output)
@@ -395,7 +443,7 @@ fn execute(
                 poll,
             )
             .map_err(classify)?;
-            if !status.success() {
+            if !status.status.success() {
                 return Err(error("heaptrack_print failed"));
             }
             let text = String::from_utf8(limited(&output.join("peak.stacks")).map_err(error)?)

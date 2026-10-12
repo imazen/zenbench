@@ -71,8 +71,13 @@ supervisor death leaves an orphan reservation that fails closed.
 
 `wall` records descriptive supervisor wall time, including launch and cleanup.
 It is not an in-process latency estimate or confirmation result. `os_peak` uses
-Linux GNU time's `ru_maxrss`, converted from KiB to integer bytes. That is OS
-resident accounting, not heap, and not a simultaneous sum over a process tree.
+Linux GNU time's `ru_maxrss`, converted from KiB to integer bytes, or macOS
+`/usr/bin/time -l`'s maximum resident set size in bytes. Windows reads the child
+handle's `PeakWorkingSetSize` and `PeakPagefileUsage` before closing it, reporting
+resident and private-commit high-water counters separately. Those are OS
+counters, not heap, and not a simultaneous sum over a process tree. Windows
+query failures retain null values with reasons. A missing Unix time tool refuses
+the observation; it never substitutes sampled RSS.
 `heaptrack` runs the Linux recorder and analyzer and retains their file hashes,
 trace, summary and exact integer global-peak stack contributions. Allocation
 contributions are all from the same global peak; independent call-site peaks

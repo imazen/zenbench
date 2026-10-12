@@ -119,6 +119,10 @@ fn observation_bundle(root: &Path, backend: &str, kind: &str) {
         "--nocapture".into(),
     ];
     if let Some(runner) = std::env::var_os("ZENBENCH_AFFINITY_TEST_RUNNER") {
+        let runner = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+            .map(|dir| dir.join(&runner))
+            .find(|p| p.is_file())
+            .expect("explicit test runner on PATH");
         files["runner"] = json!({"source":runner,"executable":true});
         program = "runner";
         args.insert(0, driver_name.into());
@@ -202,4 +206,38 @@ fn fresh_attempt_checks_output_and_retains_failures_and_cancellation() {
             .collect();
         assert!(remaining.is_empty(), "{remaining:?}");
     }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+#[test]
+fn os_high_water_is_named_and_separate_from_requested_heap() {
+    let root = root();
+    std::fs::create_dir(root.join("queue")).unwrap();
+    observation_bundle(&root, "os_peak", "ok");
+    let output = run_observation(&root).output().unwrap();
+    let packet: Value =
+        serde_json::from_slice(&std::fs::read(root.join("attempt/packet.json")).unwrap()).unwrap();
+    assert_eq!(
+        packet["status"],
+        "complete",
+        "{} {packet}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let memory = packet["memory"].as_array().unwrap();
+    assert!(
+        memory
+            .iter()
+            .all(|m| m["quantity"] != "requested_live_heap_peak")
+    );
+    let rss = memory
+        .iter()
+        .find(|m| m["quantity"] == "resident_high_water")
+        .unwrap();
+    assert!(rss["bytes"].as_u64().unwrap() >= 1024 * 1024, "{rss}");
+    #[cfg(windows)]
+    assert!(
+        memory
+            .iter()
+            .any(|m| m["quantity"] == "private_commit_high_water")
+    );
 }
