@@ -342,3 +342,23 @@ frequency, quietness, and opaque pool size remain unverified. The Windows ARM
 Job fixture tests the OS boundary independently of missing core-class discovery.
 
 [Native boundary and load-gate fixture packets](../benchmarks/windows_native_boundary_gate_2026-10-11.json) retain their executable/source hashes, test output, native RSS, and local resource records.
+
+## Native Snapdragon Windows ARM64 controls (2026-10-12)
+
+At `6a798e09`, the native ARM64 build passed requested-heap phase/failure
+controls, fleet success/failure/cancellation and named OS memory counters,
+and inherited Job Object confinement for existing Rayon workers and descendants.
+The independent Windows oracle reports performance classes 0 on CPUs 0–3 and
+1 on CPUs 4–11, with three 12 MiB shared L2 domains. These labels are OS reports,
+not measured speed ratios.
+
+The capability probe exposed missing ARM64 topology discovery: zenbench reported
+unknown and refused default placement. Passing the functional controls does not
+certify class selection. Native latency/repeatability was not measured.
+
+[Compact evidence and exact invocation](../benchmarks/winarm_native_controls_2026-10-12.json)
+retain the source/binary identities and heap observations. The control used one
+build job at idle priority under a 3 GiB process-tree Job Object cap; Windows
+reported peak job commit of 2,675,781,632 bytes, a build-envelope counter rather
+than heap or RSS. A 2 GiB cap stopped compilation of the Windows API dependency,
+including when debug symbols and incremental state were disabled.

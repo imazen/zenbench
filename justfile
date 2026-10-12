@@ -480,3 +480,7 @@ heap-oracle output:
 
 fleet-cross cross="cross":
     CROSS_CONTAINER_OPTS="--memory=6g --memory-swap=6g --cpus=2" ZENBENCH_CPU_POLICY=unrestricted {{cross}} test --target armv7-unknown-linux-gnueabihf --test fleet_cli
+
+# Run on Windows from a revision-identified source tree; keeps a transcript.
+windows-native-check:
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File examples/windows_native_check.ps1

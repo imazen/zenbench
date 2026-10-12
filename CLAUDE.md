@@ -346,3 +346,12 @@ Fleet CLI verification must include binary test targets in clippy and Windows
 MSRV checks: checking only `--bin zenbench` missed test-module ordering and a
 Windows-only overwritten fixture variable. Both were corrected without changing
 assertions.
+
+### Known Bugs: Windows ARM64 topology discovery
+
+Native Snapdragon controls at `6a798e09` passed heap phases, fleet CLI and
+inherited Job Object confinement, but the capability probe reported unknown
+CPU topology because Windows discovery only compiled the x86 CPUID path.
+The independent native oracle reports two efficiency classes and three shared
+L2 domains. Default placement correctly refuses the unknown result. Evidence:
+`benchmarks/winarm_native_controls_2026-10-12.json`.

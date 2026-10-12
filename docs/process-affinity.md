@@ -326,3 +326,21 @@ This is separate from the explicitly ungated repeatability protocol above.
 claim Rust 1.85 support using that toolchain. CI also performs this Windows
 check on Rust 1.85.0; the Linux MSRV check alone does not compile Windows-only
 dependencies or backend code.
+
+### Native Windows heap and fleet controls
+
+From a revision-identified source tree on a Windows worker, run
+`just windows-native-check` (or its PowerShell command from the justfile).
+This checks topology, existing-thread/process-mask restoration, exact requested
+heap accounting, inherited Job Object confinement (including existing Rayon
+workers and descendants), and the fleet CLI. The final capability probe removes
+the functional fixtures' unrestricted-policy override so its output exposes the
+actual default placement verdict.
+
+The runner uses one Cargo build job, disables compiler debug symbols and
+incremental state, and sets idle priority and a 3 GiB inherited Job Object memory
+cap. It requires 4 GiB available before starting, retains a local
+transcript, and reports peak job commit bytes separately from heap measurements.
+PowerShell's execution-policy override applies only to the command's process;
+the recipe does not change the machine's policy. These are correctness controls,
+not a repeatability study or evidence of production enrollment.

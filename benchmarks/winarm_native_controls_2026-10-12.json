@@ -1,0 +1,162 @@
+{
+  "date": "2026-10-12",
+  "source_commit": "6a798e09a77a5e91546a2bbe80544323ef9096de",
+  "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File examples/windows_native_check.ps1",
+  "control_script_sha256": "cedb51bd6450ccb2d241075828c3d2823fc47a5f2d31755fd839f03974aa247f",
+  "raw_log_sha256": "06a52cc0b575bed8f1f9260becc8cc82762dda17c065a050130586375ae7c762",
+  "cpu": "Snapdragon X Elite X1E78100",
+  "os": "Windows 11 Pro 10.0.26200",
+  "rust_host": "aarch64-pc-windows-msvc",
+  "rust_version": "1.94.0",
+  "native_oracle_efficiency_classes": {
+    "0": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "1": [
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11
+    ]
+  },
+  "native_oracle_shared_l2": {
+    "bytes": 12582912,
+    "domains": [
+      [
+        0,
+        1,
+        2,
+        3
+      ],
+      [
+        4,
+        5,
+        6,
+        7
+      ],
+      [
+        8,
+        9,
+        10,
+        11
+      ]
+    ]
+  },
+  "checks": {
+    "process_mask_existing_thread_and_pool": "passed",
+    "heap_phases_and_failure_semantics": "passed",
+    "heap_unit_tests": "passed",
+    "fleet_cli": "passed",
+    "job_boundary_existing_rayon_and_descendants": "passed"
+  },
+  "heap": {
+    "cross_thread_free": {
+      "allocations": 0,
+      "entry_live_bytes": 33224,
+      "exit_live_bytes": 456,
+      "failed_requests": 0,
+      "peak_live_bytes": 33224,
+      "reallocations": 0,
+      "requested_bytes": 0
+    },
+    "lifetime": {
+      "allocations": 141,
+      "failed_requests": 2,
+      "lifetime_peak_bytes": 2116576,
+      "live_bytes": 25199,
+      "reallocations": 8,
+      "requested_bytes": 6421416
+    },
+    "overlapping": {
+      "allocations": 2,
+      "entry_live_bytes": 584,
+      "exit_live_bytes": 584,
+      "failed_requests": 0,
+      "peak_live_bytes": 2097736,
+      "reallocations": 0,
+      "requested_bytes": 2097152
+    },
+    "preexisting_rayon": {
+      "allocations": 3,
+      "entry_live_bytes": 19344,
+      "exit_live_bytes": 19344,
+      "failed_requests": 0,
+      "peak_live_bytes": 2116576,
+      "reallocations": 0,
+      "requested_bytes": 2097232
+    },
+    "resize": {
+      "allocations": 0,
+      "entry_live_bytes": 19472,
+      "exit_live_bytes": 19376,
+      "failed_requests": 0,
+      "peak_live_bytes": 19600,
+      "reallocations": 2,
+      "requested_bytes": 288
+    },
+    "retained_free": {
+      "allocations": 0,
+      "entry_live_bytes": 4096,
+      "exit_live_bytes": 0,
+      "failed_requests": 0,
+      "peak_live_bytes": 4096,
+      "reallocations": 0,
+      "requested_bytes": 0
+    },
+    "sequential_workers": {
+      "allocations": 2,
+      "entry_live_bytes": 648,
+      "exit_live_bytes": 648,
+      "failed_requests": 0,
+      "peak_live_bytes": 1049224,
+      "reallocations": 0,
+      "requested_bytes": 2097152
+    },
+    "transient": {
+      "allocations": 1,
+      "entry_live_bytes": 4096,
+      "exit_live_bytes": 4096,
+      "failed_requests": 0,
+      "peak_live_bytes": 69632,
+      "reallocations": 0,
+      "requested_bytes": 65536
+    }
+  },
+  "runner": {
+    "native_arch_verified": false,
+    "os": "windows",
+    "process_arch": "aarch64",
+    "reported_machine_arch": "arm64",
+    "sha256": "1602dbed4a40ce57053fb26c03a1e013aa05dfad84756834c1af70b18ea16e58",
+    "version": "0.1.10"
+  },
+  "topology": {
+    "classes": [],
+    "diagnostic": "CPU class discovery is unsupported on this target",
+    "kind": "unknown",
+    "source": "unavailable"
+  },
+  "placement": {
+    "Err": "CPU placement refused: Unknown topology; the process is not confined to one known class. Classes: ; process boundary [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]; . Launch with `zenbench exec --cpu-policy performance PROGRAM -- ARGS`, or supply an enabled cpuset/process mask and --cpu-set=IDs. A group affinity mask and ZENBENCH_PIN are insufficient. Inspect `zenbench cpu-info` and `zenbench exec --help`. Exploratory opt-out: --cpu-policy=unrestricted (UNVERIFIED_UNRESTRICTED; cannot confirm or promote baselines)."
+  },
+  "build_envelope": {
+    "jobs": 1,
+    "debug_symbols": false,
+    "incremental": false,
+    "priority": "idle",
+    "limit_bytes": 3221225472,
+    "peak_job_commit_bytes": 2675781632
+  },
+  "limits": [
+    "Native latency/repeatability not measured by this control",
+    "Topology discovery missing on ARM64 at the tested revision; default correctly refuses unknown placement",
+    "A 2 GiB build cap failed while compiling the Windows dependency, with and without debug symbols"
+  ]
+}
