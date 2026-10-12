@@ -6,25 +6,25 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenbench.txt 752 lines (supported surface) | zenbench.features.txt 128 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,heap-profiling,precise-timing,wasm) | zenbench.internal.txt 34 lines (34 hidden + 0 excluded-feature)
+# files: zenbench.txt 757 lines (supported surface) | zenbench.features.txt 128 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,heap-profiling,precise-timing,wasm) | zenbench.internal.txt 34 lines (34 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 9
-#   pub types (struct/enum/trait/alias)        65
+#   pub types (struct/enum/trait/alias)        66
 #   pub consts/statics                          2
 #   pub macros                                  1
-#   free functions                             44
-#   inherent methods                          199
-#   struct fields                             337
+#   free functions                             45
+#   inherent methods                          200
+#   struct fields                             338
 #   enum variants                              47
-#   trait roster entries (type × trait)       222
-#   auto-trait-complete types                  46
+#   trait roster entries (type × trait)       223
+#   auto-trait-complete types                  47
 #   auto-trait exceptions                       8
 #
 # per-module pub lines:
 #   (root)                          388
-#   baseline                         26
+#   baseline                         30
 #   calibration                       5
 #   daemon                           30
 #   exclusive                        32
@@ -33,20 +33,23 @@
 #   prelude                          86
 #   quickchart                       30
 
-## items (692 lines)
+## items (696 lines)
 
 pub mod zenbench
 pub mod baseline
+#[non_exhaustive] pub struct baseline::BaselineAssessment
+pub baseline::BaselineAssessment::comparison: baseline::BaselineComparison
+pub baseline::BaselineAssessment::confirmed: alloc::vec::Vec<ProcessComparison>
+pub baseline::BaselineAssessment::promotable: bool
+pub baseline::BaselineAssessment::validity_issues: alloc::vec::Vec<alloc::string::String>
+pub fn baseline::BaselineAssessment::print_report(&self)
 pub struct baseline::BaselineComparison
 pub baseline::BaselineComparison::benchmarks: alloc::vec::Vec<baseline::BenchmarkDelta>
-pub baseline::BaselineComparison::confirmed: alloc::vec::Vec<ProcessComparison>
 pub baseline::BaselineComparison::improvements: usize
 pub baseline::BaselineComparison::missing_benchmarks: alloc::vec::Vec<alloc::string::String>
 pub baseline::BaselineComparison::new_benchmarks: alloc::vec::Vec<alloc::string::String>
-pub baseline::BaselineComparison::promotable: bool
 pub baseline::BaselineComparison::regressions: usize
 pub baseline::BaselineComparison::unchanged: usize
-pub baseline::BaselineComparison::validity_issues: alloc::vec::Vec<alloc::string::String>
 pub baseline::BaselineComparison::warnings: alloc::vec::Vec<alloc::string::String>
 pub struct baseline::BenchmarkDelta
 pub baseline::BenchmarkDelta::baseline_mean: f64
@@ -56,6 +59,7 @@ pub baseline::BenchmarkDelta::name: alloc::string::String
 pub baseline::BenchmarkDelta::new_mean: f64
 pub baseline::BenchmarkDelta::pct_change: f64
 pub baseline::BenchmarkDelta::regressed: bool
+pub fn baseline::assess_baseline(&SuiteResult, &SuiteResult, f64) -> baseline::BaselineAssessment
 pub fn baseline::compare_against_baseline(&SuiteResult, &SuiteResult, f64) -> baseline::BaselineComparison
 pub fn baseline::delete_baseline(&str) -> core::io::error::Result<()>
 pub fn baseline::list_baselines() -> alloc::vec::Vec<alloc::string::String>
@@ -728,7 +732,7 @@ pub fn run_gated<F: core::ops::function::FnOnce(&mut Suite)>(GateConfig, F) -> S
 pub fn run_passes<F: core::ops::function::FnMut(&mut Suite)>(usize, Aggregation, F) -> SuiteResult
 pub fn run_processes(usize, Aggregation) -> SuiteResult
 
-## trait impls (51 types)
+## trait impls (52 types)
 
 Aggregation: Clone, Copy, Debug
 AllocProfiler<A>: GlobalAlloc
@@ -751,6 +755,7 @@ SuiteResult: Clone, Debug, Default, serde_core::de::Deserialize<'de>, serde_core
 Summary: Clone, Debug, Default, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 Throughput: Clone, Debug, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 Verdict: Clone, Copy, Debug, Display, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+baseline::BaselineAssessment: Debug
 baseline::BaselineComparison: Debug
 baseline::BenchmarkDelta: Debug
 calibration::Calibration: Clone, Debug, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
@@ -784,10 +789,10 @@ quickchart::QuickChartUrl: Clone, Debug
 
 ## auto traits
 
-46 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+47 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 AllocProfiler<A>: !Freeze !RefUnwindSafe !Send !Unpin !UnwindSafe
 BenchGroup: !RefUnwindSafe !Sync !UnwindSafe
-ResourceGate: !Freeze !RefUnwindSafe !UnwindSafe
+ResourceGate: !Freeze
 Suite: !RefUnwindSafe !Sync !UnwindSafe
 exclusive::Lock: !RefUnwindSafe !UnwindSafe
 platform::AffinityGuard: !Send !Sync

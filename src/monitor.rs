@@ -13,7 +13,10 @@ type Observation = (Instant, SystemState);
 pub(crate) struct Monitor {
     latest: Arc<Mutex<Option<Observation>>>,
     stop: Arc<AtomicBool>,
-    worker: Option<JoinHandle<()>>,
+    // Mutex supplies an unwind boundary for the opaque JoinHandle. No monitor
+    // mutation exposes partially updated state: observations use their own Mutex,
+    // shutdown uses an atomic, and this handle is consumed only under &mut self.
+    worker: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl Monitor {
@@ -42,7 +45,7 @@ impl Monitor {
         Self {
             latest,
             stop,
-            worker: Some(worker),
+            worker: Mutex::new(Some(worker)),
         }
     }
 
@@ -57,7 +60,12 @@ impl Monitor {
 impl Drop for Monitor {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
-        if let Some(worker) = self.worker.take() {
+        if let Some(worker) = self
+            .worker
+            .get_mut()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
             let _ = worker.join();
         }
     }
@@ -77,7 +85,14 @@ mod tests {
         // Directly control the cached observation instead of a timing threshold.
         monitor.stop.store(true, Ordering::Release);
         let mut monitor = monitor;
-        monitor.worker.take().unwrap().join().unwrap();
+        monitor
+            .worker
+            .get_mut()
+            .unwrap()
+            .take()
+            .unwrap()
+            .join()
+            .unwrap();
         monitor.latest.lock().unwrap().as_mut().unwrap().0 = first - Duration::from_secs(2);
         assert!(
             monitor.latest().is_none(),
