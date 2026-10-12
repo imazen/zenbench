@@ -451,6 +451,10 @@ nice-smoke:
 install-check:
     cargo install --path . --root target/install-check --bin zenbench --locked
     target/install-check/bin/zenbench --help
+    target/install-check/bin/zenbench data --help
+    target/install-check/bin/zenbench fleet --help
+    target/install-check/bin/zenbench jobs --help
+    target/install-check/bin/zenbench read --help
     target/install-check/bin/zenbench guide --topic pair
     target/install-check/bin/zenbench nice --help
 
