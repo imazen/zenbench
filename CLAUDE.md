@@ -360,3 +360,12 @@ The approved Windows ARM64 topology backend now acquires the OS inventory and
 uses a bounds-checked parser shared with captured-buffer tests. Native CI checks
 core/cache discovery against the independent PowerShell oracle and exercises
 class selection and existing Rayon confinement. Multiple groups remain refused.
+
+### Known Bugs: release compatibility review (2026-10-12)
+
+At 9d84e8b2, native Linux `cargo semver-checks` against published 0.1.10 reports
+added fields on the exhaustively constructible `BaselineComparison` and lost
+`UnwindSafe`/`RefUnwindSafe` on `ResourceGate`. Both default and expanded feature
+checks reproduce these source-compatibility failures. They are unresolved;
+see [the release surface review](docs/public-api/review-0.1.10.md) for scope,
+reproduction commands, behavioral migration and CLI consistency findings.
