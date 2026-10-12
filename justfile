@@ -491,3 +491,7 @@ windows-topology-parser-check:
 
 windows-arm-msrv-check:
     cargo +1.85 check --locked --target aarch64-pc-windows-msvc --lib --no-default-features
+
+# Compare the supported native API with the published baseline, including heap additions.
+api-compatibility:
+    cargo semver-checks check-release --baseline-version 0.1.10 --default-features --features async,cpu-time,criterion-compat,charts --current-features heap-profiling
