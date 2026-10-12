@@ -462,3 +462,7 @@ fleet-check:
     cargo test --bin zenbench support::fleet
     cargo test --test fleet_cli
     cargo clippy --bin zenbench --test fleet_cli -- -D warnings
+
+fleet-memory-check output:
+    cargo build --bin zenbench --example fleet_memory_fixture
+    python3 -B examples/check_fleet_memory.py {{output}}

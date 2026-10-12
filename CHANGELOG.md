@@ -23,6 +23,7 @@
 - Strict Windows CPU placement now holds an inherited affinity-limited Job Object, preventing process-mask widening by benchmark code; actual-mask controls cover preexisting Rayon/ordinary threads and child processes (585b0f8d, 95e4042c).
 
 ### Added
+- Fresh fleet observations retain machine/domain/replicate/attempt identity, correctness checks, heartbeat/cancel receipts and separate Linux heaptrack/OS-resident evidence.
 - CLI capability JSON identifies the installed runner and placement verdict; explicit portable bundles retain and verify executable/input hashes before deployment.
 - Make the audited paper canonical at `METHODOLOGY.md`, retain the earlier entry point/references, and specify the issue 29 external-process runner, busy-system behavior and acceptance gates.
 - Audited measurement protocol with exact process inference, timing boundaries, shared-machine tradeoffs, an external-process A/B design review, and revision-scoped wall-time/storage evidence (bdb17c66). `zenbench guide --topic methodology` surfaces the assumptions and busy-machine workflow offline.

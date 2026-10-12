@@ -12,6 +12,7 @@ mod coordination;
 mod paths;
 mod support {
     pub(super) mod fleet;
+    pub(super) mod fleet_run;
     pub(super) mod nice;
     pub(super) mod pair;
     pub(super) mod supervisor;
@@ -39,6 +40,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Run one planned observation from a verified bundle; retain every attempt.
+    FleetRun(support::fleet_run::Options),
+    /// Decode a fleet attempt receipt without rerunning work.
+    FleetRead { directory: PathBuf },
     /// Machine-readable runner identity, CPU placement and supported protocols.
     Capabilities,
     /// Copy explicitly listed executables, inputs and assets into a verified portable bundle.
@@ -355,6 +360,20 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::FleetRun(options) => {
+            let code = support::fleet_run::run(options).unwrap_or_else(|e| {
+                eprintln!("fleet attempt failed: {e}");
+                2
+            });
+            std::process::exit(code);
+        }
+        Commands::FleetRead { directory } => match support::fleet_run::read(&directory) {
+            Ok(value) => println!("{}", serde_json::to_string_pretty(&value).unwrap()),
+            Err(e) => {
+                eprintln!("cannot read attempt: {e}");
+                std::process::exit(2);
+            }
+        },
         Commands::BundleCheck { directory } => match support::fleet::verify(&directory) {
             Ok(value) => println!("{}", serde_json::to_string_pretty(&value).unwrap()),
             Err(e) => {

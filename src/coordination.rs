@@ -63,7 +63,27 @@ impl Reservation {
         Self::at(directory()?, activity, timeout, true)
     }
 
+    #[allow(dead_code)] // The CLI compiles this shared module independently.
+    pub(crate) fn acquire_controlled(
+        activity: &str,
+        timeout: Duration,
+        poll: &mut dyn FnMut() -> io::Result<()>,
+    ) -> io::Result<Self> {
+        Self::at_controlled(directory()?, activity, timeout, true, poll)
+    }
+
     fn at(root: PathBuf, activity: &str, timeout: Duration, inherit: bool) -> io::Result<Self> {
+        Self::at_controlled(root, activity, timeout, inherit, &mut || Ok(()))
+    }
+
+    fn at_controlled(
+        root: PathBuf,
+        activity: &str,
+        timeout: Duration,
+        inherit: bool,
+        poll: &mut dyn FnMut() -> io::Result<()>,
+    ) -> io::Result<Self> {
+        poll()?;
         let started = Instant::now();
         if inherit {
             if let Some(value) = std::env::var_os(LEASE) {
@@ -122,7 +142,7 @@ impl Reservation {
         let control = open(&root.join("queue.lock"))?;
         // The control mutex only protects small filesystem transactions. Its
         // acquisition is bounded too, including an abandoned/stalled client.
-        lock_until(&control, started, timeout)?;
+        lock_controlled(&control, started, timeout, poll)?;
         let counter = root.join("sequence");
         let previous = match fs::read_to_string(&counter) {
             Ok(s) => s.parse::<u64>().map_err(io::Error::other)?,
@@ -154,7 +174,7 @@ impl Reservation {
         FileExt::unlock(&control)?;
         let mut announced = false;
         loop {
-            lock_until(&control, started, timeout)?;
+            lock_controlled(&control, started, timeout, poll)?;
             let mut blocked = None;
             for entry in fs::read_dir(&reservation.root)? {
                 let path = entry?.path();
@@ -241,7 +261,17 @@ impl Reservation {
 }
 
 fn lock_until(file: &File, start: Instant, timeout: Duration) -> io::Result<()> {
+    lock_controlled(file, start, timeout, &mut || Ok(()))
+}
+
+fn lock_controlled(
+    file: &File,
+    start: Instant,
+    timeout: Duration,
+    poll: &mut dyn FnMut() -> io::Result<()>,
+) -> io::Result<()> {
     loop {
+        poll()?;
         match FileExt::try_lock(file) {
             Ok(()) => return Ok(()),
             Err(fs4::TryLockError::Error(e)) => return Err(e),

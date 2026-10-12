@@ -6,12 +6,32 @@ use std::process::{Command, ExitStatus};
 use std::time::{Duration, Instant};
 
 pub(super) fn run(
+    command: Command,
+    budget: Duration,
+    reservation: &mut crate::coordination::Reservation,
+    scope: Option<&str>,
+    logs: &[std::path::PathBuf],
+    process_id: &mut Option<u32>,
+) -> io::Result<ExitStatus> {
+    run_controlled(
+        command,
+        budget,
+        reservation,
+        scope,
+        logs,
+        process_id,
+        &mut || Ok(()),
+    )
+}
+
+pub(super) fn run_controlled(
     mut command: Command,
     budget: Duration,
     reservation: &mut crate::coordination::Reservation,
     scope: Option<&str>,
     logs: &[std::path::PathBuf],
     process_id: &mut Option<u32>,
+    poll: &mut dyn FnMut() -> io::Result<()>,
 ) -> io::Result<ExitStatus> {
     reservation.command(&mut command);
     reservation.retain_until_reaped();
@@ -32,6 +52,30 @@ pub(super) fn run(
     *process_id = Some(child.id());
     let start = Instant::now();
     loop {
+        let interruption = poll().err();
+        let oversized = logs
+            .iter()
+            .any(|p| std::fs::metadata(p).is_ok_and(|m| m.len() > 64 * 1024 * 1024));
+        if start.elapsed() >= budget || oversized || interruption.is_some() {
+            child.start_kill()?;
+            child.inner_mut().wait()?;
+            #[cfg(windows)]
+            wait_job_empty(&observer)?;
+            #[cfg(unix)]
+            wait_group_empty(child.id(), Duration::from_secs(5))?;
+            cleanup_scope(scope)?;
+            reservation.reaped();
+            return Err(interruption.unwrap_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    if oversized {
+                        "child log limit exceeded; process group/job terminated"
+                    } else {
+                        "child deadline exceeded; process group/job terminated"
+                    },
+                )
+            }));
+        }
         if let Some(status) = child.try_wait()? {
             #[cfg(unix)]
             {
@@ -48,27 +92,6 @@ pub(super) fn run(
             cleanup_scope(scope)?;
             reservation.reaped();
             return Ok(status);
-        }
-        let oversized = logs
-            .iter()
-            .any(|p| std::fs::metadata(p).is_ok_and(|m| m.len() > 64 * 1024 * 1024));
-        if start.elapsed() >= budget || oversized {
-            child.start_kill()?;
-            child.inner_mut().wait()?;
-            #[cfg(windows)]
-            wait_job_empty(&observer)?;
-            #[cfg(unix)]
-            wait_group_empty(child.id(), Duration::from_secs(5))?;
-            cleanup_scope(scope)?;
-            reservation.reaped();
-            return Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                if oversized {
-                    "child log limit exceeded; process group/job terminated"
-                } else {
-                    "child deadline exceeded; process group/job terminated"
-                },
-            ));
         }
         std::thread::sleep(Duration::from_millis(10));
     }

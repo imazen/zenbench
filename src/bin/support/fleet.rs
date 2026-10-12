@@ -31,11 +31,15 @@ pub(crate) fn capabilities() -> io::Result<Value> {
             "os":std::env::consts::OS, "process_arch":std::env::consts::ARCH,
             "reported_machine_arch":sysinfo::System::cpu_arch(),
             "native_arch_verified":false},
-        "protocols":{"bundle":1,"pair":1},
+        "protocols":{"bundle":1,"pair":1,"fleet_attempt":1,"driver":1},
         "topology":zenbench::platform::detect_cpu_topology(),
         "placement":zenbench::platform::check_cpu_placement(),
         "coordination":{"directory":crate::coordination::directory()?,"scope":"participants sharing this local directory"},
-        "memory":{"requested_heap_peak":{"supported":false,"reason":"no validated runner backend installed in this version"}},
+        "memory":{
+            "heaptrack":{"implemented":cfg!(target_os="linux"),"recorder":tool("heaptrack"),"analyzer":tool("heaptrack_print"),"coverage":"intercepted allocations; whole child only","probe":"not_run"},
+            "os_peak":{"implemented":cfg!(target_os="linux"),"tool":tool("time"),"probe":"not_run"},
+            "driver":{"implemented":true,"coverage":"declared by instrumented driver; not independently certified"}
+        },
         "commands":{"compare":"zenbench pair --help","guide":"zenbench guide"}
     }))
 }
@@ -183,4 +187,22 @@ mod tests {
         }
         assert!(relative(Path::new("bin/metric.exe")).is_ok());
     }
+}
+
+pub(crate) fn tool(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        let file = dir.join(name);
+        if file.is_file() {
+            return file.canonicalize().ok();
+        }
+        #[cfg(windows)]
+        {
+            let file = dir.join(format!("{name}.exe"));
+            if file.is_file() {
+                return file.canonicalize().ok();
+            }
+        }
+    }
+    None
 }
