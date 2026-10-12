@@ -28,6 +28,8 @@ pub mod calibration;
 pub mod charts;
 mod checks;
 mod ci;
+#[cfg(not(target_arch = "wasm32"))]
+mod coordination;
 #[cfg(feature = "criterion-compat")]
 pub mod criterion_compat;
 pub mod daemon;
@@ -846,6 +848,10 @@ fn run_processes_planned(
             "confirmation requires mean aggregation of independent processes"
         );
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut admission =
+        coordination::Reservation::acquire("benchmark process experiment", plan.timeout)
+            .expect("benchmark admission failed");
     let supervisor_start = std::time::Instant::now();
     let exe = std::env::current_exe().unwrap_or_else(|e| {
         eprintln!("[zenbench] error: cannot determine current executable: {e}");
@@ -918,6 +924,11 @@ fn run_processes_planned(
         let log_path = proc_dir.join(format!("{i}.stderr.txt"));
         let log = std::fs::File::create(&log_path).expect("cannot retain child stderr");
         let mut command = std::process::Command::new(&exe);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            admission.command(&mut command);
+            admission.retain_until_reaped();
+        }
         command
             .args(&child_args)
             .env("ZENBENCH_SUBPROCESS", "1")
@@ -946,6 +957,8 @@ fn run_processes_planned(
         let status = command.spawn().and_then(|mut child| {
             loop {
                 if let Some(status) = child.try_wait()? {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    admission.reaped();
                     return Ok(status);
                 }
                 if supervisor_start.elapsed() >= plan.timeout {
@@ -976,6 +989,8 @@ fn run_processes_planned(
             Ok(s) if s.success() => {}
             Ok(s) => {
                 eprintln!("[zenbench] process {} exited with {s}", i + 1);
+                #[cfg(not(target_arch = "wasm32"))]
+                drop(admission);
                 std::process::exit(2);
             }
             Err(e) => {
@@ -988,6 +1003,8 @@ fn run_processes_planned(
             Ok(r) => results.push(r),
             Err(e) => {
                 eprintln!("[zenbench] process {} produced no results: {e}", i + 1);
+                #[cfg(not(target_arch = "wasm32"))]
+                drop(admission);
                 std::process::exit(2);
             }
         }
