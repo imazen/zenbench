@@ -26,6 +26,16 @@ fn bare_invocation_surfaces_guides_without_knowing_any_subcommands() {
 fn first_use_help_explains_workflows_without_requiring_a_valid_machine_plan() {
     for (args, required) in [
         (
+            vec!["guide", "--topic", "methodology"],
+            vec![
+                "BUSY WORKSTATIONS",
+                "whole-host",
+                "process-level",
+                "not implemented",
+                "measurement-protocol.md",
+            ],
+        ),
+        (
             vec!["guide", "--topic", "simd"],
             vec![
                 "compile-time",
