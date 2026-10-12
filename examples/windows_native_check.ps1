@@ -74,6 +74,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Heap unit controls failed' }
     cargo test --locked --test windows_job_boundary --test fleet_cli
     if ($LASTEXITCODE -ne 0) { throw 'Job boundary/fleet controls failed' }
+    if ([Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -eq 'Arm64') {
+        cargo test --locked --test windows_arm_topology -- --nocapture
+        if ($LASTEXITCODE -ne 0) { throw 'Native ARM64 topology/class controls failed' }
+    }
     Remove-Item Env:ZENBENCH_CPU_POLICY
     cargo run --locked --bin zenbench -- capabilities
     if ($LASTEXITCODE -ne 0) { throw 'Capability probe failed' }

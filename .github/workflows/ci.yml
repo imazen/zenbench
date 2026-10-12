@@ -74,6 +74,9 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./examples/windows_process_mask_probe.ps1
+      - name: Native Windows ARM64 topology and class enforcement
+        if: matrix.name == 'Windows ARM64'
+        run: cargo test --test windows_arm_topology -- --nocapture
       - name: Native process-wide heap controls
         run: cargo run --features heap-profiling --example heap_phases -- --exercise-oom
       - name: Unit tests (all features)
