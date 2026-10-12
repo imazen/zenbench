@@ -438,7 +438,7 @@ process-check:
     cargo fmt -p zenbench
     cargo test --lib coordination::
     cargo test --bin zenbench
-    cargo test --test cooperative_cli
+    cargo test --test cooperative_cli --test pair_cli
     cargo clippy --all-targets -- -D warnings
 
 # Real Linux cgroup/priority and nested-reservation smoke check.
@@ -446,3 +446,13 @@ nice-smoke:
     cargo build --bin zenbench
     mkdir -p target/nice-smoke-admission
     ZENBENCH_COORDINATION_DIR="{{justfile_directory()}}/target/nice-smoke-admission" target/debug/zenbench nice --memory-mib 128 -- target/debug/zenbench nice --memory-mib 64 -- target/debug/zenbench guide
+
+# Check the actual Cargo-installed binary, not just cargo run's build output.
+install-check:
+    cargo install --path . --root target/install-check --bin zenbench --locked
+    target/install-check/bin/zenbench --help
+    target/install-check/bin/zenbench guide --topic pair
+    target/install-check/bin/zenbench nice --help
+
+pair-cross cross="cross":
+    CROSS_CONTAINER_OPTS="--memory=6g --memory-swap=6g --cpus=2" ZENBENCH_CPU_POLICY=unrestricted {{cross}} test --target armv7-unknown-linux-gnueabihf --all-features --test pair_cli

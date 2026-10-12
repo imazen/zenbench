@@ -1,0 +1,78 @@
+zenbench pair: prebuilt executable / environment A/B
+
+  zenbench pair plan.json --dry-run
+  zenbench pair plan.json --case small --output target/pair-edit
+  zenbench read target/pair-edit/packet.json.gz --format json
+  zenbench read target/pair-edit/packet.json.gz --format csv
+  zenbench pair-diff BEFORE.json.gz AFTER.json.gz
+  zenbench pair plan.json --resume target/pair-edit --output target/pair-next
+
+Use --wait SECONDS for bounded FIFO admission; the default reports not-run
+immediately when another cooperating task owns admission. Ordinary background
+load is observed. It is not evidence of clean measurement conditions.
+Use zenbench nice -- COMMAND for cooperating background builds/work.
+
+Minimal plan (replace program paths, arguments and correctness contract):
+{
+  "schema": 1,
+  "baseline": {
+    "id": "before", "program": "/absolute/path/to/program",
+    "args": ["--input", "${input}", "--output", "${output}/result.bin"],
+    "env": {"IMPLEMENTATION": "old", "OPTION_TO_REMOVE": null},
+    "revision": "commit/build identifier", "timeout_seconds": 30
+  },
+  "candidates": [{
+    "id": "after", "program": "/absolute/path/to/program",
+    "args": ["--input", "${input}", "--output", "${output}/result.bin"],
+    "env": {"IMPLEMENTATION": "new", "OPTION_TO_REMOVE": null},
+    "revision": "commit/build identifier", "timeout_seconds": 30
+  }],
+  "cases": [{"id": "small", "inputs": {"input": "inputs/small.bin"}}],
+  "metric": {
+    "extract": {"kind": "prefix", "prefix": "elapsed_ms="},
+    "unit": "ms", "expected": 3, "divide_by": 1
+  },
+  "check": {"kind": "files", "paths": ["result.bin"]},
+  "warmup": "Program excludes its warmup from each elapsed_ms row",
+  "blocks": 4, "aa": true, "deadline_seconds": 300
+}
+
+One baseline, one candidate and A/A produce 12 child invocations with four
+blocks. This is an invocation count, not a runtime estimate. Every child is
+fresh; internal timing vectors stay clustered within that child. Each complete
+block contributes one log ratio of arithmetic invocation means. The report
+shows geometric mean latency change and between-block log-ratio dispersion.
+It does not report a confirmation interval or a performance acceptance verdict.
+Positive latency change means slower. A/A is a diagnostic, not a bias correction.
+
+CPU policy remains fail-closed on asymmetric/unknown topology. First inspect
+zenbench cpu-info, then use zenbench exec for a verified inherited boundary.
+ZENBENCH_CPU_POLICY=unrestricted explicitly permits unverified exploration only.
+Commands must stay in the foreground and join workers. Unix programs must not
+daemonize or leave their process group. No implicit shell is used.
+
+Metrics and JSON checks default to stdout; set stream="stderr" for diagnostic logs.
+Other extractors: tsv (prefix, zero-based column), json (prefix, JSON pointer),
+regex (pattern, capture index), wall (explicit only, unit ns, expected 1).
+Wall timing includes launch, polling and supervisor cleanup; use internal
+metrics for short kernels. Failed extraction never falls back to wall time.
+Other correctness contracts: json (prefix, pointers), command (program, args,
+timeout_seconds; ${baseline}/${candidate} output directories), or unchecked
+with an explicit reason. Correctness runs outside the child's internal metric.
+
+Relative program/cwd/input paths resolve from the plan directory. ${field}
+substitution is literal within one argument; spaces do not split arguments.
+Same program/different env and different program/same env are both supported.
+Only explicit overrides and record_env allowlisted inherited values are retained;
+clean_env=true removes inherited state. Binary hashes do not identify shared
+libraries or undeclared runtime assets. Declare required assets as case inputs.
+
+Keep full evidence/logs in the ignored attempt directory. Copy only selected.csv
+into version control, with a pointer to its packet. Packets include decode,
+export and comparison commands. Resume checks identities and retained artifact
+hashes; completed cases are reused and incomplete cases get a new full attempt.
+Failures and interrupted original attempts remain intact. Never overwrite an
+attempt directory. Exit 0 means execution completed only; failures/not-run return 2.
+
+External Confirm/Evidence and persistent workers are not implemented.
+Full contract: docs/external-process.md

@@ -3064,6 +3064,7 @@ dependencies = [
  "process-wrap",
  "raw-cpuid",
  "rayon",
+ "regex",
  "serde",
  "serde_json",
  "sha2 0.11.0",

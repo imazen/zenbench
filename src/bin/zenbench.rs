@@ -12,6 +12,7 @@ mod coordination;
 mod paths;
 mod support {
     pub(super) mod nice;
+    pub(super) mod pair;
     pub(super) mod supervisor;
 }
 
@@ -22,6 +23,7 @@ mod support {
     after_help = "Start here: zenbench guide (SIMD optimization: zenbench guide --topic simd)
 Measurement assumptions and busy systems: zenbench guide --topic methodology
 Queue background work: zenbench nice -- cargo build --release
+Compare external programs/environments: zenbench pair --help
 Quick edit loop: cargo bench --bench NAME -- --group=GROUP
 Before accepting a change: freeze inputs, then use --mode=confirm --workload-id=ID.
 Inspect asymmetric CPUs: zenbench cpu-info; choose a verified boundary with exec.
@@ -35,6 +37,26 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Compare prebuilt programs or one program under different environments.
+    #[command(after_help = include_str!("../pair-help.txt"))]
+    Pair {
+        plan: PathBuf,
+        #[arg(long, default_value = "iterate")]
+        mode: String,
+        #[arg(long)]
+        output: Option<PathBuf>,
+        #[arg(long)]
+        case: Option<String>,
+        #[arg(long)]
+        resume: Option<PathBuf>,
+        #[arg(long)]
+        dry_run: bool,
+        /// Admission wait seconds; default zero reports not-run immediately.
+        #[arg(long, default_value_t = 0)]
+        wait: u64,
+    },
+    /// Compare two external-process packets without rerunning or pooling samples.
+    PairDiff { before: PathBuf, after: PathBuf },
     /// Queue a background command fairly with benchmarks, then run at low priority.
     #[command(
         after_help = "All participants must use the same ZENBENCH_COORDINATION_DIR for system-wide coordination.
@@ -62,7 +84,7 @@ Example: zenbench nice --jobs 8 -- cargo build --release"
     /// Show workflows, CPU setup, exit meanings, provenance and profiling limits.
     Guide {
         /// Workflows, SIMD optimization, or measurement methodology and busy systems.
-        #[arg(long, default_value = "workflows", value_parser = ["workflows", "simd", "methodology"])]
+        #[arg(long, default_value = "workflows", value_parser = ["workflows", "simd", "methodology", "pair"])]
         topic: String,
     },
     /// Read saved JSON, gzip JSON, or an evidence reference without running benchmarks.
@@ -325,6 +347,37 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Pair {
+            plan,
+            mode,
+            output,
+            case,
+            resume,
+            dry_run,
+            wait,
+        } => {
+            let result = support::pair::run(support::pair::Options {
+                plan: &plan,
+                mode: &mode,
+                output: output.as_deref(),
+                case: case.as_deref(),
+                resume: resume.as_deref(),
+                dry_run,
+                wait,
+            });
+            let code = result.unwrap_or_else(|e| {
+                eprintln!("{}", serde_json::json!({"kind":"zenbench_pair_failure","schema":1,"reason":e,"exit_code":2}));
+                2
+            });
+            std::process::exit(code);
+        }
+        Commands::PairDiff { before, after } => match support::pair::diff(&before, &after) {
+            Ok(text) => println!("{text}"),
+            Err(e) => {
+                eprintln!("cannot compare pair evidence: {e}");
+                std::process::exit(2);
+            }
+        },
         Commands::Nice {
             wait,
             timeout,
@@ -349,6 +402,7 @@ fn main() {
         Commands::Guide { topic } => print!(
             "{}",
             match topic.as_str() {
+                "pair" => include_str!("../pair-help.txt"),
                 "simd" => include_str!("../simd-help.txt"),
                 "methodology" => include_str!("../methodology-help.txt"),
                 _ => include_str!("../workflow-help.txt"),
@@ -444,6 +498,16 @@ fn main() {
             )
         }
         Commands::Read { input, format } => {
+            if support::pair::is_packet(&input) {
+                match support::pair::read(&input, &format) {
+                    Ok(text) => println!("{text}"),
+                    Err(e) => {
+                        eprintln!("cannot read pair evidence: {e}");
+                        std::process::exit(2);
+                    }
+                }
+                return;
+            }
             let result = zenbench::SuiteResult::load(input).unwrap_or_else(|e| {
                 eprintln!("cannot read evidence: {e}");
                 std::process::exit(2);
