@@ -84,6 +84,17 @@ impl SystemMonitor {
     /// A gate that cannot see the busiest box on the LAN is worse than no
     /// gate — it certifies contaminated numbers as clean.
     pub fn snapshot(&self) -> SystemState {
+        self.snapshot_excluding_processes(&[])
+    }
+
+    /// Snapshot foreign resource activity while supervising external workers.
+    ///
+    /// Excludes the listed process leaders, their live descendants and this
+    /// supervisor from CPU/heavy-process admission. RAM and temperature remain
+    /// global. Linux task entries are never subtracted twice. Missing/exited
+    /// workers cannot be subtracted, so their remaining interval CPU is treated
+    /// conservatively as foreign load. An empty list preserves [`Self::snapshot`].
+    pub fn snapshot_excluding_processes(&self, workers: &[u32]) -> SystemState {
         {
             let last = *self.last_cpu_refresh.lock().unwrap();
             let since = last.elapsed();
@@ -133,6 +144,23 @@ impl SystemMonitor {
             .unwrap_or_default();
         // A standalone monitor retains its global-load contract. Only a
         // launcher that explicitly registers workers admits its own CPU work.
+        owned.extend(workers.iter().copied().map(sysinfo::Pid::from_u32));
+        if !workers.is_empty() {
+            loop {
+                let children: Vec<_> = sys
+                    .processes()
+                    .values()
+                    .filter(|p| p.thread_kind() != Some(sysinfo::ThreadKind::Userland))
+                    .filter(|p| p.parent().is_some_and(|id| owned.contains(&id)))
+                    .map(|p| p.pid())
+                    .filter(|id| !owned.contains(id))
+                    .collect();
+                if children.is_empty() {
+                    break;
+                }
+                owned.extend(children);
+            }
+        }
         if self.exclude_benchmark_owner || !owned.is_empty() {
             if let Ok(pid) = sysinfo::get_current_pid() {
                 owned.push(pid);

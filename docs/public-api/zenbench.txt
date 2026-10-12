@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenbench.txt 757 lines (supported surface) | zenbench.features.txt 128 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,heap-profiling,precise-timing,wasm) | zenbench.internal.txt 34 lines (34 hidden + 0 excluded-feature)
+# files: zenbench.txt 758 lines (supported surface) | zenbench.features.txt 128 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,heap-profiling,precise-timing,wasm) | zenbench.internal.txt 34 lines (34 hidden + 0 excluded-feature)
 
 ## summary
 #
@@ -15,7 +15,7 @@
 #   pub consts/statics                          2
 #   pub macros                                  1
 #   free functions                             45
-#   inherent methods                          200
+#   inherent methods                          201
 #   struct fields                             338
 #   enum variants                              47
 #   trait roster entries (type × trait)       223
@@ -29,11 +29,11 @@
 #   daemon                           30
 #   exclusive                        32
 #   mcp                               1
-#   platform                        106
+#   platform                        107
 #   prelude                          86
 #   quickchart                       30
 
-## items (696 lines)
+## items (697 lines)
 
 pub mod zenbench
 pub mod baseline
@@ -219,6 +219,7 @@ pub struct platform::QosGuard
 pub struct platform::SystemMonitor
 pub fn platform::SystemMonitor::new() -> Self
 pub fn platform::SystemMonitor::snapshot(&self) -> platform::SystemState
+pub fn platform::SystemMonitor::snapshot_excluding_processes(&self, &[u32]) -> platform::SystemState
 pub struct platform::SystemState
 pub platform::SystemState::available_ram_bytes: u64
 pub platform::SystemState::cpu_load: f64
