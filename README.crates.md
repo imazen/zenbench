@@ -2,6 +2,11 @@
 
 # zenbench
 
+The CLI installs with Cargo. [Installation instructions](https://github.com/imazen/zenbench/blob/main/docs/installation.md)
+cover the current review stack and released versions. Run `zenbench --help` for
+offline workflows, `zenbench pair --help` for executable/environment comparisons,
+and `zenbench nice --help` for cooperative background jobs.
+
 Interleaved microbenchmarking for Rust with paired statistics, CI regression testing, and hardware-adaptive measurement.
 
 **[Documentation](https://imazen.github.io/zenbench)** · **[Example HTML Report](https://imazen.github.io/zenbench/example-report.html)** · **[Tutorial](https://imazen.github.io/zenbench/getting-started/)**
