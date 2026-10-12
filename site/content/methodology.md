@@ -1,68 +1,136 @@
 +++
-title = "Methodology"
-weight = 4
+title = "Understand the methodology"
+description = "Separate exploratory paired rounds from fixed-process acceptance."
+weight = 11
 +++
 
-## How interleaving works
+A benchmark measures the timing boundary you wrote. Setup, allocation, destruction,
+dispatch, synchronization, warmup and cache reuse change the question. Verify output
+correctness and equal work before interpreting a faster number.
 
-Traditional harnesses run benchmark A for N iterations, then benchmark B for N iterations. System state (thermal, load, cache) differs between them.
+## What is repeated?
 
-Zenbench runs **one sample** of each benchmark per round, in shuffled order:
+| Unit | Meaning |
+|---|---|
+| Iteration | One operation requested from the callback |
+| Sample | A timed batch, possibly containing many iterations |
+| Round | One sample of every arm, in shuffled serial order |
+| Process | Fresh execution containing warmup and rounds |
+| Build | A separately compiled executable |
+| Study cell | Workload × machine/class × configuration |
+
+Many iterations or rounds in one process do not become independent process
+repetitions. Many fresh processes of one executable do not measure variation
+between builds. Hardware classes remain separate cells.
+
+## Interleave while exploring
+
+Native Suite groups run one sample per arm per round in shuffled order:
 
 ```text
-Round 1: [B, A]     → A sample 1, B sample 1
-Round 2: [A, B]     → A sample 2, B sample 2
-Round 3: [B, A]     → A sample 3, B sample 3
+Round 1: B then A
+Round 2: A then B
+Round 3: B then A
 ...
-Round 200: [A, B]   → A sample 200, B sample 200
 ```
 
-Now `A[i] - B[i]` is a **paired difference** measured under identical conditions. The bootstrap CI on these paired differences is far more sensitive than comparing independently-collected means.
+Nearby comparisons can share slowly changing conditions. They do not experience
+identical conditions: a spike can hit one arm, memory/cache pressure can affect
+arms differently, and carryover can change the next arm's state. Randomization
+and pairing reduce some biases without guaranteeing cancellation.
 
-## Terminology
+Iterate normally uses one process, up to 30 rounds and 100 ms warmup per arm.
+Explicit group settings apply. Paired IQR filtering and bootstrap intervals are
+exploratory diagnostics. MAD describes spread robustly; Wilcoxon, effect size and
+drift help investigate an experiment, not vote on CI acceptance. Adaptive
+convergence belongs to exploration. A narrow interval or “significant” flag is
+not a Confirm verdict.
 
-- **Call**: one invocation of your benchmark function
-- **Sample**: many calls timed together (e.g., 3000 calls in 1ms)
-- **Round**: one sample per benchmark in the group, shuffled order
-- **Group**: benchmarks compared against each other (interleaved)
+## Confirm the frozen experiment
 
-## Statistical pipeline
+Native Confirm fixes processes and rounds, retains every observation and uses
+one mean latency per process and arm reconstructed from raw rounds. Same-binary
+arm comparisons use Student-t intervals on process log ratios. Separate saved
+baseline/candidate populations use Welch intervals on process log latencies.
+Both report a geometric latency ratio, which can differ from the descriptive
+arithmetic means. Positive change means slower.
 
-For each pair of benchmarks (baseline vs candidate):
+The declared family confidence covers the suite's comparison family through
+Bonferroni correction. It does not cover a whole campaign's earlier candidate
+selection or every hardware cell. Timer resolution supplies a minimum interval
+width. The entire interval determines acceptance against the predeclared margin:
 
-1. **IQR outlier removal** — Tukey's fences (1.5×IQR) on paired differences. Removes context-switch spikes.
-2. **Bootstrap 95% CI** — 10,000 resamples of the paired difference mean. Non-parametric — no normality assumption.
-3. **Significance** — CI must fall entirely outside ±noise_threshold (default 1%) to be "significant."
-4. **Cohen's d** — standardized effect size: `d = mean_diff / pooled_sd`. Tells you *how big* the difference is, not just whether it exists.
-5. **Wilcoxon signed-rank** — non-parametric significance test. Doesn't assume normal distributions.
-6. **Spearman drift** — rank correlation of round index vs difference. Detects thermal throttling (r > 0.5) or warmup effects (r < -0.5).
+| Interval relative to the margin | Interpretation |
+|---|---|
+| Entirely above the positive margin | Regression |
+| Entirely below the negative margin | Improvement |
+| Entirely inside both margins | Equivalent within the margin |
+| Upper bound at or below the positive margin | Non-inferior within the margin |
+| Otherwise | Inconclusive |
 
-## Hardware-adaptive measurement
+[Confirmation and CI](@/ci-regression.md) covers the required evidence, exits and
+promotion. Fresh execution does not prove independence or approximately normal
+process log values. The recorded numerical/model controls validate a stated model;
+they do not prove coverage for every real workload.
 
-- **TSC timer**: Uses `rdtsc`/`rdtscp` on x86_64, `cntvct_el0` on aarch64. Sub-nanosecond precision. Auto-calibrated against `Instant` at startup.
-- **Stack alignment jitter**: Random 0–4096 byte stack offset per sample via safe recursive trampoline. Defeats cache-line alignment bias (Mytkowicz 2009).
-- **Overhead compensation**: Measures the empty benchmark loop cost (200 samples × 10K iterations, minimum). Subtracted from all measurements.
-- **Precision-driven iteration count**: Scales iterations to `max(1000 × timer_precision, sample_target_ns)`. Short samples dodge context switches; many rounds enable statistical filtering.
+## Observe resources and verify placement
 
-## Resource gating
+CPU-class admission is separate from resource observation. Linux strict placement
+uses a hard cpuset; supported Windows topology uses an inherited Job boundary.
+macOS advisory hints cannot certify P/E class confinement. Explicit unrestricted
+placement permits exploration only. A boundary does not reserve the CPU, shared
+cache, SMT sibling or memory bandwidth.
 
-Before each round, zenbench checks for other benchmark processes (criterion, divan, zenbench). If found, it waits up to 30s — concurrent benchmarks would corrupt both sets of measurements.
+The engine primes a background resource sampler before warmup; rounds read cached
+observations without a blocking refresh. Ordinary load remains visible in Iterate.
+Confirm requires fresh clean observations and complete fixed data; flagged or
+unknown observations invalidate it. Monitoring uses whole-host counters and
+cannot certify continuous quietness on the selected domain. A FIFO cooperative
+queue reduces overlap among participating jobs; unwrapped work still runs.
+[CPU and shared-machine guidance](@/cpu-placement.md) explains the practical setup.
 
-General system noise (CPU load, heavy processes) is **not** gated — the IQR filter and bootstrap CIs handle it. This means benchmarks complete quickly even on busy development machines.
+## Timing diagnostics have limits
 
-## Auto-convergence
+Supported precise timers use TSC on x86_64 or the architectural counter on AArch64;
+other paths use `Instant`. Calibration, batching and overhead compensation help
+interpret small operations, but sub-nanosecond batch averages do not prove an
+individual operation was resolved below one timer tick. Timer ticks are not
+retired instructions or frequency-dependent execution-core cycles.
 
-Instead of running a fixed number of rounds, zenbench checks every 10 rounds:
+Warmup does not prove maximum frequency or steady state. Optional cache spoiling
+does not reset an entire machine, and stack jitter does not randomize code/heap
+layout or implement STABILIZER. The minimum is a useful low observation; it is
+not universal true performance. Use the confirmation estimand for acceptance.
 
-1. **Resolved**: CI excludes zero (direction clear) OR CI width < target precision (equivalent)
-2. **Stable**: effect size estimate is precise enough to reproduce
+[Profiler runs](@/profiling.md) answer separate memory/instruction questions.
+Instrumentation can perturb timing and scheduling. Confirm native latency with
+an uninstrumented build.
 
-When both conditions are met for all pairs, measurement stops. This saves time on clean systems and spends more time on noisy ones.
+## External A/B and provenance
 
-## References
+[External pair plans](@/external-programs.md) randomize fresh serial processes,
+retain internal vectors in their invocation clusters, and check outputs and A/A
+controls. Their default Iterate summaries remain exploratory.
+[External Confirm](@/external-confirmation.md) uses fixed Student-t intervals on
+block log ratios, preserves invocation clustering, adds bounded timing error and
+requires the A/A interval within its control margin. It cannot resume or extend
+a plan after inspection. The same independence assumptions and candidate-specific
+confounding limits still need review.
 
-- Mytkowicz et al. — *Producing Wrong Data Without Doing Anything Obviously Wrong* (ASPLOS 2009)
-- Curtsinger & Berger — *STABILIZER* (ASPLOS 2013)
-- Chen & Revels — *Robust Benchmarking in Noisy Environments* (IEEE HPEC 2016)
-- Kalibera & Jones — *Rigorous Benchmarking in Reasonable Time* (ISMM 2013)
-- Tratt — *What Metric to Use When Benchmarking?* (2022)
+Runtime executable hashes identify executed bytes. Runtime Git HEAD does not
+identify the source used to build an old binary; clean/dirty state and a complete
+build manifest remain external. Keep exact builds/inputs, controls, plans,
+unsuccessful attempts and [raw archives](@/results.md) behind selected summaries.
+
+## Read the full protocol and research context
+
+The [full measurement protocol](https://github.com/imazen/zenbench/blob/main/METHODOLOGY.md)
+contains equations, source mappings, numerical controls, measured local cost and
+threats to validity. Its historical measurements are not speed predictions for
+your workload. Background reading:
+
+- Mytkowicz et al., [Producing Wrong Data Without Doing Anything Obviously Wrong](https://sape.inf.usi.ch/publications/asplos09.html), ASPLOS 2009: layout and setup bias.
+- Curtsinger & Berger, [STABILIZER](https://people.cs.umass.edu/~emery/pubs/stabilizer-asplos13.pdf), ASPLOS 2013: repeated layout randomization.
+- Chen & Revels, [Robust Benchmarking in Noisy Environments](https://arxiv.org/abs/1608.04295), HPEC 2016: timer resolution, batching and noisy distributions.
+- Kalibera & Jones, [Rigorous Benchmarking in Reasonable Time](https://kar.kent.ac.uk/33611/), ISMM 2013: variation at iteration, execution and build levels.
+- Tratt, [What Metric to Use When Benchmarking?](https://tratt.net/laurie/blog/2022/what_metric_to_use_when_benchmarking.html), 2022: interpreting summary metrics.

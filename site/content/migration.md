@@ -1,99 +1,104 @@
 +++
-title = "Migrating from criterion"
-weight = 3
+title = "Migrate existing benchmarks"
+description = "Keep familiar Criterion calls for exploration; use native groups for confirmation."
+weight = 10
 +++
 
-## Step 1: Add zenbench alongside criterion
+Choose whether you need familiar Criterion calls for exploratory reporting or
+registered native Suite groups for interleaving and confirmation. The current
+compatibility layer executes measurements immediately and sequentially; it does
+not supply the fixed-process evidence needed for baseline promotion.
+
+## Keep Criterion-style calls
+
+Enable compatibility on the Git dependency used by these guides:
 
 ```toml
 [dev-dependencies]
-criterion = "0.8"                                          # keep
-zenbench = { version = "0.1", features = ["criterion-compat"] }  # add
+zenbench = { git = "https://github.com/imazen/zenbench", branch = "main", features = ["criterion-compat"] }
 ```
 
-## Step 2: Change one import per file
+Keep Criterion itself while comparing separate targets. In a zenbench target,
+replace imports with:
 
 ```rust
-// Before:
-use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
-
-// After:
 use zenbench::criterion_compat::*;
 use zenbench::{criterion_group, criterion_main};
 ```
 
-**Zero code changes** to your benchmark functions. Closures can borrow local data — no `move` or `Clone` needed.
+Common calls include `benchmark_group`, `bench_function`, `bench_with_input`,
+`BenchmarkId`, `Throughput`, `iter`, `iter_batched` and `iter_batched_ref`, plus
+sample size, measurement-time and warmup configuration. Inspect the
+[current compatibility source](https://github.com/imazen/zenbench/blob/main/src/criterion_compat.rs)
+for the subset you use rather than assuming every Criterion API is covered.
 
-## Step 3: Run both
+Immediate `bench_function` and `bench_with_input` closures may borrow local data.
+Batched **setup** closures still need `'static`; captured setup state can require
+`move` and owned/cloned values. Timing boundaries and configuration semantics may
+also differ. Run correctness checks and inspect your migrated report.
 
-Both criterion and zenbench bench files coexist. Run each independently:
-
-```bash
-cargo bench --bench my_criterion_bench    # still works
-cargo bench --bench my_zenbench_bench     # new
+```sh
+cargo bench --bench my_criterion_bench
+cargo bench --bench my_zenbench_bench -- --format=html
 ```
 
-## Step 4: Remove criterion when done
+The names are example targets you define separately with `harness = false`.
+Compatibility timing is exploratory even when its report contains a narrow
+interval. It cannot accept a Confirm candidate or promote a baseline.
 
-```toml
-[dev-dependencies]
-zenbench = "0.1"
-```
+## Move comparisons into native groups
 
-## What works unchanged
-
-Everything in criterion's common API:
-
-- `criterion_group!` / `criterion_main!`
-- `c.benchmark_group()` / `group.bench_function()` / `group.finish()`
-- `c.bench_function()` / `c.bench_with_input()`
-- `BenchmarkId::new()` / `BenchmarkId::from_parameter()`
-- `Throughput::Bytes()` / `Throughput::Elements()`
-- `b.iter()` / `b.iter_batched()` / `b.iter_batched_ref()`
-- `group.sample_size()` / `group.measurement_time()` / `group.warm_up_time()`
-- `black_box()`
-
-## Incremental upgrades
-
-Once migrated, add zenbench features one line at a time:
+For interleaving and the current confirmation protocol, register the arms in
+`Suite::group` and use `zenbench::main!`:
 
 ```rust
-group.throughput_unit("pixels");       // custom unit: "Gpixels/s"
-group.baseline("reference_impl");      // compare all vs this one
-group.sort_by_speed();                 // fastest first in report
-group.subgroup("SIMD variants");       // visual section headers
+use zenbench::prelude::*;
+
+fn benches(suite: &mut Suite) {
+    suite.group("sum", |g| {
+        g.bench("iterator", |b| {
+            b.iter(|| std::hint::black_box(0..1000u64).sum::<u64>())
+        });
+        g.bench("loop", |b| {
+            b.iter(|| {
+                let mut total = 0;
+                for value in std::hint::black_box(0..1000u64) {
+                    total += value;
+                }
+                total
+            })
+        });
+    });
+}
+
+zenbench::main!(benches);
 ```
 
-CLI flags work immediately:
+This is a registration example, not a measured speed claim. Confirm equal outputs
+and use representative inputs before timing. Native `g.bench` closures are stored
+for later interleaved execution and need owned `'static` captures when state is
+captured. Replace `bench_function` with `bench` and wrap registration in
+`suite.group(...)`; no `finish()` call is needed.
 
-```bash
-cargo bench -- --format=html              # browser report
-```
+Follow [the first benchmark guide](@/getting-started.md) to inspect and run it,
+then [confirm a frozen candidate](@/ci-regression.md).
 
-CI confirmation and baseline promotion require registered native Suite groups;
-immediate-mode compatibility measurements remain exploratory.
+## Update CLI scripts by task
 
-## Switching to the native API
+The preferred command groups are `guide`, `cpu-info`, `exec`, `pair`, `nice`,
+`self-compare`, `data`, `fleet` and `jobs`. Previous flat command names remain
+accepted. Typical replacements:
 
-When you want interleaved execution, the diff is small:
+| Older spelling | Preferred spelling |
+|---|---|
+| `zenbench read FILE` | `zenbench data read FILE` |
+| `zenbench compare BEFORE AFTER` | `zenbench data compare BEFORE AFTER` |
+| `zenbench snapshot FILE --output CSV` | `zenbench data snapshot FILE --output CSV` |
+| `zenbench baseline list` | `zenbench data baseline list` |
+| `zenbench fleet-run BUNDLE ...` | `zenbench fleet run BUNDLE ...` |
+| `zenbench run NAME ...` | `zenbench jobs run NAME ...` |
 
-```rust
-// criterion-compat (sequential):        // native (interleaved):
-let mut g = c.benchmark_group("sort");   suite.group("sort", |g| {
-g.bench_function("std", |b| ...);           g.bench("std", |b| ...);
-g.bench_function("unstable", |b| ...);      g.bench("unstable", |b| ...);
-g.finish();                              });
-```
-
-`bench_function` → `bench`, drop `finish()`, wrap in `suite.group()`.
-
-## Comparison table
-
-| | criterion | zenbench compat | zenbench native |
-|---|---|---|---|
-| Code changes | — | **zero** | small rewrite |
-| Interleaving | no | no | **yes** |
-| CI regression | no | **yes** | **yes** |
-| Baselines | no | **yes** | **yes** |
-| Output formats | JSON/HTML | **JSON/CSV/LLM/MD/HTML** | same |
-| Resource gating | no | **yes** | **yes** |
+Both `--name=value` and `--name value` work for benchmark options. Preserve recorded
+mode/plan identity within an experiment. Read the
+[complete migration contract](https://github.com/imazen/zenbench/blob/main/docs/cli-migration.md)
+for aliases, decision exits and API compatibility.

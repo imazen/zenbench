@@ -1,11 +1,16 @@
 +++
-title = "Example Output"
-weight = 5
+title = "Read example output"
+description = "Interpret descriptive rows and keep acceptance decisions separate."
+weight = 12
 +++
+
+The terminal and JSON excerpts below are historical examples of report shape,
+not predictions for your machine or a current default run. Default Iterate now
+uses up to 30 rounds unless a group overrides it.
 
 ## Live HTML report
 
-<a href="/zenbench/example-report.html" target="_blank">Open example HTML report →</a>
+[Open example HTML report](/zenbench/example-report.html)
 
 Generated with `cargo bench --bench sorting -- --format=html`. Self-contained, no JavaScript. Click any benchmark name to expand full statistics.
 
@@ -58,7 +63,7 @@ Generated with `cargo bench --bench sorting -- --format=html`. Self-contained, n
 
 Confirmation reports process-level intervals and explicit improvement, regression,
 equivalence, non-inferiority or inconclusive verdicts. Descriptive percentage
-changes alone cannot pass CI. See [CI regression testing](../ci-regression/).
+changes alone cannot pass CI. See [confirmation and CI](@/ci-regression.md).
 
 ## Thread scaling output
 
@@ -81,7 +86,7 @@ changes alone cannot pass CI. See [CI regression testing](../ci-regression/).
 ## JSON output (excerpt)
 
 ```bash
-cargo bench -- --format=json | head -20
+cargo bench --bench my_bench -- --format=json > result.json
 ```
 
 ```json
@@ -103,3 +108,11 @@ cargo bench -- --format=json | head -20
   }]
 }
 ```
+
+## What to review next
+
+Mean, minimum, MAD and throughput describe observations. Positive latency change
+means slower. The comparison interval in Iterate remains exploratory; inspect
+resource flags, drift and [A/A controls](@/external-programs.md#review-stop-or-resume).
+Accept a candidate only under the applicable [confirmation contract](@/ci-regression.md).
+[Read or export retained data](@/results.md) to change views without measuring again.
