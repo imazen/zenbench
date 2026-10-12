@@ -289,6 +289,11 @@ Counter updates, including a shared relaxed atomic activity flag on successful
 allocations, are inside allocation paths and can perturb timings. Thread-local
 counts do not account for an opaque pool's allocations or peak live heap.
 Confirm native timing separately from allocation, instruction or tracing runs.
+
+The proposed [IQA heap and fleet contract](docs/heap-and-fleet-design.md)
+distinguishes live requested heap, allocation traffic and OS memory peaks. It
+specifies phase boundaries, all-thread validation and integration with the existing
+fleet scheduler; those memory backends are not yet implemented in zenbench.
 Heaptrack and iai-callgrind are external diagnostic workflows, not integrated
 confirmation backends.
 
