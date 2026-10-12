@@ -257,3 +257,92 @@ fn workflow_namespaces_retain_flat_command_compatibility() {
     assert_eq!(canonical.status.code(), legacy.status.code());
     assert_eq!(canonical.stderr, legacy.stderr);
 }
+
+#[test]
+fn saved_suite_exports_html_and_svg_without_measuring() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join(format!("chart-export-{}", zenbench::RunId::generate()));
+    std::fs::create_dir_all(&root).unwrap();
+    let input = root.join("result.json.gz");
+    let mut result = zenbench::SuiteResult::default();
+    let mut group = zenbench::ComparisonResult::default();
+    group.group_name = "Illustrative chart".into();
+    for (name, mean) in [("baseline", 100.0), ("candidate", 80.0)] {
+        let mut benchmark = zenbench::BenchmarkResult::default();
+        benchmark.name = name.into();
+        benchmark.summary = zenbench::Summary::from_slice(&[mean - 1.0, mean, mean + 1.0]);
+        group.benchmarks.push(benchmark);
+    }
+    result.comparisons.push(group);
+    result.save(&input).unwrap();
+    let original = std::fs::read(&input).unwrap();
+    let export = root.join("slides");
+    let output = cli()
+        .args(["data", "read"])
+        .arg(&input)
+        .args(["--format", "html", "--save-charts"])
+        .arg(&export)
+        // Evidence reads must work without a valid measurement environment.
+        .env("ZENBENCH_CPU_POLICY", "deliberately-invalid")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let html = String::from_utf8(output.stdout).unwrap();
+    assert!(html.contains("<!DOCTYPE html>"));
+    assert!(html.contains("Illustrative chart"));
+    let svg = std::fs::read_to_string(export.join("Illustrative_chart.svg")).unwrap();
+    assert!(svg.contains("<svg"));
+    assert!(svg.contains("candidate"));
+    assert_eq!(std::fs::read(&input).unwrap(), original);
+
+    #[cfg(feature = "charts")]
+    {
+        let output = cli()
+            .args(["data", "read"])
+            .arg(&input)
+            .arg("--publish-charts")
+            .arg(root.join("themed"))
+            .args(["--chart-theme", "light", "--vertical"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let svg = std::fs::read_to_string(root.join("themed/Illustrative_chart.svg")).unwrap();
+        assert!(svg.contains("<svg"));
+        assert!(svg.contains("candidate"));
+    }
+
+    let blocked = root.join("not-a-directory");
+    std::fs::write(&blocked, "keep this file").unwrap();
+    let output = cli()
+        .args(["data", "read"])
+        .arg(&input)
+        .arg("--save-charts")
+        .arg(&blocked)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("cannot export SVG"));
+    assert_eq!(std::fs::read_to_string(blocked).unwrap(), "keep this file");
+    assert_eq!(std::fs::read(&input).unwrap(), original);
+}
+
+#[test]
+fn pair_packets_do_not_silently_export_suite_charts() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join(format!("pair-chart-{}", zenbench::RunId::generate()));
+    std::fs::create_dir_all(&root).unwrap();
+    let input = root.join("pair.json");
+    std::fs::write(&input, r#"{"kind":"zenbench_pair","schema":1}"#).unwrap();
+    for args in [vec!["--format", "html"], vec!["--save-charts", "unused"]] {
+        let output = cli()
+            .args(["data", "read"])
+            .arg(&input)
+            .args(args)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("require native suite evidence"));
+    }
+}

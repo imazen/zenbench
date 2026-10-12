@@ -381,3 +381,17 @@ changing admission thresholds or assertions. A live Rayon pool can asynchronousl
 release scheduler allocations during later exact heap-ledger controls; those
 controls now run before pool creation. CI exposed a 48-byte live-ledger difference
 on macOS Intel; the exact assertions remain unchanged.
+
+### Known Bugs: site and chart discoverability (2026-10-12)
+
+The guide index's right TOC only offered section anchors, and GitHub was hidden
+inside a dropdown. It now offers direct guide destinations and a visible header
+repository link at mobile and desktop widths. Browser validation must click guide
+links and assert the destination, not only assert link visibility.
+
+SVG export existed on the legacy results command but was absent from the saved
+packet reader. `data read` now exports HTML and SVG from native suite JSON, gzip
+and evidence references, fails on export I/O errors, and explicitly rejects pair
+packets for these suite renderers. Themed chart bars show means; they do not draw
+confirmation confidence intervals. Matrix MAD comments in themed SVG source are
+not visible error bars. Use the chart guide to keep these quantities distinct.

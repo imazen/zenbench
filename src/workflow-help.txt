@@ -126,3 +126,14 @@ EXTERNAL PROGRAMS / STARTUP ENVIRONMENT CHANGES
 Heap peaks and multi-machine studies: zenbench guide --topic fleet
 Use separate latency and memory binaries; retain raw evidence in the fleet store
 and export a compact JSONL study file for version control.
+
+CHARTS / SLIDES
+  zenbench data read attempt.json.gz --format html > report.html
+  zenbench data read attempt.json.gz --save-charts figures
+For fixed light/dark themes and grouped bars, install the CLI with --features charts:
+  zenbench data read attempt.json.gz --publish-charts slides --chart-theme light
+Add --vertical for grouped vertical bars. These exports read native suite evidence
+without measuring again. They do not yet plot external pair packets. Mean bars and
+MAD spread are descriptive, not confirmation intervals; retain the result's verdict,
+CPU/workload/build identity and uncertainty alongside any slide.
+https://imazen.github.io/zenbench/charts/

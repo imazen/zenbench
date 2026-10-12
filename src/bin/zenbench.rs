@@ -115,8 +115,24 @@ Example: zenbench nice --jobs 8 -- cargo build --release"
     /// Read saved JSON, gzip JSON, or an evidence reference without running benchmarks.
     Read {
         input: PathBuf,
-        #[arg(long, default_value = "llm", value_parser = ["llm", "json", "csv", "md"])]
+        /// HTML reports and chart exports accept native suite evidence only.
+        #[arg(long, default_value = "llm", value_parser = ["llm", "json", "csv", "md", "html"])]
         format: String,
+        /// Export standalone SVGs, one per comparison group, without rerunning.
+        #[arg(long, value_name = "DIR")]
+        save_charts: Option<PathBuf>,
+        /// Export themed SVGs for slides (requires the charts feature).
+        #[cfg(feature = "charts")]
+        #[arg(long, value_name = "DIR")]
+        publish_charts: Option<PathBuf>,
+        /// Fixed theme for slide exports: light, dark, grafana, vintage, etc.
+        #[cfg(feature = "charts")]
+        #[arg(long, default_value = "light", requires = "publish_charts")]
+        chart_theme: String,
+        /// Use vertical grouped bars in themed exports.
+        #[cfg(feature = "charts")]
+        #[arg(long, requires = "publish_charts")]
+        vertical: bool,
     },
     /// Launch in a verified process CPU boundary. Child processes inherit it.
     #[command(
@@ -663,8 +679,27 @@ fn main() {
                 pub_config,
             )
         }
-        Commands::Read { input, format } => {
+        Commands::Read {
+            input,
+            format,
+            save_charts,
+            #[cfg(feature = "charts")]
+            publish_charts,
+            #[cfg(feature = "charts")]
+            chart_theme,
+            #[cfg(feature = "charts")]
+            vertical,
+        } => {
+            let wants_charts = save_charts.is_some();
+            #[cfg(feature = "charts")]
+            let wants_charts = wants_charts || publish_charts.is_some();
             if support::pair::is_packet(&input) {
+                if wants_charts || format == "html" {
+                    eprintln!(
+                        "HTML and SVG exports currently require native suite evidence; pair packets support llm, json, csv and md"
+                    );
+                    std::process::exit(2);
+                }
                 match support::pair::read(&input, &format) {
                     Ok(text) => println!("{text}"),
                     Err(e) => {
@@ -678,7 +713,32 @@ fn main() {
                 eprintln!("cannot read evidence: {e}");
                 std::process::exit(2);
             });
+            if let Some(dir) = save_charts {
+                result.save_charts(&dir).unwrap_or_else(|e| {
+                    eprintln!("cannot export SVG charts to {}: {e}", dir.display());
+                    std::process::exit(2);
+                });
+            }
+            #[cfg(feature = "charts")]
+            if let Some(dir) = publish_charts {
+                let config = zenbench::charts::ChartConfig {
+                    theme: chart_theme,
+                    orientation: if vertical {
+                        zenbench::charts::ChartOrientation::Vertical
+                    } else {
+                        zenbench::charts::ChartOrientation::Horizontal
+                    },
+                    ..Default::default()
+                };
+                result
+                    .save_publication_charts(&dir, &config)
+                    .unwrap_or_else(|e| {
+                        eprintln!("cannot export themed SVG charts to {}: {e}", dir.display());
+                        std::process::exit(2);
+                    });
+            }
             let text = match format.as_str() {
+                "html" => result.to_html(),
                 "json" => serde_json::to_string_pretty(&result).expect("loaded JSON result"),
                 "csv" => result.to_csv(),
                 "md" => result.to_markdown(),
