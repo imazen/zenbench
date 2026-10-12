@@ -114,6 +114,7 @@ impl Criterion {
             suite: &mut self.suite,
             group: None,
             immediate_results: Vec::new(),
+            immediate_cpu_placement: None,
             config_max_rounds: self.config_max_rounds,
             config_max_time: self.config_max_time,
             config_warmup_time: self.config_warmup_time,
@@ -164,6 +165,7 @@ pub struct BenchmarkGroup<'a> {
     group: Option<crate::bench::BenchGroup>,
     /// Results from immediate-mode benchmarks (no 'static required).
     immediate_results: Vec<crate::results::BenchmarkResult>,
+    immediate_cpu_placement: Option<crate::platform::CpuPlacement>,
     // Config inherited from Criterion
     config_max_rounds: Option<usize>,
     config_max_time: Option<std::time::Duration>,
@@ -284,6 +286,19 @@ impl<'a> BenchmarkGroup<'a> {
         let config = self.get_config();
 
         // Quick calibration
+        let cpu_session =
+            crate::platform::CpuSession::start(None, None).unwrap_or_else(|e| panic!("{e}"));
+        #[cfg(target_os = "macos")]
+        crate::platform::warmup_cpu_for(std::time::Duration::from_millis(100));
+        let mut placement = cpu_session.placement.clone();
+        placement.thread_affinity_effective = crate::platform::current_thread_affinity().ok();
+        if let Some(previous) = &self.immediate_cpu_placement {
+            assert!(
+                previous.compatible(&placement),
+                "CPU placement changed within immediate-mode group"
+            );
+        }
+        self.immediate_cpu_placement = Some(placement);
         let mut bencher = crate::bench::Bencher::new(1);
         f(&mut Bencher(&mut bencher));
         let per_iter = bencher.elapsed_ns.max(1);
@@ -298,8 +313,20 @@ impl<'a> BenchmarkGroup<'a> {
         let n_rounds = config.max_rounds.min(100);
         let mut samples = Vec::with_capacity(n_rounds);
         for _ in 0..n_rounds {
+            cpu_session.verify().unwrap_or_else(|e| panic!("{e}"));
+            self.immediate_cpu_placement
+                .as_ref()
+                .unwrap()
+                .verify_thread()
+                .unwrap_or_else(|e| panic!("{e}"));
             let mut b = crate::bench::Bencher::new(iters);
             f(&mut Bencher(&mut b));
+            cpu_session.verify().unwrap_or_else(|e| panic!("{e}"));
+            self.immediate_cpu_placement
+                .as_ref()
+                .unwrap()
+                .verify_thread()
+                .unwrap_or_else(|e| panic!("{e}"));
             samples.push(b.elapsed_ns as f64 / iters as f64);
         }
 
@@ -358,6 +385,7 @@ impl<'a> BenchmarkGroup<'a> {
             let comp = crate::results::ComparisonResult {
                 group_name: self.name.clone(),
                 benchmarks: std::mem::take(&mut self.immediate_results),
+                cpu_placement: self.immediate_cpu_placement.clone(),
                 ..Default::default()
             };
             // Print group report immediately
@@ -448,6 +476,11 @@ macro_rules! criterion_group {
 macro_rules! criterion_main {
     ($($group:path),+ $(,)?) => {
         fn main() {
+            if let Some((n, policy)) = $crate::parse_process_args() {
+                let result = $crate::run_processes(n, policy);
+                $crate::postprocess_result(&result);
+                return;
+            }
             let mut suite = $crate::Suite::new();
 
             let group_filter: Option<String> = std::env::args()

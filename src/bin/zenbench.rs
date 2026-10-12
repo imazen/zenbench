@@ -5,7 +5,16 @@ use std::path::{Path, PathBuf};
 use zenbench::daemon;
 
 #[derive(Parser)]
-#[command(name = "zenbench", about = "Interleaved microbenchmarking harness")]
+#[command(
+    name = "zenbench",
+    about = "Interleaved microbenchmarking harness",
+    after_help = "Start here: zenbench guide (SIMD optimization: zenbench guide --topic simd)
+Quick edit loop: cargo bench --bench NAME -- --group=GROUP
+Before accepting a change: freeze inputs, then use --mode=confirm --workload-id=ID.
+Inspect asymmetric CPUs: zenbench cpu-info; choose a verified boundary with exec.
+Benchmark-binary options: cargo bench --bench NAME -- --help
+Iterate exit 0 means execution succeeded, not a confirmed performance result."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -13,10 +22,69 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Show workflows, CPU setup, exit meanings, provenance and profiling limits.
+    Guide {
+        /// General workflows or archmage/magetypes optimization lessons.
+        #[arg(long, default_value = "workflows", value_parser = ["workflows", "simd"])]
+        topic: String,
+    },
+    /// Read saved JSON, gzip JSON, or an evidence reference without running benchmarks.
+    Read {
+        input: PathBuf,
+        #[arg(long, default_value = "llm", value_parser = ["llm", "json", "csv", "md"])]
+        format: String,
+    },
+    /// Launch in a verified process CPU boundary. Child processes inherit it.
+    #[command(
+        after_help = "First run zenbench cpu-info. IDs must belong to one detected core/cache class.
+Linux needs a delegated cpuset controller or an existing matching hard cpuset.
+Windows uses an inherited Job boundary on supported topology. macOS class binding
+and Windows ARM/multiple-group classification are unsupported. Thread hints are
+insufficient for existing Rayon pools. Unrestricted permits exploration only.
+Example: zenbench exec --cpu-policy performance cargo -- bench --bench kernels -- --mode=iterate"
+    )]
+    Exec {
+        #[arg(long, default_value = "performance")]
+        cpu_policy: zenbench::platform::CpuPolicy,
+        /// Explicit IDs/ranges, for cache classes without a unique P/E ranking.
+        #[arg(long)]
+        cpu_set: Option<String>,
+        program: PathBuf,
+        #[arg(last = true)]
+        args: Vec<std::ffi::OsString>,
+    },
+    #[command(hide = true)]
+    CpuChild {
+        program: PathBuf,
+        #[arg(last = true)]
+        args: Vec<std::ffi::OsString>,
+    },
+    /// Show detected classes and the current process placement check as JSON.
+    #[command(
+        after_help = "Choose a class before launching libraries or external pools; see zenbench exec --help.
+For unequal cache capacities, choose explicit IDs from this output; do not assume
+which cache class is faster. Run classes separately and keep results separate.
+--probe measures newly created workers; it does not certify existing pools or clocks."
+    )]
+    CpuInfo {
+        /// Exercise new diagnostic workers; this does not certify CPU placement.
+        #[arg(long)]
+        probe: bool,
+        /// Number of diagnostic workers (does not inspect external pools).
+        #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u16).range(1..=128), requires = "probe")]
+        workers: u16,
+    },
     /// Run a benchmark as a background process.
     ///
     /// Spawns `cargo bench --bench <name>` in the background and tracks it.
     /// Use --wait to block until the benchmark completes.
+    #[command(
+        after_help = "For an exploratory background run: zenbench run kernels --cargo-args=\"-- --group=filter\"
+Track it with list/status/results. Use direct cargo bench or a retained executable
+for confirmation exit codes. This wrapper does not preserve the 0/1/2 decision
+contract; --wait's timeout does not bound the initial Cargo child wait.
+See zenbench guide for confirmation and evidence storage."
+    )]
     Run {
         /// Benchmark target name (as in `cargo bench --bench <name>`).
         bench: String,
@@ -114,7 +182,37 @@ enum Commands {
         vertical: bool,
     },
 
-    /// Compare two result files.
+    /// Losslessly compact a result packet into gzip JSON, including all rounds.
+    Archive {
+        input: PathBuf,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+
+    /// Export one selected result as a small, stable CSV snapshot for Git.
+    Snapshot {
+        /// JSON, gzip JSON, or an evidence reference from a completed run.
+        input: PathBuf,
+        /// Destination CSV. Full raw data remains in evidence storage.
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+
+    /// Recompute a versioned process analysis from retained evidence, without measuring.
+    Reanalyze {
+        input: PathBuf,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+
+    /// Compare retained baseline and candidate evidence (does not execute code).
+    #[command(
+        after_help = "Inputs: JSON, gzip JSON, or evidence references; CSV snapshots are summaries only.
+Exit 0: every case confirms non-inferiority; 1: confirmed regression; 2: invalid
+or inconclusive (including exploratory results). Read exploratory data with read.
+Freeze workload, case inventory, sampling plan and CPU placement before measuring.
+Use zenbench guide for source-edit and retained-binary workflows."
+    )]
     Compare {
         /// Baseline result file.
         baseline: PathBuf,
@@ -123,11 +221,18 @@ enum Commands {
         candidate: PathBuf,
     },
 
-    /// Compare current code against a previous git version.
+    /// Explore a source edit against a Git ref (builds and runs both versions).
     ///
     /// Builds and runs the specified benchmark at both the old and current
-    /// commits, then prints a comparison. Requires the benchmark to use
+    /// ref and current working tree, including local edits. Requires the benchmark to use
     /// zenbench::main!() so results can be captured via ZENBENCH_RESULT_PATH.
+    #[command(
+        after_help = r#"Example: zenbench self-compare --bench kernels --ref HEAD~1 --cargo-args="-- --group=filter"
+The candidate includes uncommitted changes. Runtime Git HEAD is not build identity.
+Runs the baseline then candidate; no randomized two-binary A/B scheduling.
+Default exploratory results return 2 from comparison, never a confirmed pass.
+Retained executables can be run separately and their packets compared: zenbench guide."#
+    )]
     SelfCompare {
         /// Benchmark target name (as in `cargo bench --bench <name>`).
         #[arg(long)]
@@ -183,6 +288,53 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Guide { topic } => print!(
+            "{}",
+            match topic.as_str() {
+                "simd" => include_str!("../simd-help.txt"),
+                _ => include_str!("../workflow-help.txt"),
+            }
+        ),
+        Commands::Exec {
+            cpu_policy,
+            cpu_set,
+            program,
+            args,
+        } => cpu_exec(cpu_policy, cpu_set.as_deref(), &program, &args),
+        Commands::CpuChild { program, args } => {
+            let placement = zenbench::platform::check_cpu_placement().unwrap_or_else(|e| {
+                eprintln!("{e}");
+                std::process::exit(2);
+            });
+            if placement.status != zenbench::platform::PlacementStatus::EnforcedUniform {
+                eprintln!("launcher requires an enforced uniform process boundary");
+                std::process::exit(2);
+            }
+            eprintln!(
+                "[zenbench] verified before program launch: {}",
+                serde_json::to_string(&placement).unwrap()
+            );
+            let status = std::process::Command::new(&program)
+                .args(&args)
+                .status()
+                .unwrap_or_else(|e| {
+                    eprintln!("program launch failed: {e}");
+                    std::process::exit(2);
+                });
+            std::process::exit(status.code().unwrap_or(1));
+        }
+        Commands::CpuInfo { probe, workers } => {
+            let mut output = serde_json::json!({
+                "topology": zenbench::platform::detect_cpu_topology(),
+                "placement": zenbench::platform::check_cpu_placement(),
+            });
+            if probe {
+                output["probe"] =
+                    serde_json::to_value(cpu_probe_workers(usize::from(workers))).unwrap();
+                output["probe_scope"] = serde_json::json!("new_diagnostic_workers_only");
+            }
+            println!("{}", serde_json::to_string_pretty(&output).unwrap());
+        }
         Commands::Run {
             bench,
             project,
@@ -232,6 +384,53 @@ fn main() {
                 pub_config,
             )
         }
+        Commands::Read { input, format } => {
+            let result = zenbench::SuiteResult::load(input).unwrap_or_else(|e| {
+                eprintln!("cannot read evidence: {e}");
+                std::process::exit(2);
+            });
+            let text = match format.as_str() {
+                "json" => serde_json::to_string_pretty(&result).expect("loaded JSON result"),
+                "csv" => result.to_csv(),
+                "md" => result.to_markdown(),
+                _ => result.to_llm(),
+            };
+            println!("{text}");
+        }
+        Commands::Archive { input, output } => {
+            if output.extension().is_none_or(|e| e != "gz") {
+                eprintln!("archive output must end in .gz");
+                std::process::exit(2);
+            }
+            zenbench::SuiteResult::load(input)
+                .and_then(|r| r.save(output))
+                .unwrap_or_else(|e| {
+                    eprintln!("cannot archive results: {e}");
+                    std::process::exit(2);
+                });
+        }
+        Commands::Snapshot { input, output } => {
+            let result = zenbench::SuiteResult::load(&input).unwrap_or_else(|e| {
+                eprintln!("cannot load snapshot input: {e}");
+                std::process::exit(2);
+            });
+            if result.incomplete {
+                eprintln!("cannot export an incomplete attempt as a snapshot");
+                std::process::exit(2);
+            }
+            result.save_snapshot(&output).unwrap_or_else(|e| {
+                eprintln!("cannot write snapshot: {e}");
+                std::process::exit(2);
+            });
+        }
+        Commands::Reanalyze { input, output } => {
+            zenbench::SuiteResult::load(input)
+                .and_then(|r| r.save_analysis(output))
+                .unwrap_or_else(|e| {
+                    eprintln!("cannot reanalyze evidence: {e}");
+                    std::process::exit(2);
+                });
+        }
         Commands::Compare {
             baseline,
             candidate,
@@ -249,7 +448,9 @@ fn main() {
             BaselineAction::List => {
                 let names = zenbench::baseline::list_baselines();
                 if names.is_empty() {
-                    println!("No baselines saved. Use: cargo bench -- --save-baseline=<name>");
+                    println!(
+                        "No baselines saved. Choose verified CPU placement, then use: cargo bench --bench NAME -- --mode=confirm --workload-id=ID --save-baseline=NAME\nRun zenbench guide for the complete workflow."
+                    );
                 } else {
                     for name in &names {
                         let path = format!(".zenbench/baselines/{name}.json");
@@ -288,6 +489,119 @@ fn main() {
             },
         },
     }
+}
+
+fn cpu_probe_workers(workers: usize) -> Result<zenbench::platform::CpuProbeReport, String> {
+    std::thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(workers);
+        let mut starts = Vec::with_capacity(workers);
+        // Only start measuring once all workers exist. If a spawn fails, dropping
+        // senders releases earlier workers without leaving a broken barrier.
+        for index in 0..workers {
+            let (start, ready) = std::sync::mpsc::channel();
+            let handle = std::thread::Builder::new()
+                .name(format!("cpu-probe-{index}"))
+                .spawn_scoped(scope, move || {
+                    ready.recv().map_err(|e| e.to_string())?;
+                    zenbench::platform::probe_cpu_thread(Default::default())
+                })
+                .map_err(|e| format!("CPU probe worker creation failed: {e}"))?;
+            starts.push(start);
+            handles.push(handle);
+        }
+        for start in starts {
+            start.send(()).map_err(|e| e.to_string())?;
+        }
+        let observations = handles
+            .into_iter()
+            .map(|handle| {
+                handle
+                    .join()
+                    .map_err(|_| "CPU probe worker panicked".to_string())?
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        zenbench::platform::CpuProbeReport::from_workers(observations)
+    })
+}
+
+fn cpu_exec(
+    policy: zenbench::platform::CpuPolicy,
+    explicit: Option<&str>,
+    program: &Path,
+    args: &[std::ffi::OsString],
+) {
+    use zenbench::platform::{CpuPolicy, detect_cpu_topology};
+    let topology = detect_cpu_topology();
+    let selected = if let Some(spec) = explicit {
+        // Reuse the harness's public policy check through a child; the parser
+        // below validates input before it is passed to systemd as one argument.
+        let mut cpus = std::collections::BTreeSet::new();
+        for part in spec.split(',') {
+            let (low, high) = part.split_once('-').unwrap_or((part, part));
+            let low = low.parse::<usize>();
+            let high = high.parse::<usize>();
+            match (low, high) {
+                (Ok(low), Ok(high)) if low <= high && high < 1024 => cpus.extend(low..=high),
+                _ => {
+                    eprintln!("invalid --cpu-set");
+                    std::process::exit(2);
+                }
+            }
+        }
+        cpus.into_iter().collect::<Vec<_>>()
+    } else {
+        topology.select(policy).unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(2);
+        })
+    };
+    if policy == CpuPolicy::Unrestricted || selected.is_empty() {
+        eprintln!("exec requires a nonempty uniform CPU set and a checked policy");
+        std::process::exit(2);
+    }
+    let set = selected
+        .iter()
+        .map(usize::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let executable = std::env::current_exe().unwrap();
+    #[cfg(target_os = "linux")]
+    let mut child = {
+        let already_enforced = zenbench::platform::check_cpu_placement().is_ok_and(|p| {
+            p.status == zenbench::platform::PlacementStatus::EnforcedUniform
+                && p.effective_cpus == selected
+        });
+        if already_enforced {
+            std::process::Command::new(&executable)
+        } else {
+            let mut child = std::process::Command::new("systemd-run");
+            child
+                .args([
+                    "--user",
+                    "--scope",
+                    "--quiet",
+                    &format!("--property=AllowedCPUs={set}"),
+                ])
+                .arg(&executable);
+            child
+        }
+    };
+    #[cfg(not(target_os = "linux"))]
+    let mut child = std::process::Command::new(&executable);
+    let status = child
+        .arg("cpu-child")
+        .arg(program)
+        .arg("--")
+        .args(args)
+        .env("ZENBENCH_CPU_POLICY", policy.to_string())
+        .env("ZENBENCH_CPU_SET", &set)
+        .env("RAYON_NUM_THREADS", selected.len().to_string())
+        .status()
+        .unwrap_or_else(|e| {
+            eprintln!("CPU scope launch failed: {e}");
+            std::process::exit(2);
+        });
+    std::process::exit(status.code().unwrap_or(1));
 }
 
 fn cmd_run(
@@ -587,18 +901,18 @@ fn cmd_compare(baseline_path: &Path, candidate_path: &Path) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("Error loading baseline: {e}");
-            return;
+            std::process::exit(2);
         }
     };
     let candidate = match zenbench::SuiteResult::load(candidate_path) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("Error loading candidate: {e}");
-            return;
+            std::process::exit(2);
         }
     };
 
-    print_comparison(&baseline, &candidate);
+    std::process::exit(print_comparison(&baseline, &candidate));
 }
 
 fn cmd_self_compare(bench_name: &str, git_ref: Option<&str>, cargo_args: Option<&str>) {
@@ -624,11 +938,16 @@ fn cmd_self_compare(bench_name: &str, git_ref: Option<&str>, cargo_args: Option<
         std::process::exit(1);
     }
 
+    eprintln!(
+        "[zenbench] exploratory source comparison: baseline runs before candidate; no randomized A/B schedule"
+    );
+    eprintln!(
+        "[zenbench] candidate uses the current working tree, including local edits; runtime Git HEAD is not build provenance"
+    );
     let current_hash = zenbench::platform::git_short_hash().unwrap_or_else(|| "HEAD".to_string());
     eprintln!("[zenbench] self-compare: {reference} (baseline) vs {current_hash} (candidate)");
 
-    // Worktree and result files live under <target>/zenbench/self-compare,
-    // so `cargo clean` removes them and nothing lands in the temp dir.
+    // Build workspaces are disposable; measurement packets are durable.
     let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let tmp_dir = project_target_dir(&current_dir)
         .join("zenbench")
@@ -637,8 +956,35 @@ fn cmd_self_compare(bench_name: &str, git_ref: Option<&str>, cargo_args: Option<
         eprintln!("Error creating {}: {e}", tmp_dir.display());
         std::process::exit(1);
     });
-    let baseline_result_path = tmp_dir.join("baseline.json");
-    let candidate_result_path = tmp_dir.join("candidate.json");
+    let evidence_root = std::env::var_os("ZENBENCH_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| current_dir.join(".zenbench/data"));
+    std::fs::create_dir_all(&evidence_root).expect("cannot create evidence root");
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(evidence_root.join(".gitignore"))
+    {
+        Ok(mut file) => {
+            use std::io::Write;
+            file.write_all(b"*\n")
+                .expect("cannot protect raw evidence from Git");
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => panic!("cannot protect raw evidence: {e}"),
+    }
+    let evidence_dir = evidence_root
+        .canonicalize()
+        .expect("cannot resolve evidence root")
+        .join("self-compare")
+        .join(zenbench::RunId::generate().0);
+    std::fs::create_dir_all(&evidence_dir).expect("cannot retain self-compare evidence");
+    let baseline_result_path = evidence_dir.join("baseline.json");
+    let candidate_result_path = evidence_dir.join("candidate.json");
+    eprintln!(
+        "[zenbench] retained self-compare evidence → {}",
+        evidence_dir.display()
+    );
 
     // Step 1: Create worktree for the old ref
     let worktree_path = tmp_dir.join("worktree");
@@ -716,11 +1062,7 @@ fn cmd_self_compare(bench_name: &str, git_ref: Option<&str>, cargo_args: Option<
     };
 
     eprintln!();
-    print_comparison(&baseline, &candidate);
-
-    // Clean up temp files
-    let _ = std::fs::remove_file(&baseline_result_path);
-    let _ = std::fs::remove_file(&candidate_result_path);
+    std::process::exit(print_comparison(&baseline, &candidate));
 }
 
 /// The cargo target directory of the project in `dir`: `$CARGO_TARGET_DIR` when
@@ -798,6 +1140,11 @@ fn run_bench_in_dir(
         Err(_) => our_pid.to_string(),
     };
     cmd.env("ZENBENCH_LAUNCHER_PIDS", &launcher_pids);
+    // Do not leave auto-saved child evidence inside a disposable build workspace.
+    cmd.env(
+        "ZENBENCH_DATA_DIR",
+        result_path.parent().expect("result parent"),
+    );
 
     if let Some(args) = cargo_args {
         for arg in args.split_whitespace() {
@@ -824,97 +1171,46 @@ fn run_bench_in_dir(
     }
 }
 
-fn format_ns(ns: f64) -> String {
-    zenbench::format_ns(ns)
-}
-
 /// Print a colored comparison between two suite results.
-fn print_comparison(baseline: &zenbench::SuiteResult, candidate: &zenbench::SuiteResult) {
-    let base_git = baseline
-        .git_hash
-        .as_deref()
-        .map(|h| if h.len() > 8 { &h[..8] } else { h })
-        .unwrap_or("?");
-    let cand_git = candidate
-        .git_hash
-        .as_deref()
-        .map(|h| if h.len() > 8 { &h[..8] } else { h })
-        .unwrap_or("?");
-
-    eprintln!("═══════════════════════════════════════════════════════════════");
-    eprintln!("  zenbench comparison");
-    eprintln!("  baseline:  {} (git: {})", baseline.run_id, base_git);
-    eprintln!("  candidate: {} (git: {})", candidate.run_id, cand_git);
-    eprintln!("═══════════════════════════════════════════════════════════════");
-
-    // Compare comparison groups by name
-    for cand_group in &candidate.comparisons {
-        if let Some(base_group) = baseline
-            .comparisons
-            .iter()
-            .find(|g| g.group_name == cand_group.group_name)
-        {
-            let is_single = cand_group.benchmarks.len() == 1
-                && cand_group.benchmarks[0].name == cand_group.group_name;
-
-            if !is_single {
-                eprintln!();
-                eprintln!("  group: {}", cand_group.group_name);
-                eprintln!("  ───────────────────────────────────────────────────────────");
-            }
-
-            for cand_bench in &cand_group.benchmarks {
-                if let Some(base_bench) = base_group
-                    .benchmarks
-                    .iter()
-                    .find(|b| b.name == cand_bench.name)
-                {
-                    print_bench_diff(
-                        &cand_bench.name,
-                        base_bench.summary.mean,
-                        cand_bench.summary.mean,
-                    );
-                } else {
-                    eprintln!(
-                        "    {:<30}  {:>10}  (new)",
-                        cand_bench.name,
-                        format_ns(cand_bench.summary.mean)
-                    );
-                }
-            }
-        }
-    }
-
-    eprintln!();
-    eprintln!("═══════════════════════════════════════════════════════════════");
-    eprintln!();
+fn print_cpu_evidence(label: &str, placement: &Option<zenbench::platform::CpuPlacement>) {
+    use zenbench::platform::PlacementStatus;
+    let status = match placement.as_ref().map(|p| p.status) {
+        Some(PlacementStatus::UniformHardware) => "uniform_hardware",
+        Some(PlacementStatus::EnforcedUniform) => "enforced_uniform",
+        Some(PlacementStatus::Unrestricted) => "UNVERIFIED_UNRESTRICTED",
+        _ => "LEGACY_UNKNOWN",
+    };
+    eprintln!(
+        "{label}: cpu_placement={status} evidence={}",
+        serde_json::to_string(placement).unwrap()
+    );
 }
 
-/// Print a single benchmark comparison line with color.
-fn print_bench_diff(name: &str, base_mean: f64, cand_mean: f64) {
-    let pct = if base_mean.abs() > f64::EPSILON {
-        (cand_mean - base_mean) / base_mean * 100.0
+fn print_comparison(baseline: &zenbench::SuiteResult, candidate: &zenbench::SuiteResult) -> i32 {
+    print_cpu_evidence("baseline CPU", &baseline.cpu_placement);
+    print_cpu_evidence("candidate CPU", &candidate.cpu_placement);
+    let margin = candidate
+        .execution
+        .as_ref()
+        .map(|e| e.plan.margin_pct)
+        .unwrap_or(1.0);
+    if let Err(e) = baseline.check_cpu_compatibility(candidate) {
+        eprintln!("INVALID comparison: {e}");
+        std::process::exit(2);
+    }
+    let comparison = zenbench::baseline::compare_against_baseline(baseline, candidate, margin);
+    zenbench::baseline::print_comparison_report(&comparison);
+    if comparison
+        .confirmed
+        .iter()
+        .any(|c| c.verdict == zenbench::Verdict::Regression)
+    {
+        1
+    } else if comparison.promotable {
+        0
     } else {
-        0.0
-    };
-
-    let (arrow, reset) = if pct < -1.0 {
-        ("\x1b[32m", "\x1b[0m") // green = faster
-    } else if pct > 1.0 {
-        ("\x1b[31m", "\x1b[0m") // red = slower
-    } else {
-        ("", "") // no change
-    };
-
-    eprintln!(
-        "    {:<30}  {:>10} → {:>10}  {}{:+.2}%{}",
-        name,
-        format_ns(base_mean),
-        format_ns(cand_mean),
-        arrow,
-        pct,
-        reset,
-    );
+        2
+    }
 }
 
 fn cmd_clean(project: &Path, max_age_hours: u64) {

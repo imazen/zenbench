@@ -1,0 +1,11 @@
+{
+  "command": "just windows-topology-remote <trusted-windows-alias> [--relay <credential-host> --network-jump <network-host> --known-hosts <trusted-pin-file>] --script examples/windows_process_mask_probe.ps1 --cpu-id ID",
+  "cpu_ids": [
+    0,
+    2
+  ],
+  "oracle_source": "examples/windows_process_mask_probe.ps1 in this commit",
+  "scope": "Native OS primitive controls on preexisting managed workers; not compiled Rust/Rayon or a performance benchmark",
+  "measured_date": "2026-10-11",
+  "resource_scope": "The recorded run-heavy summaries cover the local SSH launcher. No remote hard process-memory cap is claimed."
+}

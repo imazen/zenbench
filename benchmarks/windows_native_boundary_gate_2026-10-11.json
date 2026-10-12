@@ -1,0 +1,62 @@
+{
+  "observed": "2026-10-11",
+  "source_commit": "32636ed2caa1df507d1b51e023837196b2b8842e",
+  "cpu_model": "Intel Core Ultra 7 270K Plus",
+  "rustc": "1.99.0 (b940084d7 2026-09-28)",
+  "target": "x86_64-pc-windows-gnu",
+  "fixtures": {
+    "job_boundary": {
+      "packet": {
+        "mode": "job-test",
+        "binary_sha256": "2aa5a2900c60695fb005bc42bb6384fd78bcb01004dac8808fa73332ff4fb098",
+        "memory_limit_bytes": 2147483648,
+        "priority": "idle",
+        "peak_job_commit_bytes": 75829248,
+        "runs": [
+          {
+            "cpu_set": "default",
+            "repeat": 0,
+            "exit_code": 0,
+            "peak_rss_bytes": 9773056,
+            "stderr": "",
+            "stdout": "\nrunning 1 test\ntest inherited_job_prevents_process_and_worker_escape ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s\n\n"
+          }
+        ]
+      },
+      "local_resource_record": "run-heavy: done rc=0 1s | peak-RSS 0.02GiB | min-avail 26878MiB | peak-load 0.50"
+    },
+    "cpu_load_gate": {
+      "packet": {
+        "mode": "gate-test",
+        "binary_sha256": "8fe890f9ed3716e3fbedfa58de92954cbe9d6ca28f183124dd99d957a7f5e6ea",
+        "memory_limit_bytes": 2147483648,
+        "priority": "idle",
+        "peak_job_commit_bytes": 81997824,
+        "runs": [
+          {
+            "cpu_set": "default",
+            "repeat": 0,
+            "exit_code": 0,
+            "peak_rss_bytes": 21970944,
+            "stderr": "",
+            "stdout": "\nrunning 1 test\ntest gate_sees_cpu_load ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.95s\n\n"
+          }
+        ]
+      },
+      "local_resource_record": "run-heavy: done rc=0 7s | peak-RSS 0.02GiB | min-avail 26852MiB | peak-load 0.88"
+    }
+  },
+  "source_sha256": {
+    "src/platform/windows_job.rs": "28114580788f6252b606be35c93bfe223849a7471ab9f666c52e38c438971b99",
+    "tests/windows_job_boundary.rs": "25e731e6f7c5d4347691a3e0fbf595af647f44f8eb695bca8e7407732b1eb59b",
+    "tests/gate_sees_load.rs": "43a6deca37c1660dbe0d3dba4f213b45183c7d026d3592fb9ff07e0a221cdada",
+    "examples/windows_repeatability.ps1": "a61d631fc4eccbe8dff4cfdb337443d5ba3361f9b5b5d2deef18c1b46c964596",
+    "Cargo.lock": "8633f119c25be010747553c45cd37c9cfa747cf2de3103c1e8fc4837fdb2acc3"
+  },
+  "commands": [
+    "just windows-job-test-build",
+    "just windows-job-test-remote <trusted-windows-alias> <compiled-test-executable>",
+    "just windows-gate-test-build",
+    "just windows-gate-test-remote <trusted-windows-alias> <compiled-test-executable>"
+  ]
+}

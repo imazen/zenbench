@@ -1,0 +1,9 @@
+{
+  "source_commit": "98100750257a6fb3e5dc2c440cd143ae4281d7f9",
+  "original_json_bytes": 69511,
+  "compact_gzip_bytes": 5915,
+  "snapshot_bytes": 318,
+  "rounds_preserved": 200,
+  "independent_decoder": "Python stdlib gzip/json; all historical fields equal",
+  "gzip_sha256": "44512e0823aa6ad04b4f4d3772ba417e3544f83ee0fd23316530591f27f72add"
+}

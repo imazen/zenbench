@@ -139,6 +139,10 @@ pub struct ResourceGate {
     monitor: SystemMonitor,
     total_waits: usize,
     total_wait_time: Duration,
+    background: Option<crate::monitor::Monitor>,
+    observation_age_ns: Option<u64>,
+    last_observation: Option<String>,
+    missing_observations: bool,
 }
 
 impl ResourceGate {
@@ -148,7 +152,27 @@ impl ResourceGate {
             config,
             total_waits: 0,
             total_wait_time: Duration::ZERO,
+            background: None,
+            observation_age_ns: None,
+            last_observation: None,
+            missing_observations: false,
         }
+    }
+
+    pub(crate) fn start_monitoring(&mut self) {
+        if self.config.enabled && self.background.is_none() {
+            let start = Instant::now();
+            self.background = Some(crate::monitor::Monitor::start());
+            self.total_wait_time += start.elapsed();
+        }
+    }
+
+    pub(crate) fn observation_age_ns(&self) -> Option<u64> {
+        self.observation_age_ns
+    }
+
+    pub(crate) fn last_observation(&self) -> Option<String> {
+        self.last_observation.clone()
     }
 
     /// Set thread allowance for the current benchmark group.
@@ -322,7 +346,8 @@ impl ResourceGate {
 
             if start.elapsed() >= max_wait {
                 crate::report::clear_status();
-                return; // give up waiting, measure anyway
+                self.missing_observations = true; // admission failed; result cannot certify quietness
+                return;
             }
 
             if !warned {
@@ -346,12 +371,27 @@ impl ResourceGate {
 
     /// Share the existing check with the engine's retained round evidence.
     pub(crate) fn check_and_record_status(&mut self) -> Option<bool> {
+        self.last_observation = None;
         if !self.config.enabled {
             return None;
         }
-        let state = self.monitor.snapshot();
+        let state = if let Some(background) = &self.background {
+            let Some((age, state)) = background.latest() else {
+                self.observation_age_ns = None;
+                self.missing_observations = true;
+                return None;
+            };
+            self.observation_age_ns = Some(age.as_nanos().min(u64::MAX as u128) as u64);
+            state
+        } else {
+            let start = Instant::now();
+            let state = self.monitor.snapshot();
+            self.total_wait_time += start.elapsed();
+            state
+        };
         let reason = self.check_state(&state);
         let clean = reason.is_none();
+        self.last_observation = Some(format!("reason={reason:?} state={state:?}"));
         if std::env::var_os("ZENBENCH_GATE_TRACE").is_some() {
             eprintln!("[zenbench gate] clean={clean} reason={reason:?} state={state:?}");
         }
@@ -405,7 +445,8 @@ impl ResourceGate {
     /// excessive waiting (indicates a noisy system).
     #[allow(dead_code)] // May be used by bin targets
     pub fn is_unreliable(&self) -> bool {
-        self.config.strict && self.total_waits > self.config.max_wait_count
+        self.missing_observations
+            || (self.config.strict && self.total_waits > self.config.max_wait_count)
     }
 
     /// Total number of times we had to wait.
@@ -479,19 +520,25 @@ fn collect_ancestors(
     start: Option<sysinfo::Pid>,
     out: &mut Vec<sysinfo::Pid>,
 ) {
+    collect_ancestors_with(start, out, |pid| sys.process(pid)?.parent());
+}
+
+fn collect_ancestors_with(
+    start: Option<sysinfo::Pid>,
+    out: &mut Vec<sysinfo::Pid>,
+    parent_of: impl Fn(sysinfo::Pid) -> Option<sysinfo::Pid>,
+) {
     let mut cur = start;
     // Hard cap independent of the process count: PID chains are shallow,
     // and this guards against a reused-PID cycle the visited-set might miss.
     for _ in 0..1024 {
         let Some(pid) = cur else { return };
-        let Some(proc_) = sys.process(pid) else {
+        let Some(parent) = parent_of(pid) else {
             return;
         };
-        let Some(parent) = proc_.parent() else {
-            return;
-        };
-        if out.contains(&parent) {
-            // Already walked this ancestor (shared chain) — stop.
+        if Some(parent) == start || out.contains(&parent) {
+            // PID reuse can close a cycle through the starting process,
+            // which is not necessarily already present in the output.
             return;
         }
         out.push(parent);
@@ -628,6 +675,39 @@ mod tests {
         let mut ancestors = Vec::new();
         collect_ancestors(&sys, None, &mut ancestors);
         assert!(ancestors.is_empty());
+    }
+
+    #[test]
+    fn collect_ancestors_excludes_start_in_cycles() {
+        let start = sysinfo::Pid::from(100);
+        let parent = sysinfo::Pid::from(200);
+        let mut ancestors = Vec::new();
+        collect_ancestors_with(Some(start), &mut ancestors, |pid| {
+            Some(if pid == start { parent } else { start })
+        });
+        assert_eq!(ancestors, vec![parent]);
+
+        ancestors.clear();
+        collect_ancestors_with(Some(start), &mut ancestors, Some);
+        assert!(ancestors.is_empty());
+    }
+
+    #[test]
+    fn collect_ancestors_retains_chain_and_stops_at_shared_ancestor() {
+        let start = sysinfo::Pid::from(300);
+        let parent = sysinfo::Pid::from(200);
+        let grandparent = sysinfo::Pid::from(100);
+        let parent_of = |pid| match pid {
+            p if p == start => Some(parent),
+            p if p == parent => Some(grandparent),
+            _ => None,
+        };
+        let mut ancestors = Vec::new();
+        collect_ancestors_with(Some(start), &mut ancestors, parent_of);
+        assert_eq!(ancestors, vec![parent, grandparent]);
+
+        collect_ancestors_with(Some(start), &mut ancestors, parent_of);
+        assert_eq!(ancestors, vec![parent, grandparent]);
     }
 
     #[test]

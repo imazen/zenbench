@@ -9,6 +9,10 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
   ZENBENCH_NO_SAVE: "1"
+  # Functional/statistical fixtures exercise measurements intentionally without
+  # enforcing a core class. CPU-policy subprocess tests remove this opt-out and
+  # verify fail-closed defaults independently.
+  ZENBENCH_CPU_POLICY: unrestricted
 
 # Superseded runs only waste runner queue — particularly the macOS
 # jobs, which wait on GitHub's scarcest pool. Only the newest
@@ -62,6 +66,14 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Native Windows core/cache topology oracle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./examples/windows_topology_probe.ps1
+      - name: Native Windows process-mask worker oracle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./examples/windows_process_mask_probe.ps1
       - name: Unit tests (all features)
         run: cargo test --all-features
       - name: Unit tests (no default features)
@@ -111,6 +123,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          targets: x86_64-pc-windows-gnu
       - uses: Swatinem/rust-cache@v2
       - name: Check MSRV compiles (default features)
         run: cargo check
@@ -120,5 +134,7 @@ jobs:
       # in the README features table; all targets covers tests and benches.
       - name: Check MSRV compiles (all 1.85 features, all targets)
         run: cargo check --all-targets --features async,cpu-time,criterion-compat
+      - name: Check Windows MSRV compiles (all 1.85 features, all targets)
+        run: cargo check --locked --target x86_64-pc-windows-gnu --all-targets --features async,cpu-time,criterion-compat
       - name: Test on MSRV
         run: cargo test --lib

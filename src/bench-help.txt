@@ -1,0 +1,64 @@
+zenbench benchmark options
+
+Usage: cargo bench --bench NAME -- [OPTIONS]
+       ./retained-benchmark [OPTIONS]
+
+Start with --group=NAME for a quick edit loop. Default Iterate is exploratory:
+exit 0 means execution succeeded, not that performance is confirmed.
+
+  --help, -h                 Show this help before registering benchmarks
+  --group=NAME               Select matching groups
+  --mode=iterate|confirm|evidence
+                            Iterate: one process; group defaults 30 rounds,
+                            100 ms warmup per arm. Explicit group settings apply.
+                            Confirm: fixed rounds in five fresh processes.
+                            Evidence: Confirm protocol for one named matrix cell.
+  --workload-id=ID           Identify inputs/configuration; required to confirm
+  --scope=ID                 Name the hardware/workload cell; required for Evidence
+  --processes=N              Fresh confirmation processes (minimum 3; default 5)
+  --rounds=N                 Override rounds per group per process
+  --margin=PERCENT           Practical comparison margin (default 1)
+  --confidence=FRACTION      Family confidence (default 0.95)
+  --timeout=SECONDS          Confirmation child deadline (default 300; excludes build)
+  --dry-run                  Resolve plan/groups/CPU/storage/hash without timed callbacks
+  --cpu-policy=auto|performance|efficiency|unrestricted
+  --cpu-set=IDS              Process set, e.g. 0,2-4; choose from zenbench cpu-info
+  --format=llm|json|csv|md|html
+  --save-baseline=NAME       Save initial baseline after complete confirmation
+  --baseline=NAME            Compare against a saved baseline
+  --max-regression=PERCENT   Saved-baseline margin; requires --baseline
+  --update-on-pass           Promote only after every required case confirms
+  --no-busy-gate             Exploration only; disables observations needed to confirm
+
+CLI > environment > Suite defaults. Plan environment variables: ZENBENCH_MODE,
+ZENBENCH_PROCESSES, ZENBENCH_ROUNDS, ZENBENCH_MARGIN, ZENBENCH_CONFIDENCE,
+ZENBENCH_WORKLOAD_ID, ZENBENCH_SCOPE, ZENBENCH_TIMEOUT. Placement variables:
+ZENBENCH_CPU_POLICY, ZENBENCH_CPU_SET. ZENBENCH_PIN is a scoped thread hint,
+not a boundary for existing external pools. Most options require --name=value.
+Legacy --best-of-passes=N, --mean-of-passes=N, --median-of-passes=N and the
+corresponding -of-processes flags are exploratory and cannot combine with Confirm.
+
+Did my edit help?
+  1. Verify output correctness; explore with --group=NAME.
+  2. Freeze candidate, inputs, margin and sampling plan before confirmation.
+  3. Inspect: --mode=confirm --workload-id=inputs-v1 --dry-run
+  4. Measure: --mode=confirm --workload-id=inputs-v1
+     Use --save-baseline=before on the control build, then --baseline=before
+     on the candidate with the same workload/settings and compatible placement.
+     --update-on-pass is explicit; a wide interval is inconclusive, not success.
+
+Confirmation exit 0: valid/non-inferior; 1: regression; 2: invalid/inconclusive.
+A one-arm initial baseline makes no relative performance claim. Fix invalid
+configuration/noise first; do not rerun until a favorable answer appears.
+
+On asymmetric or unknown topology, inspect zenbench cpu-info and launch through
+zenbench exec --help. macOS hints cannot guarantee P/E selection. Explicit
+unrestricted is for exploration only and cannot authorize baseline promotion.
+
+Raw evidence stays in ignored .zenbench/data (ZENBENCH_DATA_DIR overrides).
+Read saved packets: zenbench read FILE. Diff: zenbench compare BEFORE AFTER.
+Commit selected summaries: zenbench snapshot FILE --output benchmarks/baseline.csv
+Keep referenced raw objects in your artifact store; CSV alone cannot be compared.
+
+More offline guidance, retained builds and profiling limits: zenbench guide
+Archmage/magetypes optimization workflow: zenbench guide --topic simd

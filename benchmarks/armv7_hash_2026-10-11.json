@@ -1,0 +1,20 @@
+{
+  "source_parent": "dc4669b87757322cada94fc9bd1fb8eec4146475",
+  "command": "TMPDIR=/home/lilith/tmp run-heavy --mem 12G -- just protocol-cross-plan /home/lilith/tmp/zenbench-cross/cross",
+  "target": "armv7-unknown-linux-gnueabihf",
+  "method": "One already-built debug dry-run per variant under QEMU; command includes cross startup. Hash independently checked using Python hashlib over each exact binary. Wrapper RSS excludes the separately capped 6 GiB, 2 CPU container. Release profile unchanged.",
+  "measurements": [
+    {
+      "sha2_dev_optimization": 0,
+      "binary_sha256": "427789e986419c4e468f0a4f4afd814d371c06471d9c5b2e927cbb07ce4dbade",
+      "binary_bytes": 29297812,
+      "run_heavy": "run-heavy: done rc=0 7s | peak-RSS 0.10GiB | min-avail 26745MiB | peak-load 0.57"
+    },
+    {
+      "sha2_dev_optimization": 3,
+      "binary_sha256": "2f985710e57d6c6bd5edf5f330161e820711ed44efd55fee88933b5a0579d0fb",
+      "binary_bytes": 29268472,
+      "run_heavy": "run-heavy: done rc=0 1s | peak-RSS 0.10GiB | min-avail 26844MiB | peak-load 0.60"
+    }
+  ]
+}

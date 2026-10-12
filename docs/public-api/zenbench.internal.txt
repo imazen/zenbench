@@ -10,28 +10,48 @@
 ## summary
 #
 #   free functions                              4
-#   inherent methods                            4
-#   trait roster entries (type × trait)         3
+#   inherent methods                           15
+#   trait roster entries (type × trait)        11
 #
 # per-module pub lines:
-#   (root)                            5
+#   (root)                            7
 #   charts                            1
 #   criterion_compat                  1
 #   daemon                            1
+#   platform                          9
 
-## items (8 lines)
+## items (19 lines)
 
+pub fn BenchmarkMode::assert_fields_are_eq(&self)
 pub fn RoundSample::assert_fields_are_eq(&self)
+pub fn Verdict::assert_fields_are_eq(&self)
 pub fn charts::ChartOrientation::assert_fields_are_eq(&self)
 pub fn criterion_compat::Criterion::into_suite(self) -> Suite
 pub fn daemon::RunStatus::assert_fields_are_eq(&self)
 pub fn engine_new(Suite) -> engine::Engine
 pub fn parse_pass_args() -> core::option::Option<(usize, Aggregation)>
 pub fn parse_process_args() -> core::option::Option<(usize, Aggregation)>
+pub fn platform::AffinityError::assert_fields_are_eq(&self)
+pub fn platform::CoreClass::assert_fields_are_eq(&self)
+pub fn platform::CpuPlacement::assert_fields_are_eq(&self)
+pub fn platform::CpuPolicy::assert_fields_are_eq(&self)
+pub fn platform::CpuTopology::assert_fields_are_eq(&self)
+pub fn platform::PlacementStatus::assert_fields_are_eq(&self)
+pub fn platform::ThreadQos::assert_fields_are_eq(&self)
+pub fn platform::ThreadQosState::assert_fields_are_eq(&self)
+pub fn platform::TopologyKind::assert_fields_are_eq(&self)
 pub fn postprocess_result(&SuiteResult)
 
-## trait impls (3 types)
+## trait impls (11 types)
 
 Aggregation: TrivialClone
+BenchmarkMode: TrivialClone
+Verdict: TrivialClone
 charts::ChartOrientation: TrivialClone
 criterion_compat::BatchSize: TrivialClone
+platform::CpuPolicy: TrivialClone
+platform::CpuProbeConfig: TrivialClone
+platform::PlacementStatus: TrivialClone
+platform::ThreadQos: TrivialClone
+platform::ThreadQosState: TrivialClone
+platform::TopologyKind: TrivialClone

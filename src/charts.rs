@@ -346,6 +346,7 @@ mod tests {
 
     fn make_comp(name: &str, benches: Vec<BenchmarkResult>) -> ComparisonResult {
         ComparisonResult {
+            config: None,
             group_name: name.to_string(),
             benchmarks: benches,
             analyses: Vec::new(),
@@ -360,6 +361,7 @@ mod tests {
             expect_sub_ns: false,
             cold_start: false,
             iterations_per_sample: 100,
+            cpu_placement: None,
         }
     }
 

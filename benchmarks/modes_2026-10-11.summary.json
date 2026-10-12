@@ -1,0 +1,149 @@
+{
+  "timings": [
+    {
+      "case": "iterate",
+      "command": [
+        "/work/target/release/examples/protocol_fixture",
+        "--format=json"
+      ],
+      "exit": 0,
+      "expected": 0,
+      "wall_seconds": 0.7657671020133421
+    },
+    {
+      "case": "confirm",
+      "command": [
+        "/work/target/release/examples/protocol_fixture",
+        "--format=json",
+        "--mode=confirm"
+      ],
+      "exit": 1,
+      "expected": 1,
+      "wall_seconds": 3.827813619049266
+    },
+    {
+      "case": "evidence",
+      "command": [
+        "/work/target/release/examples/protocol_fixture",
+        "--format=json",
+        "--mode=evidence",
+        "--scope=single-cpu/fold-1024"
+      ],
+      "exit": 1,
+      "expected": 1,
+      "wall_seconds": 3.8756551039987244
+    },
+    {
+      "case": "dryrun",
+      "command": [
+        "/work/target/release/examples/protocol_fixture",
+        "--format=json",
+        "--mode=confirm",
+        "--dry-run"
+      ],
+      "exit": 0,
+      "expected": 0,
+      "wall_seconds": 0.003605123027227819
+    },
+    {
+      "case": "deadline",
+      "command": [
+        "/work/target/release/examples/protocol_fixture",
+        "--format=json",
+        "--mode=confirm",
+        "--timeout=1"
+      ],
+      "exit": 2,
+      "expected": 2,
+      "wall_seconds": 1.017604989989195
+    },
+    {
+      "case": "missing_scope",
+      "command": [
+        "/work/target/release/examples/protocol_fixture",
+        "--format=json",
+        "--mode=evidence"
+      ],
+      "exit": 2,
+      "expected": 2,
+      "wall_seconds": 0.0015146119985729456
+    },
+    {
+      "case": "disabled_gate",
+      "command": [
+        "/work/target/release/examples/protocol_fixture",
+        "--format=json",
+        "--mode=confirm"
+      ],
+      "exit": 2,
+      "expected": 2,
+      "wall_seconds": 0.03186655102763325
+    },
+    {
+      "case": "empty",
+      "command": [
+        "/work/target/release/examples/protocol_fixture",
+        "--format=json",
+        "--mode=confirm",
+        "--group=does-not-exist"
+      ],
+      "exit": 2,
+      "expected": 2,
+      "wall_seconds": 0.8191857779747806
+    },
+    {
+      "case": "typo",
+      "command": [
+        "/work/target/release/examples/protocol_fixture",
+        "--format=json",
+        "--mod=confirm"
+      ],
+      "exit": 2,
+      "expected": 2,
+      "wall_seconds": 0.004171809006948024
+    },
+    {
+      "case": "bad_format",
+      "command": [
+        "/work/target/release/examples/protocol_fixture",
+        "--format=jsno"
+      ],
+      "exit": 2,
+      "expected": 2,
+      "wall_seconds": 0.0013716269750148058
+    }
+  ],
+  "storage": [
+    {
+      "case": "iterate",
+      "pretty_json_bytes": 24426,
+      "gzip_bytes": 3003,
+      "snapshot_bytes": 826,
+      "analysis_bytes": 245,
+      "binary_sha256": "4ebd65e57b120255f4b21e6427518a6504b9a03b7d3d80c684ada965c705bc97",
+      "gzip_sha256": "a9b297f051999f57fcdd9da9eadc63864fd01716d95b12b13b5823d850bbe2a0",
+      "retained_rounds": 30
+    },
+    {
+      "case": "confirm",
+      "pretty_json_bytes": 146109,
+      "gzip_bytes": 9729,
+      "snapshot_bytes": 874,
+      "analysis_bytes": 532,
+      "binary_sha256": "4ebd65e57b120255f4b21e6427518a6504b9a03b7d3d80c684ada965c705bc97",
+      "gzip_sha256": "06ef12f58cedc5a1842cc521fb86f8d21422a5f7dacf46e034594a5105f8b656",
+      "retained_rounds": 150
+    },
+    {
+      "case": "evidence",
+      "pretty_json_bytes": 146069,
+      "gzip_bytes": 9668,
+      "snapshot_bytes": 895,
+      "analysis_bytes": 532,
+      "binary_sha256": "4ebd65e57b120255f4b21e6427518a6504b9a03b7d3d80c684ada965c705bc97",
+      "gzip_sha256": "5709ac5008283357243e3c27700d3d9f78f9e57d001d63197a95abba0e827f9f",
+      "retained_rounds": 150
+    }
+  ],
+  "scope": "One two-arm fold control on one Linux CPU; not a prediction for other workloads. All attempts are archived, including one noisy Evidence refusal."
+}

@@ -1,12 +1,20 @@
-// Without precise-timing or alloc-profiling, no unsafe is permitted anywhere.
-// With either feature, unsafe is denied (errors) but the timing/alloc modules
-// can override with #[allow(unsafe_code)] for TSC reads, asm fences, and GlobalAlloc.
+// Unsafe is forbidden except for the existing timing/allocation features and
+// the macOS affinity backend. Those configurations deny unsafe everywhere;
+// only the corresponding primitive modules have scoped allow attributes.
 #![cfg_attr(
-    not(any(feature = "precise-timing", feature = "alloc-profiling")),
+    not(any(
+        feature = "precise-timing",
+        feature = "alloc-profiling",
+        target_os = "macos"
+    )),
     forbid(unsafe_code)
 )]
 #![cfg_attr(
-    any(feature = "precise-timing", feature = "alloc-profiling"),
+    any(
+        feature = "precise-timing",
+        feature = "alloc-profiling",
+        target_os = "macos"
+    ),
     deny(unsafe_code)
 )]
 #![doc = include_str!("../README.md")]
@@ -28,19 +36,25 @@ pub mod exclusive;
 mod format;
 mod gate;
 mod html;
+mod inference;
 pub mod mcp;
+mod monitor;
 mod paths;
+mod plan;
 pub mod platform;
 pub mod quickchart;
 mod report;
 mod results;
 mod stats;
+mod storage;
 #[cfg(feature = "precise-timing")]
 mod timing;
 #[cfg(feature = "wasm")]
 pub mod wasm;
 
 pub use bench::{BenchGroup, Bencher, GroupConfig, Suite, Throughput};
+pub use inference::{ProcessComparison, Verdict};
+pub use plan::{BenchmarkMode, BenchmarkPlan, ExecutionRecord};
 
 /// Post-run processing: format output, save baseline, compare against baseline.
 ///
@@ -65,7 +79,13 @@ pub fn postprocess_result(result: &SuiteResult) {
             a.strip_prefix("--max-regression=")
                 .and_then(|v| v.parse().ok())
         })
-        .unwrap_or(5.0);
+        .unwrap_or_else(|| {
+            result
+                .execution
+                .as_ref()
+                .map(|e| e.plan.margin_pct)
+                .unwrap_or(5.0)
+        });
     let update_on_pass = args.iter().any(|a| a == "--update-on-pass");
 
     // Output in requested format (to stdout)
@@ -82,12 +102,17 @@ pub fn postprocess_result(result: &SuiteResult) {
         _ => {} // default: terminal report already printed to stderr
     }
 
-    // Save as named baseline
+    // An explicit initial baseline still requires complete confirmation evidence.
     if let Some(ref name) = save_baseline {
+        let issues = result.confirmation_issues();
+        if !issues.is_empty() {
+            eprintln!("[zenbench] cannot promote baseline: {}", issues.join("; "));
+            std::process::exit(2);
+        }
         match baseline::save_baseline(result, name) {
             Ok(path) => eprintln!("[zenbench] baseline '{name}' saved to {}", path.display()),
             Err(e) => {
-                eprintln!("[zenbench] error saving baseline '{name}': {e}");
+                eprintln!("[zenbench] error saving baseline: {e}");
                 std::process::exit(2);
             }
         }
@@ -97,30 +122,34 @@ pub fn postprocess_result(result: &SuiteResult) {
     if let Some(ref name) = baseline_name {
         match baseline::load_baseline(name) {
             Ok(saved) => {
+                if let Err(e) = saved.check_cpu_compatibility(result) {
+                    eprintln!("[zenbench] INVALID comparison: {e}");
+                    std::process::exit(2);
+                }
                 let comparison = baseline::compare_against_baseline(&saved, result, max_regression);
                 baseline::print_comparison_report(&comparison);
 
-                if comparison.regressions > 0 {
+                if comparison
+                    .confirmed
+                    .iter()
+                    .any(|c| c.verdict == Verdict::Regression)
+                {
                     eprintln!(
-                        "\n[zenbench] FAIL: {} regression(s) exceed {max_regression}% threshold",
-                        comparison.regressions,
+                        "[zenbench] FAIL: confirmed regression exceeds {max_regression}% margin"
                     );
                     std::process::exit(1);
-                } else {
+                }
+                if !comparison.promotable {
                     eprintln!(
-                        "\n[zenbench] PASS: no regressions exceed {max_regression}% threshold"
+                        "[zenbench] INCONCLUSIVE/INVALID: non-inferiority is not established for every required case"
                     );
-                    // --update-on-pass: overwrite baseline with current results
-                    if update_on_pass {
-                        match baseline::save_baseline(result, name) {
-                            Ok(path) => eprintln!(
-                                "[zenbench] baseline '{name}' updated (--update-on-pass) → {}",
-                                path.display()
-                            ),
-                            Err(e) => {
-                                eprintln!("[zenbench] warning: failed to update baseline: {e}");
-                            }
-                        }
+                    std::process::exit(2);
+                }
+                eprintln!("[zenbench] PASS: non-inferiority established within {max_regression}%");
+                if update_on_pass {
+                    if let Err(e) = baseline::save_baseline(result, name) {
+                        eprintln!("[zenbench] cannot update baseline: {e}");
+                        std::process::exit(2);
                     }
                 }
             }
@@ -135,6 +164,33 @@ pub fn postprocess_result(result: &SuiteResult) {
     if let Some(path) = daemon::result_path_from_env() {
         if let Err(e) = result.save(&path) {
             eprintln!("[zenbench] error saving results: {e}");
+            std::process::exit(2);
+        }
+    }
+    if result
+        .execution
+        .as_ref()
+        .is_some_and(|e| e.plan.mode != BenchmarkMode::Iterate)
+        && std::env::var("ZENBENCH_SUBPROCESS").as_deref() != Ok("1")
+    {
+        let issues = result.confirmation_issues();
+        if !issues.is_empty() {
+            eprintln!("[zenbench] INVALID confirmation: {}", issues.join("; "));
+            std::process::exit(2);
+        }
+        if result
+            .process_comparisons
+            .iter()
+            .any(|c| c.verdict == Verdict::Regression)
+        {
+            std::process::exit(1);
+        }
+        if result
+            .process_comparisons
+            .iter()
+            .any(|c| c.verdict == Verdict::Inconclusive)
+        {
+            std::process::exit(2);
         }
     }
 }
@@ -402,6 +458,31 @@ pub fn aggregate_results(runs: Vec<SuiteResult>, policy: Aggregation) -> SuiteRe
         return runs.into_iter().next().unwrap();
     }
 
+    for run in &runs[1..] {
+        runs[0]
+            .check_cpu_compatibility(run)
+            .unwrap_or_else(|e| panic!("{e}"));
+        let inventory = |r: &SuiteResult| {
+            r.comparisons
+                .iter()
+                .map(|g| {
+                    (
+                        g.group_name.clone(),
+                        g.benchmarks
+                            .iter()
+                            .map(|b| b.name.clone())
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            inventory(&runs[0]),
+            inventory(run),
+            "cannot aggregate different benchmark inventories"
+        );
+    }
+
     // Collect per-(group, bench) the full list of per-run means.
     // Used by all policies: Best needs to find the winner; Mean and
     // Median rebuild the summary from this distribution; Best reports
@@ -443,11 +524,34 @@ pub fn aggregate_results(runs: Vec<SuiteResult>, policy: Aggregation) -> SuiteRe
     // Template = first run. Overwrite each bench's summary according
     // to the chosen policy.
     let mut out = runs[0].clone();
+    out.process_comparisons.clear();
+    if let Some(execution) = &mut out.execution {
+        execution.independent_processes = false;
+    }
+    out.incomplete = runs.iter().any(|r| r.incomplete);
+    out.run_id = RunId::generate();
+    out.total_time = runs.iter().map(|r| r.total_time).sum();
+    out.gate_wait_time = runs.iter().map(|r| r.gate_wait_time).sum();
+    out.gate_waits = runs.iter().map(|r| r.gate_waits).sum();
+    // Calibration is local to an execution. Each replicate retains its own.
+    out.calibration = None;
+    out.loop_overhead_ns = 0.0;
+    out.timer_resolution_ns = runs
+        .iter()
+        .map(|r| r.timer_resolution_ns)
+        .max()
+        .unwrap_or(0);
     out.unreliable = runs.iter().any(|run| run.unreliable);
-    for cmp in out.comparisons.iter_mut() {
+    for (index, cmp) in out.comparisons.iter_mut().enumerate() {
         // Even Best may select different runs for different arms. None of
         // the multi-run policies preserves a single paired round population.
         cmp.samples.clear();
+        cmp.analyses.clear();
+        cmp.completed_rounds = runs
+            .iter()
+            .map(|r| r.comparisons[index].completed_rounds)
+            .sum();
+        cmp.iterations_per_sample = 0;
         for bench in cmp.benchmarks.iter_mut() {
             let key = (cmp.group_name.clone(), bench.name.clone());
             let samples = match means.get(&key) {
@@ -485,8 +589,16 @@ pub fn aggregate_results(runs: Vec<SuiteResult>, policy: Aggregation) -> SuiteRe
             // The single-run bootstrap CI no longer describes the
             // distribution the reported mean came from in any policy.
             bench.mean_ci = None;
+            bench.cpu_summary = None;
+            bench.slope_ns = None;
+            bench.timer_ticks_per_sample = 0.0;
+            #[cfg(feature = "alloc-profiling")]
+            {
+                bench.alloc_stats = None;
+            }
         }
     }
+    out.replicates = runs;
     out
 }
 
@@ -635,6 +747,16 @@ pub fn parse_pass_args() -> Option<(usize, Aggregation)> {
 /// guard) or if no process flag is present.
 #[doc(hidden)]
 pub fn parse_process_args() -> Option<(usize, Aggregation)> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        print!("{}", include_str!("bench-help.txt"));
+        std::process::exit(0);
+    }
+    report::startup_guidance();
+    plan::validate_harness_args(&args).unwrap_or_else(|e| {
+        eprintln!("[zenbench] {e}; use --help for benchmark options and workflows");
+        std::process::exit(2);
+    });
     // Recursion guard: children spawned by run_processes set this.
     if std::env::var("ZENBENCH_SUBPROCESS").as_deref() == Ok("1") {
         return None;
@@ -683,10 +805,9 @@ pub fn parse_process_args() -> Option<(usize, Aggregation)> {
 /// Re-exec the current benchmark binary N times in separate OS processes
 /// and aggregate the results.
 ///
-/// Each child gets a fresh ASLR layout, CPU frequency state, scheduler
-/// affinity, and page cache — noise sources that in-process `run_passes`
-/// cannot reset. The child writes its `SuiteResult` to a temp JSON file
-/// via `ZENBENCH_RESULT_PATH`; the parent reads it back and aggregates.
+/// Each child is a fresh execution. This does not reset page caches or clocks,
+/// or guarantee independent noise/code layouts. Complete child packets are
+/// retained under the durable evidence root and included in the aggregate.
 ///
 /// # CLI flags
 ///
@@ -701,6 +822,31 @@ pub fn parse_process_args() -> Option<(usize, Aggregation)> {
 /// Composable with passes: `--best-of-processes=3 --best-of-passes=2`
 /// runs 3 OS processes, each doing 2 in-process passes. Total = 6 runs.
 pub fn run_processes(processes: usize, policy: Aggregation) -> SuiteResult {
+    report::startup_guidance();
+    let plan = BenchmarkPlan::default().resolve().unwrap_or_else(|e| {
+        eprintln!("[zenbench] invalid benchmark plan: {e}");
+        std::process::exit(2);
+    });
+    run_processes_planned(processes, policy, plan)
+}
+
+fn run_processes_planned(
+    processes: usize,
+    policy: Aggregation,
+    mut plan: BenchmarkPlan,
+) -> SuiteResult {
+    plan.processes = processes;
+    plan.validate().unwrap_or_else(|e| {
+        eprintln!("[zenbench] invalid benchmark plan: {e}");
+        std::process::exit(2);
+    });
+    if plan.mode != BenchmarkMode::Iterate {
+        assert!(
+            matches!(policy, Aggregation::Mean),
+            "confirmation requires mean aggregation of independent processes"
+        );
+    }
+    let supervisor_start = std::time::Instant::now();
     let exe = std::env::current_exe().unwrap_or_else(|e| {
         eprintln!("[zenbench] error: cannot determine current executable: {e}");
         std::process::exit(2);
@@ -738,36 +884,103 @@ pub fn run_processes(processes: usize, policy: Aggregation) -> SuiteResult {
     };
 
     // Exchange files live under <target>/zenbench/proc, not the temp dir.
-    let proc_dir = paths::target_zenbench_dir().join("proc");
-    let _ = std::fs::create_dir_all(&proc_dir);
+    let proc_dir = storage::prepare_dir()
+        .expect("cannot prepare process evidence")
+        .join("processes")
+        .join(&run_id);
+    std::fs::create_dir_all(&proc_dir).expect("cannot create process evidence directory");
     let temp_paths: Vec<std::path::PathBuf> = (0..processes)
-        .map(|i| proc_dir.join(format!("zenbench-proc-{run_id}-{i}.json")))
+        .map(|i| proc_dir.join(format!("{i}.json.gz")))
         .collect();
 
+    let manifest_path = proc_dir.join("experiment.json");
+    let mut manifest = serde_json::json!({
+        "zenbench_experiment": 1,
+        "plan": plan,
+        "binary_sha256": storage::binary_digest().expect("cannot hash executable"),
+        "status": "running",
+        "attempts": (0..processes).map(|i| serde_json::json!({
+            "index": i, "status": "planned", "result": format!("{i}.json.gz"),
+            "stderr": format!("{i}.stderr.txt")
+        })).collect::<Vec<_>>()
+    });
+    let write_manifest = |manifest: &serde_json::Value| {
+        storage::atomic_write(
+            &manifest_path,
+            &serde_json::to_vec(manifest).expect("manifest serializes"),
+        )
+        .expect("cannot retain experiment manifest");
+    };
+    write_manifest(&manifest);
     let mut results: Vec<SuiteResult> = Vec::with_capacity(processes);
     for (i, path) in temp_paths.iter().enumerate() {
         eprintln!("[zenbench] process {}/{processes}", i + 1);
-        let status = std::process::Command::new(&exe)
+        let log_path = proc_dir.join(format!("{i}.stderr.txt"));
+        let log = std::fs::File::create(&log_path).expect("cannot retain child stderr");
+        let mut command = std::process::Command::new(&exe);
+        command
             .args(&child_args)
             .env("ZENBENCH_SUBPROCESS", "1")
             .env("ZENBENCH_RESULT_PATH", path)
             .env("ZENBENCH_LAUNCHER_PIDS", &launcher_pids)
+            .env("ZENBENCH_MODE", plan.mode.to_string())
+            .env("ZENBENCH_PROCESSES", processes.to_string())
+            .env("ZENBENCH_MARGIN", plan.margin_pct.to_string())
+            .env("ZENBENCH_CONFIDENCE", plan.confidence.to_string())
+            .env("ZENBENCH_TIMEOUT", plan.timeout.as_secs().to_string())
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::inherit())
-            .status();
+            .stderr(log);
+        if let Some(rounds) = plan.rounds {
+            command.env("ZENBENCH_ROUNDS", rounds.to_string());
+        }
+        if let Some(id) = &plan.workload_id {
+            command.env("ZENBENCH_WORKLOAD_ID", id);
+        }
+        if let Some(scope) = &plan.scope {
+            command.env("ZENBENCH_SCOPE", scope);
+        }
+        eprintln!("[zenbench] child log → {}", log_path.display());
+        manifest["attempts"][i]["status"] = "running".into();
+        write_manifest(&manifest);
+        let status = command.spawn().and_then(|mut child| {
+            loop {
+                if let Some(status) = child.try_wait()? {
+                    return Ok(status);
+                }
+                if supervisor_start.elapsed() >= plan.timeout {
+                    child.kill()?;
+                    let _ = child.wait();
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "experiment deadline exceeded; retained partial evidence",
+                    ));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        });
 
+        manifest["attempts"][i]["elapsed_supervisor_seconds"] =
+            supervisor_start.elapsed().as_secs_f64().into();
+        manifest["attempts"][i]["status"] = if status.as_ref().is_ok_and(|s| s.success()) {
+            "completed"
+        } else {
+            "failed"
+        }
+        .into();
+        if manifest["attempts"][i]["status"] == "failed" {
+            manifest["status"] = "failed".into();
+        }
+        write_manifest(&manifest);
         match status {
             Ok(s) if s.success() => {}
             Ok(s) => {
                 eprintln!("[zenbench] process {} exited with {s}", i + 1);
-                cleanup_temp(&temp_paths);
-                std::process::exit(1);
+                std::process::exit(2);
             }
             Err(e) => {
                 eprintln!("[zenbench] failed to spawn process {}: {e}", i + 1);
-                cleanup_temp(&temp_paths);
-                std::process::exit(1);
+                std::process::exit(2);
             }
         }
 
@@ -775,15 +988,32 @@ pub fn run_processes(processes: usize, policy: Aggregation) -> SuiteResult {
             Ok(r) => results.push(r),
             Err(e) => {
                 eprintln!("[zenbench] process {} produced no results: {e}", i + 1);
-                cleanup_temp(&temp_paths);
-                std::process::exit(1);
+                std::process::exit(2);
             }
         }
     }
 
-    cleanup_temp(&temp_paths);
-
-    let aggregated = aggregate_results(results, policy);
+    let mut aggregated = aggregate_results(results, policy);
+    aggregated.total_time = supervisor_start.elapsed();
+    if let Some(execution) = &mut aggregated.execution {
+        execution.independent_processes = true;
+        execution.process_id = std::process::id();
+        execution.plan = plan;
+    }
+    aggregated.process_comparisons = inference::confirm(&aggregated);
+    let reference = storage::persist(&aggregated).expect("cannot persist aggregate evidence");
+    manifest["status"] = if aggregated.confirmation_issues().is_empty() {
+        "complete"
+    } else {
+        "unconfirmed"
+    }
+    .into();
+    manifest["evidence_sha256"] = storage::evidence_digest(&aggregated)
+        .expect("cannot hash aggregate")
+        .into();
+    manifest["elapsed_supervisor_seconds"] = supervisor_start.elapsed().as_secs_f64().into();
+    write_manifest(&manifest);
+    eprintln!("[zenbench] aggregate evidence → {}", reference.display());
 
     // Print the aggregated report.
     report::print_header(
@@ -807,13 +1037,9 @@ pub fn run_processes(processes: usize, policy: Aggregation) -> SuiteResult {
         aggregated.unreliable,
     );
 
-    aggregated
-}
+    eprint!("{}", aggregated.process_report());
 
-fn cleanup_temp(paths: &[std::path::PathBuf]) {
-    for p in paths {
-        let _ = std::fs::remove_file(p);
-    }
+    aggregated
 }
 
 #[macro_export]

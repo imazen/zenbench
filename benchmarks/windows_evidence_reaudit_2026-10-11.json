@@ -1,0 +1,35 @@
+{
+  "audit": "independent recount of retained native evidence, no new Windows timing run",
+  "series": [
+    {
+      "mode": "tsc",
+      "archive_sha256": "b3c69b82b7b978584cf1b699e41c8c3ea553e6a1bc446e764850193c322dc61b",
+      "successful_processes": 20,
+      "refusals": 10,
+      "rounds": 12000,
+      "null_comparisons": 60,
+      "null_practical_significant": 0,
+      "null_ci_excludes_zero": 9,
+      "positive_controls": 120,
+      "positive_controls_detected": 120,
+      "gate_unobserved_rounds": 12000,
+      "verified_process_masks": 240,
+      "verified_worker_masks": 480
+    },
+    {
+      "mode": "qpc",
+      "archive_sha256": "9d24ce0651de4dbaea42dde35cc8e5ece9bba2fe963da7cc52dee0c206f1b205",
+      "successful_processes": 20,
+      "refusals": 10,
+      "rounds": 12000,
+      "null_comparisons": 60,
+      "null_practical_significant": 0,
+      "null_ci_excludes_zero": 5,
+      "positive_controls": 120,
+      "positive_controls_detected": 120,
+      "gate_unobserved_rounds": 12000,
+      "verified_process_masks": 240,
+      "verified_worker_masks": 480
+    }
+  ]
+}

@@ -1,0 +1,94 @@
+{
+  "cpu": "Apple M4 Pro",
+  "os": "macOS-27.0-arm64-arm-64bit-Mach-O",
+  "python_version": "3.14.7",
+  "workload": "PBKDF2-HMAC-SHA256, 4000 iterations, 32-byte output",
+  "warmup_min_thread_cpu_ns": 100000000,
+  "samples_per_worker": 12,
+  "worker_execution": "sequential fresh threads, one per QoS class",
+  "certifies_cpu_class": false,
+  "frequency_measured": false,
+  "native_max_rss_bytes": 22396928,
+  "native_hard_memory_cap": false,
+  "native_rss_admission_limit_bytes": 268435456,
+  "observations": [
+    {
+      "requested_qos": "user_interactive",
+      "requested_class": 33,
+      "before": {
+        "class": 21,
+        "relative_priority": 0
+      },
+      "set_return_code": 0,
+      "readback": {
+        "class": 33,
+        "relative_priority": 0
+      },
+      "warmup_cpu_ns": 100225292,
+      "warmup_wall_ns": 100226750,
+      "elapsed_per_call_ns": [
+        300125,
+        303083,
+        292542,
+        295042,
+        297750,
+        300875,
+        297000,
+        293417,
+        302459,
+        292042,
+        293625,
+        304125
+      ],
+      "median_ns": 297375.0,
+      "qos_after_samples": {
+        "class": 33,
+        "relative_priority": 0
+      },
+      "restore_return_code": 0,
+      "after_restore": {
+        "class": 21,
+        "relative_priority": 0
+      }
+    },
+    {
+      "requested_qos": "background",
+      "requested_class": 9,
+      "before": {
+        "class": 21,
+        "relative_priority": 0
+      },
+      "set_return_code": 0,
+      "readback": {
+        "class": 9,
+        "relative_priority": 0
+      },
+      "warmup_cpu_ns": 101606333,
+      "warmup_wall_ns": 101744209,
+      "elapsed_per_call_ns": [
+        1920250,
+        1904625,
+        1904125,
+        1989667,
+        1940708,
+        1917417,
+        1895417,
+        1898875,
+        1908875,
+        1981958,
+        1920958,
+        1899917
+      ],
+      "median_ns": 1913146.0,
+      "qos_after_samples": {
+        "class": 9,
+        "relative_priority": 0
+      },
+      "restore_return_code": 0,
+      "after_restore": {
+        "class": 21,
+        "relative_priority": 0
+      }
+    }
+  ]
+}

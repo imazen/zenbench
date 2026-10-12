@@ -1,0 +1,286 @@
+//! Default-policy negative controls run in fresh processes with CI opt-outs removed.
+use std::process::Command;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
+use std::time::Duration;
+use zenbench::platform::{CpuPolicy, PlacementStatus, check_cpu_placement};
+use zenbench::{GateConfig, run_gated};
+
+fn child_command(executable: impl AsRef<std::ffi::OsStr>) -> Command {
+    if let Some(runner) = std::env::var_os("ZENBENCH_AFFINITY_TEST_RUNNER") {
+        let mut child = Command::new(runner);
+        child.arg(executable);
+        child
+    } else {
+        Command::new(executable)
+    }
+}
+
+#[test]
+fn startup_guides_precede_refusal_once_and_stay_out_of_child_output() {
+    if std::env::var_os("ZENBENCH_GUIDANCE_TEST_CHILD").is_some() {
+        // The deliberately invalid policy refuses both attempts before callbacks.
+        for _ in 0..2 {
+            let result = std::panic::catch_unwind(|| {
+                run_gated(GateConfig::disabled(), |suite| {
+                    suite.group("must-not-run", |group| {
+                        group.bench("work", |_| panic!("callback must not run"));
+                    });
+                });
+            });
+            let error = result.expect_err("invalid CPU policy was accepted");
+            let message = error.downcast_ref::<String>().unwrap();
+            assert!(message.contains("invalid CPU policy"), "{message}");
+        }
+        return;
+    }
+    for supervised in [false, true] {
+        let mut child = child_command(std::env::current_exe().unwrap());
+        child
+            .args([
+                "--exact",
+                "startup_guides_precede_refusal_once_and_stay_out_of_child_output",
+                "--nocapture",
+            ])
+            .env("ZENBENCH_GUIDANCE_TEST_CHILD", "1")
+            .env("ZENBENCH_MODE", "iterate")
+            .env("ZENBENCH_CPU_POLICY", "invalid-test-policy")
+            .env_remove("ZENBENCH_PIN")
+            .env_remove("ZENBENCH_CPU_SET")
+            .env_remove("ZENBENCH_SUBPROCESS");
+        if supervised {
+            child.env("ZENBENCH_SUBPROCESS", "1");
+        }
+        let output = child.output().unwrap();
+        let text = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(
+            text.matches("[zenbench] Guides:").count(),
+            usize::from(!supervised)
+        );
+        if !supervised {
+            assert!(text.contains("zenbench guide --topic simd"), "{text}");
+            assert!(
+                text.find("[zenbench] Guides:").unwrap() < text.find("invalid CPU policy").unwrap()
+            );
+        }
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("[zenbench] Guides:"));
+    }
+}
+
+#[test]
+fn fresh_processes_use_independent_execution_orders() {
+    if std::env::var_os("ZENBENCH_ORDER_TEST_CHILD").is_some() {
+        let result = run_gated(GateConfig::disabled(), |suite| {
+            suite.cpu_policy(CpuPolicy::Unrestricted);
+            suite.group("execution-order", |group| {
+                group
+                    .config()
+                    .max_rounds(64)
+                    .auto_rounds(false)
+                    .warmup_time(Duration::ZERO)
+                    .sample_target_ns(10_000)
+                    .min_sample_ns(0);
+                for id in 0..3 {
+                    group.bench(format!("work-{id}"), move |b| {
+                        b.iter(|| std::hint::black_box(id));
+                    });
+                }
+            });
+        });
+        let orders: Vec<_> = result.comparisons[0]
+            .samples
+            .iter()
+            .map(|r| &r.execution_order)
+            .collect();
+        assert_eq!(orders.len(), 64);
+        println!("\nORDER={}", serde_json::to_string(&orders).unwrap());
+        return;
+    }
+    let mut schedules = Vec::new();
+    for _ in 0..3 {
+        let output = child_command(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "fresh_processes_use_independent_execution_orders",
+                "--nocapture",
+            ])
+            .env("ZENBENCH_ORDER_TEST_CHILD", "1")
+            .env("ZENBENCH_CPU_POLICY", "unrestricted")
+            .env("ZENBENCH_NO_SAVE", "1")
+            .env("ZENBENCH_NO_CALIBRATE", "1")
+            .env_remove("ZENBENCH_CPU_SET")
+            .env_remove("ZENBENCH_PIN")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "child failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        schedules.push(
+            stdout
+                .lines()
+                .find_map(|l| l.strip_prefix("ORDER="))
+                .unwrap()
+                .to_owned(),
+        );
+    }
+    // Matching all 64 permutations of three items is vanishingly unlikely.
+    // The previous constant seed reproduces this failure on every run.
+    assert_ne!(schedules[0], schedules[1]);
+    assert_ne!(schedules[0], schedules[2]);
+    assert_ne!(schedules[1], schedules[2]);
+}
+
+#[test]
+fn process_policy() {
+    if let Ok(mode) = std::env::var("ZENBENCH_CPU_TEST_MODE") {
+        let visited = Arc::new(AtomicUsize::new(0));
+        let seen = visited.clone();
+        let expected = check_cpu_placement();
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
+        let _pin = (mode == "caller_pin").then(|| {
+            let cpu = zenbench::platform::current_thread_affinity().unwrap()[0];
+            zenbench::platform::pin_current_thread(&[cpu]).unwrap()
+        });
+        let outcome = std::panic::catch_unwind(move || {
+            run_gated(GateConfig::disabled(), |suite| {
+                if mode == "suite_override" {
+                    suite.cpu_policy(CpuPolicy::Unrestricted);
+                }
+                suite.group("cpu-proof", |group| {
+                    group
+                        .config()
+                        .max_rounds(5)
+                        .auto_rounds(false)
+                        .warmup_time(Duration::ZERO)
+                        .sample_target_ns(10_000)
+                        .min_sample_ns(0);
+                    group.bench("work", move |b| {
+                        seen.fetch_add(1, Ordering::Relaxed);
+                        b.iter(|| std::hint::black_box(42));
+                    });
+                });
+            })
+        });
+        let permitted = expected.is_ok()
+            || std::env::var("ZENBENCH_CPU_TEST_MODE").unwrap() == "suite_override";
+        if permitted {
+            let result = outcome.unwrap();
+            assert!(visited.load(Ordering::Relaxed) > 0);
+            let placement = result.cpu_placement.as_ref().unwrap();
+            assert!(result.comparisons.iter().all(|c| {
+                c.cpu_placement.as_ref().is_some_and(|p| {
+                    p.status == placement.status && p.effective_cpus == placement.effective_cpus
+                })
+            }));
+            let rows = result.to_llm();
+            assert!(rows.contains("cpu_enforcement="));
+            assert!(rows.contains("pool_thread_count=unknown"));
+            if placement.status == PlacementStatus::Unrestricted {
+                assert!(rows.contains("UNVERIFIED_UNRESTRICTED"));
+                assert!(rows.contains("cpu_class_uniform=false"));
+            }
+            assert!(result.to_csv().contains("cpu_placement_evidence"));
+        } else {
+            assert!(
+                outcome.is_err(),
+                "default accepted unverified CPU placement"
+            );
+            assert_eq!(
+                visited.load(Ordering::Relaxed),
+                0,
+                "work ran before refusal"
+            );
+        }
+    } else {
+        for (mode, policy) in [
+            ("default", None),
+            ("caller_pin", None),
+            ("opt_out", Some("unrestricted")),
+            ("invalid", Some("fast")),
+            ("suite_override", None),
+        ] {
+            let executable = std::env::current_exe().unwrap();
+            let mut child = child_command(executable);
+            child
+                .args(["--exact", "process_policy", "--nocapture"])
+                .env("ZENBENCH_CPU_TEST_MODE", mode)
+                .env("ZENBENCH_NO_SAVE", "1")
+                .env("ZENBENCH_NO_CALIBRATE", "1")
+                .env_remove("ZENBENCH_CPU_POLICY")
+                .env_remove("ZENBENCH_CPU_SET")
+                .env_remove("ZENBENCH_PIN");
+            if let Some(policy) = policy {
+                child.env("ZENBENCH_CPU_POLICY", policy);
+            }
+            let output = child.output().unwrap();
+            assert!(
+                output.status.success(),
+                "{mode}:\n{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[test]
+fn suite_affinity_is_inherited_and_groups_can_override() {
+    let before = zenbench::platform::current_thread_affinity().unwrap();
+    let cpu = before[0];
+    let result = run_gated(GateConfig::disabled(), |suite| {
+        suite.cpu_policy(CpuPolicy::Unrestricted).affinity(&[cpu]);
+        for name in ["inherit", "override"] {
+            let expected = if name == "override" {
+                before.clone()
+            } else {
+                vec![cpu]
+            };
+            suite.group(name, |g| {
+                if name == "override" {
+                    g.affinity(&before);
+                }
+                g.config()
+                    .max_rounds(5)
+                    .auto_rounds(false)
+                    .warmup_time(Duration::ZERO)
+                    .sample_target_ns(10_000)
+                    .min_sample_ns(0);
+                g.bench("mask", move |b| {
+                    assert_eq!(
+                        zenbench::platform::current_thread_affinity().unwrap(),
+                        expected
+                    );
+                    b.iter(|| std::hint::black_box(42));
+                });
+            });
+        }
+    });
+    assert_eq!(result.comparisons.len(), 2);
+    assert_eq!(
+        zenbench::platform::current_thread_affinity().unwrap(),
+        before
+    );
+}
+
+#[cfg(feature = "cli")]
+#[test]
+fn launcher_helper_cannot_certify_an_opt_out() {
+    let output = child_command(env!("CARGO_BIN_EXE_zenbench"))
+        .args(["cpu-child", "this-program-must-never-be-launched"])
+        .env("ZENBENCH_CPU_POLICY", "unrestricted")
+        .env_remove("ZENBENCH_CPU_SET")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("launcher requires an enforced uniform process boundary")
+    );
+}

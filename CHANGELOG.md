@@ -8,8 +8,34 @@
 - Resource admission accounts for explicitly registered launcher/worker CPU ownership; foreign work and global RAM/temperature gates remain visible. A private development example reuses engine paired statistics for external-worker rounds (cca46093fe78).
 
 ### QUEUED BREAKING CHANGES
+- Local default becomes exploratory Iterate (30 rounds, 100 ms warmup per arm); baseline CLI promotion requires explicit fixed-process confirmation and rejects unknown flags, incomplete cases and inconclusive evidence (c60b7b62, ec0246cb).
+- Default CPU admission now refuses asymmetric or unknown topology without verified uniform process placement. Explicit `unrestricted` policy permits unverified runs and labels every result row (d151aac6).
 <!-- Breaking changes that will ship together in the next minor release.
      Add items here as you discover them. Do NOT ship these piecemeal — batch them. -->
+
+### Fixed
+- Measurement schedules now receive independent seeds across groups and fresh processes; recorded round orders preserve the realized schedule (b40ac4a3).
+- Strict Windows CPU placement now holds an inherited affinity-limited Job Object, preventing process-mask widening by benchmark code; actual-mask controls cover preexisting Rayon/ordinary threads and child processes (585b0f8d, 95e4042c).
+
+### Added
+- Surface general and SIMD guide commands on benchmark startup, once before configuration validation; bare CLI invocation and benchmark help also show the entry points.
+- `zenbench guide --topic simd` and a source-linked archmage/magetypes optimization workflow drawn from zenav1-svt probes: dispatch boundaries, differential correctness, assembly inspection and application confirmation.
+- Offline `zenbench guide`, workflow-oriented command help, and benchmark `--help` before registration; source-revision, retained-binary, provenance and profiling guidance.
+- Iterate/Confirm/Evidence plans, dry-run inspection, fixed-process paired/Welch inference, separate versioned reanalysis, and retained experiment/attempt manifests. CLI/environment override suite defaults. Independent SciPy controls and fail-closed promotion tests cover the decision contract (dfc72892, c60b7b62, 0acfd44a).
+- Background owner-aware resource observations remove per-round CPU-refresh sleeps; threaded groups retain checks and rounds record observation age.
+- Ignored durable gzip evidence, compact JSON saves, hash-verified references, and explicit `snapshot`/`archive` CLI commands for small version-control exports.
+- Multi-run results retain complete replicates; descriptive aggregates clear stale paired analyses and sum elapsed/resource accounting.
+- Reproducible defaults runtime/storage audit, aggregation counterexample, and proposed evidence/diff contract (98100750, e8921074).
+- Native Windows execution of the existing first-snapshot/load-gate regression, with retained resource and status evidence (32636ed2).
+- Native Windows fresh-process repeatability controls for integer/cache/Rayon workloads, identical work, known work increments, independent QPC batches, and resource-limit readback (fc757037).
+- Native Windows process-mask oracle with preexisting managed thread/pool negative controls, verified worker/process restoration, and separate real hybrid P/E observations.
+- Repeatable SSH transport for the native Windows topology oracle using existing credentials, optional relay/jump hosts, and trusted host pins.
+- Read-only PowerShell native Windows core/cache/group topology oracle, executed by Windows x64/ARM CI; it does not change affinity or supply the Rust backend's missing ARM topology.
+- Scoped macOS pthread QoS requests/readbacks and worker probe QoS records; separate 100 ms CPU warmup before probe samples and macOS startup calibration. Warmup and QoS do not certify core class or maximum frequency (cd44614f).
+- Observational CPU warmup probes callable on actual Rayon workers, fixed integer/cache batches and per-worker timing spread (7d15cacf); `cpu-info --probe` diagnoses new workers without certifying CPU placement (914111a9).
+- CPU topology/placement records, `Suite::cpu_policy`, `Suite::cpu_set`, and suite affinity defaults; per-row CPU evidence and incompatible-placement checks for aggregation/baselines (d151aac6).
+- `zenbench cpu-info` and `zenbench exec` verified launch control; Linux cpuset and supported Windows process-mask enforcement cover external pools. macOS class binding and Windows ARM/multiple processor groups fail closed (8e2d6334).
+- Scoped CPU affinity: `platform::pin_current_thread` / `AffinityGuard`, mask queries on Linux/Windows, `BenchGroup::affinity`, and cached `ZENBENCH_PIN` CPU lists/ranges. Group settings cover warmup, estimation, rounds, and zenbench-owned workers. macOS saves/restores an advisory Mach cache-sharing tag rather than binding CPU IDs; rejected hints return errors (ce74f0dc).
 
 ### Changed
 - **Nothing goes to the temp dir any more.** Auto-saved results move from `/tmp/zenbench/` to `<target>/zenbench/results/`, `--best-of-processes` exchange files to `<target>/zenbench/proc/`, and `self-compare`'s git worktree and builds to `<target>/zenbench/self-compare/`; the engine lock (`zenbench.lock`) and `exclusive::Lock::default_path()` move to the per-user cache dir (`~/.cache/zenbench/`, `%LOCALAPPDATA%\zenbench\`), so the rendezvous no longer follows `TMPDIR`. Versions up to 0.1.10 still lock in the temp dir, so mixed old/new runs on one box don't wait for each other until both sides upgrade (c62baca).
@@ -20,7 +46,6 @@
 ## [0.1.10] - 2026-10-06
 
 ### Fixed
-
 - Preserve global CPU-load checks when no worker PID inventory is supplied.
 
 - Exclude explicitly registered workers’ Linux tasks from rival counts without double-subtracting CPU usage.

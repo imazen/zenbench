@@ -868,170 +868,23 @@ For completeness — areas where zenbench leads:
 
 ## Baseline persistence and CI regression testing
 
-### The problem
+The current process-level confirmation policy is documented in
+[benchmark modes](docs/benchmark-modes.md), including assumptions and independent
+SciPy controls. Earlier round-level analyses in this document describe exploratory
+inference; they do not authorize baseline promotion.
 
-CI performance regression testing requires comparing the current
-commit's performance against a known-good reference. This means:
+Confirm/Evidence retain every fixed-plan child and raw round. Same-binary arms
+use independent process log ratios; historical baseline comparisons use Welch
+intervals on process log latencies. The practical margin and family confidence
+are recorded. No adaptive stopping or round trimming enters these decisions.
+CPU/resource uncertainty and incomplete inventories block promotion. Inconclusive
+intervals cannot update a baseline simply because regression is undetected.
 
-1. Storing benchmark results durably (not in `/tmp/`)
-2. Identifying results by commit, branch, or named tag
-3. Comparing new results against the stored baseline
-4. Alerting when performance degrades beyond a threshold
-5. Updating the baseline when changes are intentional
-
-zenbench already has the statistical machinery (PairedAnalysis, bootstrap
-CI, significance detection) and serialization (SuiteResult JSON). What's
-missing is the storage, identity, and workflow layer.
-
-### Design: named baselines
-
-**Storage location**: `.zenbench/baselines/` in the project directory.
-Each baseline is a `SuiteResult` JSON file named by its identifier:
-
-```
-.zenbench/baselines/
-  main.json           # latest results from main branch
-  v0.3.0.json         # release baseline
-  prod.json           # named tag for production reference
-```
-
-These are regular files that can be committed to git (for reproducibility
-and review) or gitignored (for large suites).
-
-**CLI commands**:
-
-```bash
-# Save current results as a named baseline
-cargo bench -- --save-baseline main
-
-# Compare against a saved baseline
-cargo bench -- --baseline main
-
-# Update baseline only if no regressions
-cargo bench -- --baseline main --update-on-pass
-
-# List saved baselines
-zenbench baseline list
-
-# Delete a baseline
-zenbench baseline delete old-baseline
-```
-
-**Behavior of `--baseline`**:
-
-When `--baseline main` is specified, zenbench:
-1. Runs the full benchmark suite (interleaved, converging)
-2. Loads `.zenbench/baselines/main.json`
-3. For each benchmark present in both, computes PairedAnalysis between
-   the baseline's per-round means and the new run's per-round means
-4. Reports using the same CI / significance / Cohen's d framework
-5. Exits with nonzero status if any significant regressions are detected
-
-**Threshold configuration**:
-
-```toml
-# .zenbench/config.toml (future)
-[thresholds]
-noise_threshold = 0.01        # ±1% noise gate (suppress tiny changes)
-max_regression_pct = 5.0      # fail CI if any benchmark regresses >5%
-significance_level = 0.95     # CI confidence level
-```
-
-Thresholds can also be set per-group in code:
-
-```rust
-group.config().noise_threshold(0.02);     // 2% for this group
-group.config().max_regression_pct(10.0);  // 10% for noisy benchmarks
-```
-
-### Comparison against saved baselines vs. interleaved comparison
-
-Saved baseline comparison is fundamentally weaker than interleaved
-comparison. The baseline and candidate ran at different times, on
-potentially different hardware, under different system conditions. The
-paired-difference statistical framework assumes the two measurements
-experienced similar conditions — which is true within an interleaved
-run but NOT across runs.
-
-**Mitigation strategies:**
-
-1. **Wider CIs for cross-run comparisons**: Apply an inflation factor
-   to the CI based on estimated cross-run variance. Store the baseline's
-   internal variance alongside its means — use it to widen the
-   comparison CI appropriately.
-2. **Require more evidence**: Use a stricter significance threshold
-   (99% instead of 95%) or larger noise threshold for cross-run
-   comparisons.
-3. **Calibration workloads**: See "Cross-machine comparability" below.
-4. **Prefer self-compare for PRs**: Use `self-compare` (interleaved,
-   same machine, same run) for PR checks. Use saved baselines only for
-   tracking trends on main.
-
-### CI workflow recommendations
-
-**PR checks** (blocking, high confidence):
-
-```yaml
-# Build both versions, interleave on same runner
-- run: cargo bench -- self-compare --ref origin/main --format=json
-  # Exits nonzero if significant regressions detected
-```
-
-This is the gold standard — interleaved, paired, same hardware, same
-thermal state. The only overhead is building twice.
-
-**Main branch tracking** (non-blocking, trend analysis):
-
-```yaml
-# Run benchmarks, save as baseline tagged by commit
-- run: cargo bench -- --save-baseline "commit-$(git rev-parse --short HEAD)"
-  # Also update the "main" baseline for PR comparisons
-- run: cp .zenbench/baselines/commit-*.json .zenbench/baselines/main.json
-```
-
-Over time this builds a time series suitable for change point detection
-(see below).
-
-**Release gates** (blocking, named baseline):
-
-```yaml
-- run: cargo bench -- --baseline release-v0.3.0 --max-regression-pct 3
-```
-
-### Implementation status — DONE
-
-All core baseline features are implemented:
-
-1. ✅ `--save-baseline=<name>`: Saves to `.zenbench/baselines/<name>.json`
-2. ✅ `--baseline=<name>`: Load, compare, exit 0/1/2
-3. ✅ `--update-on-pass`: Auto-ratchets baseline on clean runs
-4. ✅ `--max-regression=<pct>`: Configurable threshold (default 5%)
-5. ✅ `zenbench baseline list/show/delete`: CLI management
-6. ✅ Works with both `main!` and `criterion_main!` macros
-
-See REGRESSION-TESTING.md for complete user stories and CI workflows.
-
-### Cross-run statistical adjustment
-
-When comparing against a saved baseline (not interleaved), the paired
-assumptions break down. The two runs experienced different system
-states, so the difference distribution has higher variance than an
-interleaved comparison would measure.
-
-**Approach: variance inflation**
-
-Store the baseline's per-benchmark variance (from its original
-interleaved run). When comparing cross-run:
-
-1. Compute the new run's per-benchmark variance
-2. Estimate cross-run variance as `max(var_baseline, var_new)` plus
-   a configurable additive term (the "cross-run noise floor")
-3. Widen the CI by the ratio `sqrt(cross_run_var / interleaved_var)`
-4. Apply stricter significance threshold (99% CI instead of 95%)
-
-This is conservative — it reduces false positives from hardware
-fluctuations at the cost of missing small regressions. For catching
-small regressions, self-compare (interleaved) is the right tool.
+[Regression testing](REGRESSION-TESTING.md) owns CLI usage and exit semantics.
+[Storage](docs/result-storage.md) owns immutable gzip objects, versioned baseline
+references and compact selected Git snapshots. Reanalysis references the raw hash
+and never re-executes a benchmark. Historical comparisons do not replace randomized
+contemporaneous A/B blocks; `self-compare` remains exploratory.
 
 ## Cross-machine comparability
 

@@ -1,0 +1,9 @@
+{
+  "command": "just mac-affinity-probe mac",
+  "method": "Direct native Python ctypes oracle; same Mach ABI and calls as the Rust backend, not an execution of the compiled Rust crate",
+  "rust_source_commit": "2c577de7f2a47a425699d1bac22a960c7bd10431",
+  "rust_backend_sha256": "ee5164ec700b103f15f22a41fd8cb3bac1e60b1ea5e9dedc1a392c15a86e54b0",
+  "oracle_source": "examples/macos_affinity_probe.py in this commit",
+  "measured_date": "2026-10-11",
+  "remote_writes": "None; code executed from stdin with Python bytecode writes disabled"
+}

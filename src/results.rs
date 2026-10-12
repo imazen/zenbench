@@ -11,13 +11,15 @@ pub struct RunId(pub String);
 
 impl RunId {
     pub fn generate() -> Self {
-        // Timestamp-based ID with random suffix
+        use std::hash::{BuildHasher, Hasher};
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default();
-        // Use process ID for uniqueness within the same second
         let pid = std::process::id();
-        RunId(format!("{}-{:x}", now.as_secs(), pid))
+        let random = std::collections::hash_map::RandomState::new()
+            .build_hasher()
+            .finish();
+        RunId(format!("{:x}-{pid:x}-{random:016x}", now.as_nanos()))
     }
 }
 
@@ -112,6 +114,13 @@ pub struct RoundSample {
     /// or absent in historical evidence. This does not monitor the timed body.
     #[serde(default)]
     pub gate_clean: Option<bool>,
+    /// Age of the background observation used for the pre-round check.
+    /// None means no fresh background observation; not continuous quietness proof.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_observation_age_ns: Option<u64>,
+    /// Diagnostic values and admission reason for the cached pre-round observation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_observation: Option<String>,
     /// Actual iteration count shared by all benchmarks in this round.
     pub iterations: usize,
     /// Benchmark indices in their randomized execution order.
@@ -126,6 +135,12 @@ pub struct RoundSample {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ComparisonResult {
+    /// Resolved sampling settings; absent on historical/immediate-mode results.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<crate::GroupConfig>,
+    /// Process CPU-placement evidence. None means historical/unknown.
+    #[serde(default)]
+    pub cpu_placement: Option<crate::platform::CpuPlacement>,
     pub group_name: String,
     pub benchmarks: Vec<BenchmarkResult>,
     /// Paired analyses: (baseline_name, candidate_name, analysis).
@@ -169,11 +184,24 @@ pub struct ComparisonResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct SuiteResult {
+    /// Resolved measurement intent and executed binary identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<crate::ExecutionRecord>,
+    /// Inference across independent process populations, separate from round analyses.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub process_comparisons: Vec<crate::ProcessComparison>,
+    /// Process CPU-placement evidence. None never certifies uniform placement.
+    #[serde(default)]
+    pub cpu_placement: Option<crate::platform::CpuPlacement>,
     pub run_id: RunId,
     pub timestamp: String,
     pub git_hash: Option<String>,
     pub ci_environment: Option<String>,
     pub comparisons: Vec<ComparisonResult>,
+    /// Original runs underlying a descriptive multi-run aggregate. Process/pass
+    /// boundaries and raw rounds remain available; aggregate rows are not paired rounds.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub replicates: Vec<SuiteResult>,
     /// Deprecated — always empty. `suite.bench()` now creates single-benchmark
     /// groups in `comparisons`. Kept for API and serde compatibility.
     #[deprecated(
@@ -188,6 +216,9 @@ pub struct SuiteResult {
     #[serde(with = "duration_serde")]
     pub gate_wait_time: Duration,
     pub unreliable: bool,
+    /// A checkpoint from an interrupted/running attempt, never completed evidence.
+    #[serde(default)]
+    pub incomplete: bool,
     /// Timer resolution in nanoseconds (measured at startup).
     #[serde(default)]
     pub timer_resolution_ns: u64,
@@ -211,35 +242,243 @@ impl Default for SuiteResult {
     #[allow(deprecated)] // standalones field kept for serde compat
     fn default() -> Self {
         Self {
+            execution: None,
+            process_comparisons: Vec::new(),
             run_id: RunId(String::new()),
             timestamp: String::new(),
             git_hash: None,
             ci_environment: None,
             comparisons: Vec::new(),
+            replicates: Vec::new(),
             standalones: Vec::new(),
             total_time: Duration::ZERO,
             gate_waits: 0,
             gate_wait_time: Duration::ZERO,
             unreliable: false,
+            incomplete: false,
             timer_resolution_ns: 0,
             loop_overhead_ns: 0.0,
             testbed: None,
             calibration: None,
+            cpu_placement: None,
         }
     }
 }
 
 impl SuiteResult {
-    /// Save results to a JSON file.
-    pub fn save(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
-        let json = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
-        std::fs::write(path, json)
+    /// Reasons this packet cannot support confirmation or baseline promotion.
+    pub fn confirmation_issues(&self) -> Vec<String> {
+        let mut issues = crate::inference::issues(self);
+        if issues.is_empty() {
+            let expected = self
+                .replicates
+                .first()
+                .map(|r| {
+                    r.comparisons
+                        .iter()
+                        .map(|g| g.analyses.len())
+                        .sum::<usize>()
+                })
+                .unwrap_or(0);
+            if crate::inference::confirm(self).len() != expected {
+                issues.push("one or more process intervals are numerically unresolved".into());
+            }
+        }
+        issues
     }
 
-    /// Load results from a JSON file.
+    /// Process-level inference rendered from the same decisions used by CI/JSON.
+    pub fn process_report(&self) -> String {
+        use std::fmt::Write;
+        let mut out = String::new();
+        for comparison in &self.process_comparisons {
+            let _ = writeln!(
+                out,
+                "process_comparison group={:?} baseline={:?} candidate={:?} estimate={:+.4}% interval=[{:+.4}%,{:+.4}%] verdict={} processes={}/{} method={}",
+                comparison.group,
+                comparison.baseline,
+                comparison.candidate,
+                comparison.estimate_pct,
+                comparison.lower_pct,
+                comparison.upper_pct,
+                comparison.verdict,
+                comparison.baseline_processes,
+                comparison.candidate_processes,
+                comparison.method
+            );
+        }
+        out
+    }
+    /// Refuse aggregation/baseline comparisons across differing CPU boundaries.
+    /// Two historical results are comparable with unknown placement; they do
+    /// not acquire certification by being compared.
+    pub fn check_cpu_compatibility(&self, other: &Self) -> Result<(), String> {
+        let compatible =
+            |a: &Option<crate::platform::CpuPlacement>,
+             b: &Option<crate::platform::CpuPlacement>| match (a, b) {
+                (None, None) => true,
+                (Some(a), Some(b)) => a.compatible(b),
+                _ => false,
+            };
+        if !compatible(&self.cpu_placement, &other.cpu_placement) {
+            return Err(
+                "CPU placement differs or is missing from one run; comparison/aggregation refused"
+                    .into(),
+            );
+        }
+        for group in &self.comparisons {
+            if let Some(previous) = other
+                .comparisons
+                .iter()
+                .find(|c| c.group_name == group.group_name)
+            {
+                if !compatible(&group.cpu_placement, &previous.cpu_placement) {
+                    return Err(format!(
+                        "CPU placement differs in group {:?}; comparison/aggregation refused",
+                        group.group_name
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn cpu_evidence(&self, comp: Option<&ComparisonResult>) -> String {
+        let placement = comp.map_or(self.cpu_placement.as_ref(), |c| c.cpu_placement.as_ref())
+            .map(|placement| placement.llm())
+            .unwrap_or_else(|| "cpu_placement=LEGACY_UNKNOWN cpu_class_uniform=unknown cpu_enforcement=unknown pool_thread_count=unknown".into());
+        let mode = self
+            .execution
+            .as_ref()
+            .map(|e| e.plan.mode.to_string())
+            .unwrap_or_else(|| "legacy".into());
+        let status = if self
+            .execution
+            .as_ref()
+            .is_some_and(|e| e.plan.mode == crate::BenchmarkMode::Iterate)
+        {
+            "exploratory"
+        } else if !self.process_comparisons.is_empty() {
+            "process_analysis"
+        } else {
+            "unconfirmed"
+        };
+        format!("mode={mode} inference={status} {placement}")
+    }
+    /// Atomically save compact JSON, compressed when the filename ends in `.gz`.
+    pub fn save(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
+        crate::storage::save(self, path.as_ref())
+    }
+
+    /// Load JSON, gzip JSON, or an immutable evidence reference.
     pub fn load(path: impl AsRef<Path>) -> std::io::Result<Self> {
-        let json = std::fs::read_to_string(path)?;
-        serde_json::from_str(&json).map_err(std::io::Error::other)
+        crate::storage::load(path.as_ref())
+    }
+
+    /// Recompute the recorded process analysis without running benchmarks.
+    /// The separate versioned artifact references a retained immutable raw packet.
+    pub fn save_analysis(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
+        crate::storage::persist(self)?;
+        let report = serde_json::json!({
+            "zenbench_analysis": 1,
+            "policy": "zenbench-process-v1",
+            "evidence_sha256": crate::storage::evidence_digest(self)?,
+            "validity_issues": self.confirmation_issues(),
+            "comparisons": crate::inference::confirm(self),
+        });
+        crate::storage::atomic_write(
+            path.as_ref(),
+            &serde_json::to_vec(&report).map_err(std::io::Error::other)?,
+        )
+    }
+
+    /// Stable CSV summary for an explicitly selected version-control snapshot.
+    /// Raw rounds and replicate packets are retained in evidence storage instead.
+    /// Values are descriptive; this export does not establish confirmation.
+    pub fn to_snapshot(&self) -> String {
+        let mut rows = self
+            .comparisons
+            .iter()
+            .flat_map(|group| group.benchmarks.iter().map(move |bench| (group, bench)))
+            .collect::<Vec<_>>();
+        rows.sort_by(|(ga, ba), (gb, bb)| {
+            (&ga.group_name, &ba.name).cmp(&(&gb.group_name, &bb.name))
+        });
+        let mut out = String::from(
+            "group,benchmark,mean_ns,mad_ns,n,scope,unreliable,mode,baseline,change_pct,lo_pct,hi_pct,verdict\n",
+        );
+        for (group, bench) in rows {
+            use std::fmt::Write;
+            let decision = self
+                .process_comparisons
+                .iter()
+                .find(|c| c.group == group.group_name && c.candidate == bench.name);
+            let scope = if self.replicates.is_empty() {
+                "within_process"
+            } else {
+                "aggregate"
+            };
+            let _ = writeln!(
+                out,
+                "{},{},{},{},{},{},{},{},{},{},{},{},{}",
+                csv_escape(&group.group_name),
+                csv_escape(&bench.name),
+                bench.summary.mean,
+                bench.summary.mad,
+                bench.summary.n,
+                scope,
+                self.unreliable,
+                self.execution
+                    .as_ref()
+                    .map(|e| e.plan.mode.to_string())
+                    .unwrap_or_else(|| "legacy".into()),
+                decision
+                    .map(|c| csv_escape(&c.baseline))
+                    .unwrap_or_default(),
+                decision
+                    .map(|c| c.estimate_pct.to_string())
+                    .unwrap_or_default(),
+                decision
+                    .map(|c| c.lower_pct.to_string())
+                    .unwrap_or_default(),
+                decision
+                    .map(|c| c.upper_pct.to_string())
+                    .unwrap_or_default(),
+                decision
+                    .map(|c| c.verdict.to_string())
+                    .unwrap_or_else(|| "unconfirmed".into())
+            );
+        }
+        out
+    }
+
+    /// Export a selected snapshot with an evidence hash, retaining its raw packet
+    /// in the ignored data directory first. Incomplete attempts are refused.
+    pub fn save_snapshot(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
+        if self.incomplete {
+            return Err(std::io::Error::other("cannot export an incomplete attempt"));
+        }
+        crate::storage::persist(self)?;
+        let hash = crate::storage::evidence_digest(self)?;
+        let object = crate::storage::data_dir()
+            .join("objects")
+            .join(format!("{hash}.json.gz"));
+        let usage = crate::storage::usage(&object);
+        let context = serde_json::json!({
+            "testbed": self.testbed,
+            "cpu_class": self.cpu_placement.as_ref().and_then(|p| p.core_class.as_deref()),
+            "cpu_set": self.cpu_placement.as_ref().map(|p| &p.effective_cpus),
+            "execution": self.execution.as_ref().map(|e| serde_json::json!({
+                "mode": e.plan.mode, "workload_id": e.plan.workload_id,
+                "scope": e.plan.scope, "binary_sha256": e.binary_sha256,
+                "confidence": e.plan.confidence, "margin_pct": e.plan.margin_pct,
+            })),
+        });
+        let text = format!(
+            "# zenbench-snapshot-v1 evidence_sha256={hash}\n# usage={usage}\n# context={context}\n{}",
+            self.to_snapshot()
+        );
+        crate::storage::atomic_write(path.as_ref(), text.as_bytes())
     }
 
     /// Print a human-readable report to stderr (with ANSI colors).
@@ -334,6 +573,7 @@ impl SuiteResult {
                     identity.push(format!("subgroup={}", llm_quote(sg)));
                 }
                 identity.push(format!("benchmark={}", llm_quote(&bench.name)));
+                identity.push(self.cpu_evidence(Some(comp)));
 
                 // Section 2: Comparison (the number you care about most)
                 let mut comparison = Vec::new();
@@ -377,7 +617,11 @@ impl SuiteResult {
                     format!("n={}", s.n),
                     format!("cv={:.1}%", s.cv() * 100.0),
                     format!("rounds={}", comp.completed_rounds),
-                    format!("calls={}", comp.iterations_per_sample),
+                    if self.replicates.is_empty() {
+                        format!("calls={}", comp.iterations_per_sample)
+                    } else {
+                        "calls=per_process".into()
+                    },
                 ];
                 if let Some(ci) = &bench.mean_ci {
                     meta.push(format!(
@@ -392,14 +636,21 @@ impl SuiteResult {
                         crate::format::format_ns(bench.cold_start_ns),
                     ));
                 }
-                if bench.timer_ticks_per_sample < 50.0 {
+                if !self.replicates.is_empty() {
+                    meta.push("timer_ticks=per_process".into());
+                } else if bench.timer_ticks_per_sample < 50.0 {
                     meta.push(format!(
                         "timer_ticks={:.0} (resolution-limited)",
                         bench.timer_ticks_per_sample,
                     ));
                 }
                 for (k, v) in &bench.tags {
-                    meta.push(format!("{k}={}", llm_quote(v)));
+                    let key = if k.starts_with("cpu_") || k == "pool_thread_count" {
+                        format!("tag_{k}")
+                    } else {
+                        k.clone()
+                    };
+                    meta.push(format!("{}={}", llm_quote(&key), llm_quote(v)));
                 }
 
                 // Allocation stats (when profiler is active)
@@ -429,6 +680,7 @@ impl SuiteResult {
             }
         }
 
+        out.push_str(&self.process_report());
         out
     }
 
@@ -438,6 +690,7 @@ impl SuiteResult {
 
         // Header
         out.push_str("# Benchmark Results\n\n");
+        out.push_str(&format!("CPU placement: `{}`\n\n", self.cpu_evidence(None)));
         if let Some(hash) = &self.git_hash {
             out.push_str(&format!("**git:** `{hash}`  \n"));
         }
@@ -450,6 +703,10 @@ impl SuiteResult {
 
         // Comparison groups
         for comp in &self.comparisons {
+            out.push_str(&format!(
+                "CPU placement: `{}`\n\n",
+                self.cpu_evidence(Some(comp))
+            ));
             // Single-bench group with matching name: compact one-liner
             let is_single =
                 comp.benchmarks.len() == 1 && comp.benchmarks[0].name == comp.group_name;
@@ -643,6 +900,11 @@ impl SuiteResult {
             out.push('\n');
         }
 
+        if !self.process_comparisons.is_empty() {
+            out.push_str("\n```text\n");
+            out.push_str(&self.process_report());
+            out.push_str("```\n");
+        }
         out
     }
 
@@ -657,6 +919,7 @@ impl SuiteResult {
             .to_string();
         #[cfg(feature = "alloc-profiling")]
         header.push_str(",allocs_per_iter,deallocs_per_iter,reallocs_per_iter,bytes_per_iter");
+        header.push_str(",cpu_placement_evidence,process_comparisons");
         header.push('\n');
         out.push_str(&header);
 
@@ -813,6 +1076,17 @@ impl SuiteResult {
                     #[cfg(feature = "alloc-profiling")]
                     out.push_str(",,,,");
                 }
+                out.push(',');
+                out.push_str(&csv_escape(&self.cpu_evidence(Some(comp))));
+                out.push(',');
+                let decisions = self
+                    .process_comparisons
+                    .iter()
+                    .filter(|c| c.group == comp.group_name && c.candidate == bench.name)
+                    .collect::<Vec<_>>();
+                out.push_str(&csv_escape(
+                    &serde_json::to_string(&decisions).expect("process comparisons serialize"),
+                ));
                 out.push('\n');
             }
         }
@@ -848,8 +1122,8 @@ pub use crate::format::format_ns;
 /// Quote a value for LLM key-value format. Wraps in double quotes if it
 /// contains spaces, quotes, or equals signs.
 fn llm_quote(s: &str) -> String {
-    if s.contains(' ') || s.contains('"') || s.contains('=') {
-        format!("\"{}\"", s.replace('"', "\\\""))
+    if s.chars().any(char::is_whitespace) || s.contains(['"', '=', '\\', '|']) {
+        serde_json::to_string(s).expect("serializing LLM string")
     } else {
         s.to_string()
     }
@@ -1046,6 +1320,22 @@ mod tests {
     }
 
     // --- to_llm() ---
+
+    #[test]
+    fn llm_aggregate_does_not_present_unavailable_metadata_as_zero() {
+        let mut child = make_suite_result_with_analyses();
+        for bench in &mut child.comparisons[0].benchmarks {
+            bench.timer_ticks_per_sample = 120.0;
+        }
+        let aggregate =
+            crate::aggregate_results(vec![child.clone(), child], crate::Aggregation::Mean);
+        let text = aggregate.to_llm();
+        assert!(text.contains("calls=per_process"));
+        assert!(text.contains("timer_ticks=per_process"));
+        assert!(!text.contains("calls=0"));
+        assert!(!text.contains("timer_ticks=0"));
+        assert!(!text.contains("resolution-limited"));
+    }
 
     #[test]
     fn llm_output_baseline_has_vs_base_eq_baseline() {
@@ -1402,6 +1692,100 @@ mod tests {
             json.contains(r#""standalones":[]"#),
             "standalones should serialize as empty array, got:\n{json}"
         );
+    }
+    #[test]
+    fn placement_metadata_prevents_mixing_and_preserves_legacy_unknown() {
+        use crate::platform::{
+            CoreClass, CpuPlacement, CpuPolicy, CpuTopology, PlacementStatus, TopologyKind,
+        };
+        let topology = CpuTopology {
+            kind: TopologyKind::Asymmetric,
+            classes: vec![
+                CoreClass {
+                    name: "P".into(),
+                    cpus: vec![0],
+                    logical_cpu_count: 1,
+                    performance_rank: Some(2),
+                },
+                CoreClass {
+                    name: "E".into(),
+                    cpus: vec![1],
+                    logical_cpu_count: 1,
+                    performance_rank: Some(1),
+                },
+            ],
+            source: "fixture".into(),
+            diagnostic: None,
+        };
+        let p = CpuPlacement {
+            policy: CpuPolicy::Auto,
+            topology,
+            status: PlacementStatus::EnforcedUniform,
+            core_class: Some("P".into()),
+            effective_cpus: vec![0],
+            requested_cpus: None,
+            enforcement: "cpuset".into(),
+            thread_affinity_requested: None,
+            thread_affinity_effective: None,
+        };
+        let mut e = p.clone();
+        e.core_class = Some("E".into());
+        e.effective_cpus = vec![1];
+        let mut bench = BenchmarkResult {
+            name: "work".into(),
+            ..Default::default()
+        };
+        bench.tags.push(("cpu_class_uniform".into(), "true".into()));
+        bench.tags.push((
+            "note\ncpu_class_uniform".into(),
+            "value\ncpu_class_uniform=true".into(),
+        ));
+        let comparison = ComparisonResult {
+            group_name: "proof".into(),
+            benchmarks: vec![bench],
+            cpu_placement: Some(p.clone()),
+            ..Default::default()
+        };
+        let run = SuiteResult {
+            cpu_placement: Some(p),
+            comparisons: vec![comparison],
+            ..Default::default()
+        };
+        let mut other = run.clone();
+        other.cpu_placement = Some(e);
+        assert!(run.check_cpu_compatibility(&other).is_err());
+        assert!(
+            std::panic::catch_unwind(|| crate::aggregate_results(
+                vec![run.clone(), other.clone()],
+                crate::Aggregation::Mean
+            ))
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| crate::baseline::compare_against_baseline(
+                &run, &other, 5.0
+            ))
+            .is_err()
+        );
+        other = run.clone();
+        other.comparisons[0]
+            .cpu_placement
+            .as_mut()
+            .unwrap()
+            .thread_affinity_effective = Some(vec![0]);
+        assert!(run.check_cpu_compatibility(&other).is_err());
+        other = run.clone();
+        other.comparisons[0].cpu_placement = None;
+        assert!(other.to_llm().contains("cpu_placement=LEGACY_UNKNOWN"));
+        assert!(!other.to_llm().contains("cpu_placement=enforced_uniform"));
+        assert!(run.to_llm().contains("tag_cpu_class_uniform="));
+        assert_eq!(run.to_llm().lines().count(), 1);
+        assert!(run.to_llm().contains("\\n"));
+        let mut encoded = serde_json::to_value(SuiteResult::default()).unwrap();
+        encoded.as_object_mut().unwrap().remove("cpu_placement");
+        let legacy: SuiteResult = serde_json::from_value(encoded).unwrap();
+        assert!(legacy.cpu_placement.is_none());
+        assert!(legacy.check_cpu_compatibility(&run).is_err());
     }
 }
 

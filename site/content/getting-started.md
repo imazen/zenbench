@@ -5,6 +5,11 @@ weight = 1
 
 ## Install
 
+Run `zenbench guide` for offline workflow guidance and
+`cargo bench --bench my_bench -- --help` for benchmark flags.
+The [workflow guide](https://github.com/imazen/zenbench/blob/main/docs/benchmark-workflows.md)
+covers source edits, retained builds, confirmation, CPU/Rayon setup and profiling.
+
 Add zenbench to your project:
 
 ```toml

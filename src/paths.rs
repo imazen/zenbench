@@ -1,4 +1,4 @@
-//! Where zenbench keeps files outside the project's `.zenbench/` directory.
+//! Cache/lock paths and target-directory test fixtures.
 //!
 //! - Auto-saved results and multi-process exchange files go under the cargo
 //!   target directory (`<target>/zenbench/`), next to the benchmark binary,
@@ -8,7 +8,9 @@
 //!
 //! Neither uses the system temp directory unless no home directory is known.
 
-use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::path::Path;
+use std::path::PathBuf;
 
 /// Per-user cache directory: `$XDG_CACHE_HOME/zenbench`, else
 /// `$HOME/.cache/zenbench` (`%LOCALAPPDATA%\zenbench` on Windows). Falls back
@@ -32,6 +34,7 @@ pub(crate) fn user_cache_dir() -> PathBuf {
 /// cargo's `CACHEDIR.TAG` (cargo writes one at the root of every target
 /// directory). Falls back to `<user cache>/results` for a binary that does
 /// not live under a cargo target directory.
+#[cfg(test)]
 pub(crate) fn target_zenbench_dir() -> PathBuf {
     if let Some(dir) = absolute_env("CARGO_TARGET_DIR") {
         return dir.join("zenbench");
@@ -46,6 +49,7 @@ pub(crate) fn target_zenbench_dir() -> PathBuf {
 }
 
 /// The cargo target directory containing `path`, found by its `CACHEDIR.TAG`.
+#[cfg(test)]
 fn cargo_target_of(path: &Path) -> Option<PathBuf> {
     path.ancestors()
         .skip(1)

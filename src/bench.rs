@@ -74,18 +74,61 @@ impl Throughput {
 
 /// A complete benchmark suite containing comparison groups.
 pub struct Suite {
+    pub(crate) plan: crate::BenchmarkPlan,
     pub(crate) groups: Vec<BenchGroup>,
     pub(crate) group_filter: Option<String>,
+    pub(crate) cpu_policy: Option<crate::platform::CpuPolicy>,
+    pub(crate) cpu_set: Option<Vec<usize>>,
+    pub(crate) affinity_cores: Option<Vec<usize>>,
     /// Pre-computed results from criterion-compat immediate mode.
     #[cfg(feature = "criterion-compat")]
     pub(crate) precomputed_comparisons: Vec<crate::results::ComparisonResult>,
 }
 
 impl Suite {
+    /// Set crate-wide experiment intent; CLI overrides environment, then this default.
+    pub fn mode(&mut self, mode: crate::BenchmarkMode) -> &mut Self {
+        self.plan.mode = mode;
+        self
+    }
+
+    /// Configure the recorded process count, workload identity, margin and deadline.
+    pub fn plan(&mut self) -> &mut crate::BenchmarkPlan {
+        &mut self.plan
+    }
+    /// Configure process CPU-class admission for all groups. Auto (default)
+    /// refuses unknown/asymmetric placement without a verified uniform boundary.
+    pub fn cpu_policy(&mut self, policy: crate::platform::CpuPolicy) -> &mut Self {
+        self.cpu_policy = Some(policy);
+        self
+    }
+
+    /// Require this exact process CPU set. Linux needs an enabled cpuset;
+    /// Windows applies a process mask. A thread affinity mask is insufficient.
+    pub fn cpu_set(&mut self, cores: &[usize]) -> &mut Self {
+        let mut cores = cores.to_vec();
+        cores.sort_unstable();
+        cores.dedup();
+        self.cpu_set = Some(cores);
+        self
+    }
+
+    /// Set scoped affinity for all groups, including previously registered ones.
+    /// Explicit group settings take precedence; external pools use the process
+    /// boundary rather than this calling-thread mask.
+    pub fn affinity(&mut self, cores: &[usize]) -> &mut Self {
+        self.affinity_cores = Some(cores.to_vec());
+        self
+    }
+
     pub fn new() -> Self {
         Self {
+            plan: crate::BenchmarkPlan::default(),
             groups: Vec::new(),
             group_filter: None,
+            cpu_policy: None,
+            cpu_set: None,
+            affinity_cores: None,
             #[cfg(feature = "criterion-compat")]
             precomputed_comparisons: Vec::new(),
         }
@@ -167,7 +210,30 @@ impl Suite {
     }
 
     /// Merge another suite's groups into this one.
-    pub fn merge(&mut self, other: Suite) {
+    pub fn merge(&mut self, mut other: Suite) {
+        for (name, same) in [
+            (
+                "CPU policy",
+                self.cpu_policy.is_none()
+                    || other.cpu_policy.is_none()
+                    || self.cpu_policy == other.cpu_policy,
+            ),
+            (
+                "CPU set",
+                self.cpu_set.is_none() || other.cpu_set.is_none() || self.cpu_set == other.cpu_set,
+            ),
+        ] {
+            assert!(same, "cannot merge suites with different {name}");
+        }
+        self.cpu_policy = self.cpu_policy.or(other.cpu_policy);
+        if self.cpu_set.is_none() {
+            self.cpu_set = other.cpu_set.take();
+        }
+        for group in &mut other.groups {
+            if group.affinity_cores.is_none() {
+                group.affinity_cores = other.affinity_cores.clone();
+            }
+        }
         self.groups.extend(other.groups);
         #[cfg(feature = "criterion-compat")]
         self.precomputed_comparisons
@@ -206,6 +272,7 @@ pub struct BenchGroup {
     pub(crate) baseline_name: Option<String>,
     /// Current subgroup label, applied to subsequent benchmarks.
     current_subgroup: Option<String>,
+    pub(crate) affinity_cores: Option<Vec<usize>>,
 }
 
 impl BenchGroup {
@@ -223,7 +290,28 @@ impl BenchGroup {
             throughput_unit: None,
             baseline_name: None,
             current_subgroup: None,
+            affinity_cores: None,
         }
+    }
+
+    /// Pin this group's coordinator and zenbench-created workers to logical CPUs.
+    ///
+    /// Overrides `ZENBENCH_PIN` for this group. Covers warmup, iteration estimation,
+    /// and all measured rounds, restoring the calling thread's previous affinity
+    /// afterward. Existing external thread pools are unaffected. Empty CPU sets
+    /// and OS failures abort the run before results are returned.
+    ///
+    /// ```rust,no_run
+    /// # use zenbench::prelude::*;
+    /// # let mut suite = Suite::new();
+    /// suite.group("pinned", |g| {
+    ///     g.affinity(&[2, 3]);
+    ///     g.bench("work", |b| b.iter(|| std::hint::black_box(42)));
+    /// });
+    /// ```
+    pub fn affinity(&mut self, cores: &[usize]) -> &mut Self {
+        self.affinity_cores = Some(cores.to_vec());
+        self
     }
 
     /// Add a benchmark to this comparison group.
@@ -304,6 +392,7 @@ impl BenchGroup {
                 let shared = setup();
                 let shared = Arc::new(shared);
                 let iterations = bencher.iterations;
+                let affinity = crate::platform::benchmark_affinity();
                 let barrier = Arc::new(Barrier::new(threads + 1)); // +1 for the timing thread
 
                 let mut handles = Vec::with_capacity(threads);
@@ -311,12 +400,22 @@ impl BenchGroup {
                     let shared = shared.clone();
                     let barrier = barrier.clone();
                     let work = work.clone();
+                    let affinity = affinity.clone();
                     handles.push(std::thread::spawn(move || {
+                        let pin = affinity
+                            .as_deref()
+                            .map(crate::platform::pin_current_thread)
+                            .transpose();
                         // Each thread gets its own bencher for iteration counting
                         let mut thread_bencher = Bencher::new(iterations);
                         barrier.wait(); // synchronized start
-                        work(&mut thread_bencher, &shared, tid);
+                        if pin.is_ok() {
+                            work(&mut thread_bencher, &shared, tid);
+                        }
                         barrier.wait(); // synchronized end
+                        // Participate in both barriers on failure so the coordinator
+                        // can join and abort without deadlocking or running unpinned.
+                        let _pin = pin.unwrap_or_else(|e| panic!("benchmark worker affinity: {e}"));
                     }));
                 }
 
@@ -372,17 +471,26 @@ impl BenchGroup {
             subgroup: self.current_subgroup.clone(),
             func: BenchFn::new(move |bencher: &mut Bencher| {
                 let iterations = bencher.iterations;
+                let affinity = crate::platform::benchmark_affinity();
                 let barrier = Arc::new(Barrier::new(threads + 1));
 
                 let mut handles = Vec::with_capacity(threads);
                 for tid in 0..threads {
                     let barrier = barrier.clone();
                     let work = work.clone();
+                    let affinity = affinity.clone();
                     handles.push(std::thread::spawn(move || {
+                        let pin = affinity
+                            .as_deref()
+                            .map(crate::platform::pin_current_thread)
+                            .transpose();
                         let mut thread_bencher = Bencher::new(iterations);
                         barrier.wait();
-                        work(&mut thread_bencher, tid);
+                        if pin.is_ok() {
+                            work(&mut thread_bencher, tid);
+                        }
                         barrier.wait();
+                        let _pin = pin.unwrap_or_else(|e| panic!("benchmark worker affinity: {e}"));
                     }));
                 }
 
@@ -511,7 +619,7 @@ impl BenchGroup {
 }
 
 /// Configuration for a benchmark group's execution.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct GroupConfig {
     /// Target number of measurement rounds.
@@ -658,9 +766,9 @@ pub struct GroupConfig {
 impl Default for GroupConfig {
     fn default() -> Self {
         Self {
-            max_rounds: 200,
+            max_rounds: 30,
             min_rounds: 5,
-            warmup_time: Duration::from_millis(500),
+            warmup_time: Duration::from_millis(100),
             max_time: Duration::from_secs(10),
             min_iterations: 1,
             max_iterations: 10_000_000,

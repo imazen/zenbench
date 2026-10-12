@@ -3,6 +3,20 @@ use crate::format::{format_ns, ns_unit, terminal_width};
 use crate::results::{BenchmarkResult, ComparisonResult, SuiteResult};
 use std::io::IsTerminal;
 
+/// Keep guidance visible to first-time callers without repeating it per pass
+/// or supervised child, or adding text to machine-readable stdout.
+pub(crate) fn startup_guidance() {
+    if std::env::var("ZENBENCH_SUBPROCESS").as_deref() == Ok("1") {
+        return;
+    }
+    static PRINTED: std::sync::Once = std::sync::Once::new();
+    PRINTED.call_once(|| {
+        eprintln!(
+            "[zenbench] Guides: zenbench guide | zenbench guide --topic simd | benchmark options: --help"
+        );
+    });
+}
+
 /// Report display style.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReportStyle {
@@ -128,8 +142,16 @@ pub fn print_footer(
 }
 
 /// Print a single group's report. Dispatches to table or tree style.
-pub fn print_group(comp: &ComparisonResult, _timer_res: u64) {
-    print_group_styled(comp, _timer_res, detect_style());
+pub fn print_group(comp: &ComparisonResult, timer_res: u64) {
+    print_group_styled(comp, timer_res, detect_style());
+}
+
+fn print_cpu_evidence(comp: &ComparisonResult) {
+    if let Some(placement) = &comp.cpu_placement {
+        eprintln!("[zenbench] {}", placement.llm());
+    } else {
+        eprintln!("[zenbench] cpu_placement=LEGACY_UNKNOWN cpu_class_uniform=unknown");
+    }
 }
 
 /// Print a single group in the specified style.
@@ -144,6 +166,7 @@ pub fn print_group_styled(comp: &ComparisonResult, timer_res: u64, style: Report
             print_report_body(&wrapper);
         }
         ReportStyle::Tree => {
+            print_cpu_evidence(comp);
             print_group_tree(comp, timer_res);
         }
     }
@@ -172,6 +195,7 @@ fn print_report_body(result: &SuiteResult) {
     let CYAN = pick("\x1b[36m", c);
 
     for comp in &result.comparisons {
+        print_cpu_evidence(comp);
         eprintln!();
 
         // Group header with separator line
@@ -929,6 +953,8 @@ fn print_report_body(result: &SuiteResult) {
 /// Print a complete report (header + all groups + footer).
 /// Used by SuiteResult::print_report() for batch mode.
 pub fn print_report(result: &SuiteResult) {
+    eprintln!("[zenbench] {}", result.cpu_evidence(None));
+    eprint!("{}", result.process_report());
     print_header(
         &result.run_id,
         result.git_hash.as_deref(),
