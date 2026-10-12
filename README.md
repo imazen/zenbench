@@ -84,6 +84,8 @@ intervals and fail-closed evidence checks.
 For the edit → confirm workflow, run `zenbench guide` or
 `cargo bench --bench my_bench -- --help`. The [workflow guide](docs/benchmark-workflows.md)
 covers source revisions, retained executables, CPU/Rayon setup, profiling and small Git exports.
+The [measurement protocol](docs/measurement-protocol.md) documents the statistical
+methods, busy-machine tradeoffs, limits, and measured wall-time/storage costs.
 
 ```toml
 # Cargo.toml
