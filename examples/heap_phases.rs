@@ -90,23 +90,6 @@ fn main() {
 
     let sequential = sequential_workers();
     let transferred = cross_thread_free();
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(2)
-        .build()
-        .unwrap();
-    pool.broadcast(|_| {}); // Existing pool, warmed before the phase.
-    let barrier = Barrier::new(2);
-    let phase = HeapPhase::begin().unwrap();
-    pool.broadcast(|_| {
-        let bytes = vec![7u8; 1024 * 1024];
-        std::hint::black_box(&bytes);
-        barrier.wait();
-        barrier.wait();
-        drop(bytes);
-    });
-    let rayon = phase.finish().unwrap();
-    assert!(rayon.peak_live_bytes >= rayon.entry_live_bytes + 2 * 1024 * 1024);
-
     // Successful growth/shrink and fallible requests preserve the live ledger.
     let mut data = vec![0u8; 128];
     let phase = HeapPhase::begin().unwrap();
@@ -136,6 +119,25 @@ fn main() {
         assert_eq!(after.failed_requests, before.failed_requests + 1);
     }
     drop(data);
+    // Start the asynchronous pool only after the exact single-thread ledger
+    // controls. Idle Rayon workers may still reclaim scheduler allocations.
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .unwrap();
+    pool.broadcast(|_| {}); // Existing pool, warmed before the phase.
+    let barrier = Barrier::new(2);
+    let phase = HeapPhase::begin().unwrap();
+    pool.broadcast(|_| {
+        let bytes = vec![7u8; 1024 * 1024];
+        std::hint::black_box(&bytes);
+        barrier.wait();
+        barrier.wait();
+        drop(bytes);
+    });
+    let rayon = phase.finish().unwrap();
+    assert!(rayon.peak_live_bytes >= rayon.entry_live_bytes + 2 * 1024 * 1024);
+
     println!(
         "{}",
         serde_json::json!({"transient":transient,"retained_free":retained_free,"overlapping":overlapping,"preexisting_rayon":rayon,"resize":resize,"sequential_workers":sequential,"cross_thread_free":transferred,"lifetime":HeapSnapshot::get().unwrap()})

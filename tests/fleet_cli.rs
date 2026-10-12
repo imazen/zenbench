@@ -2,6 +2,10 @@
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+// These tests execute real resource admission. Concurrent bundle hashing and
+// fixture processes are foreign load to one another; serialize the scenarios.
+static SCENARIO: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn cli() -> Command {
     let exe = env!("CARGO_BIN_EXE_zenbench");
     if let Some(runner) = std::env::var_os("ZENBENCH_AFFINITY_TEST_RUNNER") {
@@ -35,6 +39,7 @@ fn json_file(path: &Path, value: Value) {
 }
 #[test]
 fn capabilities_identify_actual_runner_and_preserve_placement_failure() {
+    let _scenario = SCENARIO.lock().unwrap();
     let output = cli()
         .arg("capabilities")
         .env("ZENBENCH_CPU_POLICY", "invalid")
@@ -53,6 +58,7 @@ fn capabilities_identify_actual_runner_and_preserve_placement_failure() {
 }
 #[test]
 fn bundles_survive_relocation_and_refuse_modified_bytes() {
+    let _scenario = SCENARIO.lock().unwrap();
     let root = root();
     std::fs::write(root.join("input"), b"fixed input").unwrap();
     let spec = json!({"schema":1,"target":"test-target","plan":{"input":"data/input"},"files":{"data/input":{"source":"input","executable":false}}});
@@ -172,6 +178,7 @@ fn run_observation(root: &Path) -> Command {
 }
 #[test]
 fn fresh_attempt_checks_output_and_retains_failures_and_cancellation() {
+    let _scenario = SCENARIO.lock().unwrap();
     // Serial to avoid one test's sleeping workload contending with another.
     for (kind, status) in [
         ("ok", "complete"),
@@ -213,6 +220,7 @@ fn fresh_attempt_checks_output_and_retains_failures_and_cancellation() {
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 #[test]
 fn os_high_water_is_named_and_separate_from_requested_heap() {
+    let _scenario = SCENARIO.lock().unwrap();
     let root = root();
     std::fs::create_dir(root.join("queue")).unwrap();
     observation_bundle(&root, "os_peak", "ok");
@@ -246,6 +254,7 @@ fn os_high_water_is_named_and_separate_from_requested_heap() {
 
 #[test]
 fn fleet_exports_are_compact_and_comparisons_verify_evidence() {
+    let _scenario = SCENARIO.lock().unwrap();
     let root = root();
     std::fs::create_dir(root.join("queue")).unwrap();
     observation_bundle(&root, "wall", "ok");
