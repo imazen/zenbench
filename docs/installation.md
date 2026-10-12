@@ -5,10 +5,11 @@ The default `cli` feature includes `pair`, `nice`, the CPU launcher, and offline
 workflow guides. No separate source checkout is needed to read those guides
 after installation.
 
-The new commands are currently unreleased. Install the review stack with:
+The new commands are merged into `main` and currently unreleased on crates.io.
+Install the current Git version with:
 
 ```sh
-cargo install --git https://github.com/imazen/zenbench --branch review/16-external-pair --locked --bin zenbench
+cargo install --git https://github.com/imazen/zenbench --locked --bin zenbench
 zenbench --help
 zenbench guide --topic pair
 ```
