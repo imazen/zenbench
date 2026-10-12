@@ -61,6 +61,8 @@ Retain build flags/toolchain, source state and input identity alongside evidence
 
 The full paper provides equations, timing boundaries, measured-cost provenance,
 source references, limitations and the issue 29 design review:
-https://github.com/imazen/zenbench/blob/main/docs/measurement-protocol.md
+https://github.com/imazen/zenbench/blob/main/METHODOLOGY.md
 
 Commands: zenbench guide | zenbench guide --topic simd | benchmark --help
+
+Earlier entry point: https://github.com/imazen/zenbench/blob/main/docs/measurement-protocol.md

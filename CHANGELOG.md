@@ -18,6 +18,7 @@
 - Strict Windows CPU placement now holds an inherited affinity-limited Job Object, preventing process-mask widening by benchmark code; actual-mask controls cover preexisting Rayon/ordinary threads and child processes (585b0f8d, 95e4042c).
 
 ### Added
+- Make the audited paper canonical at `METHODOLOGY.md`, retain the earlier entry point/references, and specify the issue 29 external-process runner, busy-system behavior and acceptance gates.
 - Audited measurement protocol with exact process inference, timing boundaries, shared-machine tradeoffs, an external-process A/B design review, and revision-scoped wall-time/storage evidence (bdb17c66). `zenbench guide --topic methodology` surfaces the assumptions and busy-machine workflow offline.
 - Surface general and SIMD guide commands on benchmark startup, once before configuration validation; bare CLI invocation and benchmark help also show the entry points.
 - `zenbench guide --topic simd` and a source-linked archmage/magetypes optimization workflow drawn from zenav1-svt probes: dispatch boundaries, differential correctness, assembly inspection and application confirmation.
