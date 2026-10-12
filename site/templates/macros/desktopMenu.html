@@ -1,0 +1,29 @@
+{# Project navigation uses native details/summary for keyboard-accessible links. #}
+{% macro menu(config, lang) %}
+<nav aria-label="Primary" class="w-full">
+    <ul class="menu w-full justify-end lg:menu-horizontal px-1">
+        {% for item in config.extra.nav %}
+        <li>
+            {% if item.type == "dropdown" %}
+            <details>
+                <summary>{{ item.name }}</summary>
+                <ul class="menu bg-base-100 border border-gray-500/15 rounded-box z-50 p-2">
+                    {% for member in item.members %}
+                    <li><a href="{% if member.url is matching('^https?://') %}{{ member.url | safe }}{% else %}{{ get_url(path=member.url) | safe }}{% endif %}">{{ member.name }}</a></li>
+                    {% endfor %}
+                </ul>
+            </details>
+            {% else %}
+            <a href="{% if item.url is matching('^https?://') %}{{ item.url | safe }}{% else %}{{ get_url(path=item.url) | safe }}{% endif %}">{{ item.name }}</a>
+            {% endif %}
+        </li>
+        {% endfor %}
+        <li>
+            <label class="btn btn-ghost">
+                <input type="checkbox" class="theme-controller" value="{{ config.extra.theme.default_theme_dark }}" aria-label="Toggle color theme">
+                Theme
+            </label>
+        </li>
+    </ul>
+</nav>
+{% endmacro menu %}

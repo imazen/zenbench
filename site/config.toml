@@ -3,7 +3,7 @@
 
 base_url = "https://imazen.github.io/zenbench"
 title = "zenbench"
-description = "Interleaved microbenchmarking for Rust"
+description = "Task guides for Rust benchmarks and command-line experiments"
 
 theme = "goyo"
 
@@ -32,21 +32,20 @@ include_content = true
 truncate_content_length = 200
 
 [extra]
+enable_custom_css = true
 footer_html = "<span>Powered by <a href='https://www.getzola.org'>Zola</a> and <a href='https://github.com/hahwul/goyo'>Goyo</a></span>"
 default_thumbnail = ""
 gtag = ""
 
 nav = [
-    { name = "Tutorial", url = "/getting-started", type = "url", icon = "fa-solid fa-rocket" },
-    { name = "CI Regression", url = "/ci-regression", type = "url", icon = "fa-solid fa-shield" },
-    { name = "Migration", url = "/migration", type = "url", icon = "fa-solid fa-arrow-right" },
-    { name = "Methodology", url = "/methodology", type = "url", icon = "fa-solid fa-microscope" },
-    { name = "Examples", url = "/examples", type = "url", icon = "fa-solid fa-chart-bar" },
+    { name = "Guides", url = "/guides/", type = "url", icon = "fa-solid fa-book" },
+    { name = "First benchmark", url = "/getting-started/", type = "url", icon = "fa-solid fa-rocket" },
+    { name = "Confirm / CI", url = "/ci-regression/", type = "url", icon = "fa-solid fa-shield" },
     { name = "Links", type = "dropdown", icon = "fa-solid fa-link", members = [
         { name = "GitHub", url = "https://github.com/imazen/zenbench", type = "url", icon = "fa-brands fa-github" },
         { name = "docs.rs", url = "https://docs.rs/zenbench", type = "url", icon = "fa-solid fa-book" },
         { name = "crates.io", url = "https://crates.io/crates/zenbench", type = "url", icon = "fa-solid fa-cube" },
-        { name = "HTML Report", url = "/example-report.html", type = "url", icon = "fa-solid fa-file-lines" },
+        { name = "Example report", url = "/example-report.html", type = "url", icon = "fa-solid fa-file-lines" },
     ] },
 ]
 
@@ -65,9 +64,13 @@ default_theme_light = "goyo-light"
 
 [extra.sidebar]
 expand_depth = 2
-disable_root_hide = false
+disable_root_hide = true
 enable_desktop_menu = true
 
 [extra.share]
 copy_url = true
 x = false
+
+# Goyo emits favicon URLs literally; include the Pages project prefix.
+[extra.favicon]
+base_path = "/zenbench/icons/"

@@ -1,0 +1,40 @@
+{% import "macros/desktopMenu.html" as desktop %}
+
+{% macro header(config, lang, page=false, section=false) %}
+<header class="navbar opacity-95 fixed top-0 left-0 right-0 z-50 h-16 border-b border-gray-500/15 backdrop-blur-3xl">
+    <div class="flex-none lg:hidden">
+        <button type="button" id="navigation-toggle" class="btn btn-square btn-ghost"
+                aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">
+            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="inline-block w-5 h-5 stroke-current">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+            </svg>
+        </button>
+    </div>
+    <div class="flex-1">
+        <a href="{{ get_url(path="/", lang=lang) }}" class="btn btn-ghost normal-case text-xl">{{ config.extra.logo.text }}</a>
+    </div>
+    <div class="flex-none hidden lg:flex">{{ desktop::menu(config=config, lang=lang) }}</div>
+</header>
+<script>
+(() => {
+    const button = document.getElementById('navigation-toggle');
+    const drawer = document.getElementById('my-drawer-2');
+    const update = () => {
+        button.setAttribute('aria-expanded', String(drawer.checked));
+        button.setAttribute('aria-label', drawer.checked ? 'Close navigation' : 'Open navigation');
+    };
+    button.addEventListener('click', () => {
+        drawer.checked = !drawer.checked;
+        update();
+    });
+    drawer.addEventListener('change', update);
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && drawer.checked) {
+            drawer.checked = false;
+            update();
+            button.focus();
+        }
+    });
+})();
+</script>
+{% endmacro header %}

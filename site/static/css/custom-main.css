@@ -1,0 +1,38 @@
+/* Keep long commands and schemas inside the reading column on narrow screens. */
+main.prose {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+main.prose pre {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-wrap: normal;
+}
+main.prose table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+}
+main.prose :is(a, button, input):focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 3px;
+}
+@media (max-width: 640px) {
+    .drawer-content > .p-8 {
+        padding: 1rem;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation: none !important;
+        transition: none !important;
+        scroll-behavior: auto !important;
+    }
+}
+/* Copy controls must be available to touch and keyboard users without hover. */
+main.prose pre {
+    padding-top: 3rem;
+}
+main.prose .copy-code-button {
+    visibility: visible;
+}
