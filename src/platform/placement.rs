@@ -2,14 +2,7 @@
 //! needed when the OS enforces a fixed process boundary.
 
 use serde::{Deserialize, Serialize};
-#[cfg(any(
-    target_os = "linux",
-    all(
-        target_os = "windows",
-        any(target_arch = "x86", target_arch = "x86_64")
-    ),
-    test
-))]
+#[cfg(any(target_os = "linux", target_os = "windows", test))]
 use std::collections::BTreeMap;
 #[cfg(target_os = "linux")]
 use std::path::{Path, PathBuf};
@@ -243,14 +236,7 @@ impl CpuPlacement {
     }
 }
 
-#[cfg(any(
-    target_os = "linux",
-    all(
-        target_os = "windows",
-        any(target_arch = "x86", target_arch = "x86_64")
-    ),
-    test
-))]
+#[cfg(any(target_os = "linux", target_os = "windows", test))]
 fn group_classes(
     entries: Vec<(usize, String, Option<u32>)>,
     source: &str,
@@ -412,6 +398,13 @@ pub fn detect_cpu_topology() -> CpuTopology {
                 "macOS performance levels unavailable; one calling CPU ({name}) cannot establish whole-machine topology"
             ));
         }
+    }
+    #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
+    {
+        return match super::windows_topology::discover() {
+            Ok(entries) => group_classes(entries, "windows_native_topology", false),
+            Err(error) => CpuTopology::unknown(error),
+        };
     }
     #[cfg(all(
         target_os = "windows",

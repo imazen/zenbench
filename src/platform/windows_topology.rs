@@ -113,6 +113,101 @@ pub(super) fn decode(mut data: &[u8]) -> Result<Vec<Entry>, String> {
         .collect()
 }
 
+#[cfg(all(target_os = "windows", target_arch = "aarch64"))]
+pub(super) fn discover() -> Result<Vec<Entry>, String> {
+    decode(&native::read().map_err(|e| format!("Windows topology query failed: {e}"))?)
+}
+
+// The allocation/retry protocol is safe and injectable for failure controls.
+fn read_with(
+    mut query: impl FnMut(Option<&mut [u64]>, &mut u32) -> std::io::Result<()>,
+) -> std::io::Result<Vec<u8>> {
+    use std::io;
+    const ERROR_INSUFFICIENT_BUFFER: i32 = 122;
+    let mut length = 0u32;
+    match query(None, &mut length) {
+        Err(error) if error.raw_os_error() == Some(ERROR_INSUFFICIENT_BUFFER) => {}
+        Err(error) => return Err(error),
+        Ok(()) => return Err(io::Error::other("unexpected topology sizing success")),
+    }
+    // Hotplug can change the size between calls. Bound allocation and retries.
+    for _ in 0..3 {
+        if !(8..=16 * 1024 * 1024).contains(&length) {
+            return Err(io::Error::other("invalid topology buffer size"));
+        }
+        let capacity = length as usize;
+        let words = capacity.div_ceil(8);
+        let mut storage = Vec::<u64>::new();
+        storage.try_reserve_exact(words).map_err(io::Error::other)?;
+        storage.resize(words, 0);
+        match query(Some(&mut storage), &mut length) {
+            Ok(()) => {
+                if length < 8 || length as usize > capacity {
+                    return Err(io::Error::other("invalid topology readback length"));
+                }
+                return Ok(storage
+                    .into_iter()
+                    .flat_map(u64::to_ne_bytes)
+                    .take(length as usize)
+                    .collect());
+            }
+            Err(error) if error.raw_os_error() == Some(ERROR_INSUFFICIENT_BUFFER) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::other(
+        "topology changed during every query attempt",
+    ))
+}
+
+// User-approved Windows topology primitive. Checked slices parse every byte;
+// no native structs, uninitialized memory or borrowed union views escape.
+#[cfg(all(target_os = "windows", target_arch = "aarch64"))]
+#[allow(unsafe_code)]
+mod native {
+    use std::ffi::c_void;
+    use std::io;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetLogicalProcessorInformationEx(
+            relationship: i32,
+            buffer: *mut c_void,
+            length: *mut u32,
+        ) -> i32;
+    }
+
+    pub(super) fn read() -> io::Result<Vec<u8>> {
+        super::read_with(|storage, length| {
+            let pointer = match storage {
+                Some(storage) => {
+                    // Defend the native boundary independently of the caller.
+                    if *length as usize > std::mem::size_of_val(storage) {
+                        return Err(io::Error::other("topology capacity exceeds allocation"));
+                    }
+                    storage.as_mut_ptr().cast()
+                }
+                None => {
+                    if *length != 0 {
+                        return Err(io::Error::other("nonzero null topology buffer"));
+                    }
+                    std::ptr::null_mut()
+                }
+            };
+            // SAFETY: the null/zero pair is the documented size query. Otherwise
+            // u64 storage supplies the ARM64 SDK's 8-byte alignment and at least
+            // `length` initialized writable bytes (checked above). The exclusive
+            // storage and length borrows remain live for the synchronous call;
+            // the OS retains neither pointer. RELATION_ALL is the SDK enum value.
+            if unsafe { GetLogicalProcessorInformationEx(0xffff, pointer, length) } != 0 {
+                Ok(())
+            } else {
+                Err(io::Error::last_os_error())
+            }
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,6 +221,76 @@ mod tests {
                     .map(move |i| u8::from_str_radix(&line[i..i + 2], 16).unwrap())
             })
             .collect()
+    }
+
+    #[test]
+    fn query_protocol_bounds_retries_and_validates_readback() {
+        use std::io;
+        let insufficient = || io::Error::from_raw_os_error(122);
+        let mut calls = 0;
+        let result = read_with(|buffer, length| {
+            calls += 1;
+            if buffer.is_none() {
+                *length = 8;
+                return Err(insufficient());
+            }
+            if calls == 2 {
+                *length = 16;
+                return Err(insufficient());
+            }
+            let buffer = buffer.unwrap();
+            assert_eq!(buffer.len(), 2);
+            buffer[0] = u64::from_ne_bytes([1; 8]);
+            buffer[1] = u64::from_ne_bytes([2; 8]);
+            *length = 12;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(calls, 3);
+        assert_eq!(result, [vec![1; 8], vec![2; 4]].concat());
+        let mut calls = 0;
+        assert!(
+            read_with(|_, length| {
+                calls += 1;
+                *length = 8;
+                Err(insufficient())
+            })
+            .is_err()
+        );
+        assert_eq!(calls, 4);
+        assert!(read_with(|_, _| Ok(())).is_err());
+        assert_eq!(
+            read_with(|_, _| Err(io::Error::from_raw_os_error(5)))
+                .unwrap_err()
+                .raw_os_error(),
+            Some(5)
+        );
+        for bad in [0, 7, 16 * 1024 * 1024 + 1, u32::MAX] {
+            let mut calls = 0;
+            assert!(
+                read_with(|_, length| {
+                    calls += 1;
+                    *length = bad;
+                    Err(insufficient())
+                })
+                .is_err()
+            );
+            assert_eq!(calls, 1);
+        }
+        for bad in [0, 7, 9] {
+            assert!(
+                read_with(|buffer, length| {
+                    if buffer.is_none() {
+                        *length = 8;
+                        Err(insufficient())
+                    } else {
+                        *length = bad;
+                        Ok(())
+                    }
+                })
+                .is_err()
+            );
+        }
     }
 
     #[test]

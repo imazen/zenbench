@@ -1,11 +1,12 @@
 // Unsafe is forbidden except for the existing timing/allocation features and
-// the macOS affinity backend. Those configurations deny unsafe everywhere;
+// the macOS affinity and Windows ARM64 topology backends. Those configurations deny unsafe everywhere;
 // only the corresponding primitive modules have scoped allow attributes.
 #![cfg_attr(
     not(any(
         feature = "precise-timing",
         feature = "alloc-profiling",
-        target_os = "macos"
+        target_os = "macos",
+        all(target_os = "windows", target_arch = "aarch64")
     )),
     forbid(unsafe_code)
 )]
@@ -13,7 +14,8 @@
     any(
         feature = "precise-timing",
         feature = "alloc-profiling",
-        target_os = "macos"
+        target_os = "macos",
+        all(target_os = "windows", target_arch = "aarch64")
     ),
     deny(unsafe_code)
 )]
