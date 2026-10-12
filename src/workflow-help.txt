@@ -17,16 +17,17 @@ Select detected CPU IDs explicitly for unequal cache classes; do not assume
 which is faster. Use separate launches/results for P/E or cache classes.
 Linux needs a matching hard cpuset (or a delegated systemd cpuset controller).
 Windows uses an inherited Job boundary on supported topology. macOS class binding
-and Windows ARM/multiple-group classification are unsupported. A thread hint or
+and Windows multiple-group classification are unsupported. Native Windows ARM64
+uses OS core/cache classes within one processor group. A thread hint or
 taskset cannot constrain arbitrary pools that widen their masks. Register Rayon
 work with bench(); do not wrap it in bench_parallel/bench_contended. Configure the
 pool size yourself. Probes observe new workers; they do not certify hidden pools.
 Unrestricted is an explicit exploratory opt-out, never a confirmation remedy.
 
 BACKGROUND EXPLORATION
-  zenbench run kernels --cargo-args="-- --group=filter"
-  zenbench list
-  zenbench results latest
+  zenbench jobs run kernels --cargo-args="-- --group=filter"
+  zenbench jobs list
+  zenbench jobs results latest
 Use status RUN_ID to track a run. For confirmation use direct cargo bench or a
 retained executable: the background wrapper does not preserve decision exit codes.
 Its --wait timeout does not bound the initial Cargo child wait.
@@ -59,9 +60,11 @@ assets outside Cargo's replaceable target directory. Run each directly with the
 same working directory, input/configuration and verified CPU boundary. They accept
 the same --mode/--group flags as cargo bench after --. Set ZENBENCH_RESULT_PATH to
 a different fresh .json.gz path for each run, then:
-  zenbench compare before.json.gz after.json.gz
-This compares recorded results; it does not launch executables. There is no
-dedicated two-binary runner or automatic source-to-binary build manifest today.
+  zenbench data compare before.json.gz after.json.gz
+This compares recorded suite results; it does not launch executables.
+For fresh-process A/B across retained programs or different environments, use
+zenbench pair PLAN.json (see zenbench guide --topic pair). Pair retains correctness
+and A/A controls but remains exploratory. No automatic build manifest is captured.
 Record toolchain, target, features, flags, allocator, dependencies, input hashes,
 Git commit and clean/dirty state at build time beside each executable. Saved
 execution.binary_sha256 identifies the executable bytes. Saved git_hash is runtime
@@ -69,18 +72,19 @@ HEAD in the working directory, not the source used to build a retained executabl
 Clean/dirty status, patches and source digests are not automatically captured.
 
 EVIDENCE / MULTIPLE MACHINES
-  cargo bench --bench kernels -- --mode=evidence --workload-id=inputs-v1 --scope=linux/performance/filter
-Evidence runs one named matrix cell with Confirm's protocol. You own the matrix,
+  cargo bench --bench kernels -- --mode=confirm --workload-id=inputs-v1 --scope=linux/performance/filter
+Confirm with --scope runs one named matrix cell. Legacy --mode=evidence uses
+the same protocol and requires --scope. You own the matrix,
 correctness controls, build provenance and artifact backup. Do not merge unlike
 hardware/core classes into one baseline. This command does not schedule a fleet
 or certify publication readiness. Warmup is not proof of maximum CPU frequency.
 
 READ / KEEP SMALL GIT DIFFS
-  zenbench read candidate.json.gz
-  zenbench read candidate.json.gz --format json
-  zenbench compare baseline.json.gz candidate.json.gz
-  zenbench snapshot candidate.json.gz --output benchmarks/baseline.csv
-  zenbench reanalyze candidate.json.gz --output analysis.json
+  zenbench data read candidate.json.gz
+  zenbench data read candidate.json.gz --format json
+  zenbench data compare baseline.json.gz candidate.json.gz
+  zenbench data snapshot candidate.json.gz --output benchmarks/baseline.csv
+  zenbench data reanalyze candidate.json.gz --output analysis.json
 Raw rounds/processes live in ignored .zenbench/data (ZENBENCH_DATA_DIR overrides).
 Commit selected stable CSV summaries, not every run. Back up full gzip objects;
 references alone are not portable. CSV is not comparison input. Read/decode/compare

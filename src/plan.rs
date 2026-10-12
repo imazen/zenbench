@@ -10,6 +10,8 @@ pub enum BenchmarkMode {
     #[default]
     Iterate,
     Confirm,
+    /// Compatibility spelling for confirmation with a required study scope.
+    /// New callers can use Confirm and set BenchmarkPlan::scope directly.
     Evidence,
 }
 
