@@ -268,6 +268,8 @@ dependencies that need newer compilers; `zenbench::wasm` re-exports
 
 Tested on all targets via GitHub Actions CI:
 
+macOS support targets ARM64.
+
 | Platform | Timer | Notes |
 |---|---|---|
 | Linux x86_64 | TSC (rdtsc) | Full support |
@@ -275,7 +277,6 @@ Tested on all targets via GitHub Actions CI:
 | Windows x86_64 | TSC (rdtsc) | Full support |
 | Windows ARM64 | Instant (~300ns) | No hardware counter in user mode |
 | macOS ARM64 | Counter (cntvct_el0) | Full support |
-| macOS Intel | TSC (rdtsc) | Full support |
 
 
 ## Next steps
