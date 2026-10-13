@@ -37,6 +37,11 @@ zen := env("HOME") / "work/zen"
 # Run all CI checks (fmt, clippy, test, wasm)
 ci: fmt clippy test wasm-check
 
+# Compile the README and embedded guides; fail on rustdoc warnings.
+doc-check:
+    cargo test --doc
+    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+
 # Check default + wasm features
 check:
     cargo check
