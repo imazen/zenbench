@@ -1,3 +1,6 @@
+#![doc = include_str!("../docs/cpu-pinning.md")]
+#![doc = include_str!("../docs/process-affinity.md")]
+
 use std::sync::Mutex;
 use std::time::Instant;
 use sysinfo::System;

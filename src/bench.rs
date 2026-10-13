@@ -73,6 +73,7 @@ impl Throughput {
 }
 
 /// A complete benchmark suite containing comparison groups.
+#[doc = include_str!("../docs/benchmarking.md")]
 pub struct Suite {
     pub(crate) plan: crate::BenchmarkPlan,
     pub(crate) groups: Vec<BenchGroup>,

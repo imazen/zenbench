@@ -1,5 +1,8 @@
 # Verified CPU placement
 
+Use this guide for process-wide core/cache classes. For scoped thread masks,
+see [thread pinning](https://docs.rs/zenbench/latest/zenbench/platform/index.html#thread-pinning).
+
 Zenbench checks CPU placement before calibration, warmup, or timed callbacks.
 The default `auto` policy accepts known homogeneous hardware, or an OS process
 boundary containing one known CPU class. Asymmetric or unknown topology without
@@ -46,7 +49,7 @@ fn configure(suite: &mut Suite) {
 }
 ```
 
-Suite CPU settings override CLI/environment settings; explicit group affinity
+CLI CPU settings override environment settings, which override suite defaults; explicit group affinity
 requests override suite affinity, which overrides `ZENBENCH_PIN`. IDs must be
 chosen from `cpu-info`, rather than assumed to identify P/E cores. Suite policy
 checks run before measurement. Criterion-compatible immediate mode checks
@@ -176,7 +179,7 @@ thread, including their attempts to widen affinity, then runs a tiny benchmark.
 It requires an enforced single-class process set. No large sweep is involved.
 
 Measured confinement and negative controls are recorded in
-[CPU placement verification](cpu-placement-verification.md).
+[CPU placement verification](https://github.com/imazen/zenbench/blob/main/docs/cpu-placement-verification.md).
 
 ## Worker warmup observations
 

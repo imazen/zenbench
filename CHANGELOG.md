@@ -8,6 +8,7 @@
 
 ### Changed
 
+- Start the README with a Cargo benchmark; include separate benchmarking and CPU-pinning guides in docs.rs without adding public API.
 - Group primary CLI help into `data`, `fleet`, and `jobs` workflows while retaining flat command spellings. Accept separated benchmark option values consistently. Recommend Confirm plus scope for study cells while retaining Evidence compatibility.
 - Align offline guides and methodology with native Windows ARM64 topology, implemented heap/fleet backends and exploratory two-program comparisons.
 

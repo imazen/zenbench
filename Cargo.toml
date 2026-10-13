@@ -15,7 +15,8 @@ exclude = [
   "copter-report/", ".github/", "Cross.toml", "justfile",
   "Cargo.toml.original.txt", "fuzz/",
   "benches/", "tests/",
-  "docs/", "site/",
+  "docs/*", "!docs/benchmarking.md", "!docs/cpu-pinning.md",
+  "!docs/process-affinity.md", "site/",
   "CHART-GALLERY.md",
 ]
 
