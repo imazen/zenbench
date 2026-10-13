@@ -51,7 +51,7 @@ suite.plan().margin_pct = 0.5;
 
 CPU policy and CPU set follow the same precedence. Group thread-affinity
 constraints must fit inside the selected process boundary. See
-[CPU placement](../README.md#cpu-placement-and-affinity). Workload IDs are supplied
+[CPU placement](https://docs.rs/zenbench/latest/zenbench/platform/index.html#verified-cpu-placement). Workload IDs are supplied
 by the benchmark owner: include input/configuration changes in the ID. The
 harness cannot discover changes hidden inside arbitrary closures.
 

@@ -28,8 +28,9 @@ paths for parsing; this does not validate real program timing or correctness.
 Use `ZOLA=/path/to/zola` to select a local binary. Browser scratch defaults to
 `~/tmp`; override `TMPDIR` with another disk-backed location if needed.
 
-Guides describe the current Git implementation, with an unreleased-version note
-on the guide index and tutorial. Verify flags against `src/bin/zenbench.rs`,
+Guides describe zenbench 0.1.11. The README and home page introduce a Cargo
+benchmark before advanced workflows; separate CPU-pinning guides are embedded
+in the existing `platform` rustdoc page. Verify flags against `src/bin/zenbench.rs`,
 benchmark flags against `src/plan.rs`/`src/bench-help.txt`, and external plan fields
 against `src/bin/support/pair/plan.rs` before changing command examples. Keep native
 suite decisions, external pair decisions and descriptive fleet observations clear.

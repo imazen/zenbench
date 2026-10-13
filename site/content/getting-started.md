@@ -11,15 +11,15 @@ case before adapting it.
 
 ## 1. Add a benchmark target
 
-These guides use the current, unreleased Git implementation:
+Add the zenbench 0.1.11 dependency and a benchmark target:
 
 ```toml
-[dev-dependencies]
-zenbench = { git = "https://github.com/imazen/zenbench", branch = "main" }
-
 [[bench]]
 name = "my_bench"
 harness = false
+
+[dev-dependencies]
+zenbench = "0.1.11"
 ```
 
 Add these entries to your existing `Cargo.toml`; keep your other dependencies and

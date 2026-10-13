@@ -22,22 +22,18 @@ weight = 0
 
 ## Install the version these guides describe
 
-These guides cover the current `main` implementation. The new command families
-and confirmation protocol are **unreleased**; crates.io 0.1.10 does not provide
-all of them. Install the current CLI:
+The [first benchmark](@/getting-started.md) starts with `Cargo.toml` and
+`cargo bench`. These guides describe zenbench 0.1.11. Install the optional CLI
+for retained-result tools, CPU launch control, or external-program comparisons:
 
 ```sh
-cargo install --git https://github.com/imazen/zenbench --locked --bin zenbench
-zenbench --help
+cargo install zenbench --version 0.1.11 --locked --bin zenbench
 zenbench guide
 ```
 
-For a Rust benchmark, use the Git dependency in the
-[first benchmark guide](@/getting-started.md). For a reproducible study, pin the
-reviewed Git revision in both the dependency and CLI install (`--rev COMMIT`).
-Keep Cargo's binary directory on PATH; Windows installs `zenbench.exe`.
 [Installation details](https://github.com/imazen/zenbench/blob/main/docs/installation.md)
-cover native toolchains and platform requirements.
+include source builds and revision pinning. CPU pinning also has a
+[guide in docs.rs](https://docs.rs/zenbench/latest/zenbench/platform/index.html#thread-pinning).
 
 ## Know which command owns the arguments
 

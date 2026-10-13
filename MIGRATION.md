@@ -8,7 +8,7 @@ Add zenbench alongside criterion — no need to remove criterion first:
 # Cargo.toml
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }  # keep during migration
-zenbench = { version = "0.1", features = ["criterion-compat"] }
+zenbench = { version = "0.1.11", features = ["criterion-compat"] }
 ```
 
 For each bench file, change one import:

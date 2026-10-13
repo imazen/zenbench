@@ -5,25 +5,27 @@ The default `cli` feature includes `pair`, `nice`, the CPU launcher, and offline
 workflow guides. No separate source checkout is needed to read those guides
 after installation.
 
-The new commands are merged into `main` and currently unreleased on crates.io.
-Install the current Git version with:
+Install the 0.1.11 CLI with:
 
 ```sh
-cargo install --git https://github.com/imazen/zenbench --locked --bin zenbench
+cargo install zenbench --version 0.1.11 --locked --bin zenbench
 zenbench --help
-zenbench guide --topic pair
+zenbench guide
 ```
 
-For a local checkout:
+The CLI is optional for [writing a Cargo benchmark](https://docs.rs/zenbench/latest/zenbench/).
+Install it when you need retained-result tools, external-program comparisons,
+or CPU launch control.
+
+To work from a source checkout instead:
 
 ```sh
 cargo install --path . --locked --bin zenbench
 ```
 
-The crates.io installation command is `cargo install zenbench --locked --bin
-zenbench`; it installs the published version, which may not include unreleased
-commands. This change does not publish a release. A release must pass the
-project's full validation and release review first.
+For development versions, use `cargo install --git
+https://github.com/imazen/zenbench --locked --bin zenbench`. Pin `--rev` when
+you need to reproduce a specific Git build.
 
 Cargo installs binaries into `$CARGO_HOME/bin` (normally `~/.cargo/bin`); ensure
 that directory is on PATH. Windows uses `zenbench.exe`. The package supports Rust

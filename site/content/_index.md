@@ -5,10 +5,29 @@ template = "home.html"
 sort_by = "weight"
 +++
 
-Zenbench compares Rust functions in shuffled, serial rounds. Use a short
-**Iterate** run while editing, then freeze the workload and candidate before
-**Confirm**. The CLI also compares prebuilt programs and startup environments,
-keeps evidence, and records memory or fleet observations.
+Zenbench compares Rust functions in shuffled, serial rounds. Begin with an
+ordinary Cargo benchmark, then add comparisons and confirmation when needed.
+
+## Add a benchmark target
+
+```toml
+[[bench]]
+name = "my_bench"
+harness = false
+
+[dev-dependencies]
+zenbench = "0.1.11"
+```
+
+Create `benches/my_bench.rs` using the [first benchmark tutorial](@/getting-started.md),
+then run:
+
+```sh
+cargo bench --bench my_bench
+```
+
+Default **Iterate** runs are exploratory. Freeze your workload and candidate
+before using **Confirm** to accept a change.
 
 ## Start with your task
 
@@ -24,24 +43,12 @@ keeps evidence, and records memory or fleet observations.
 - [Run named study cells and fleet observations](@/fleet.md)
 
 [Choose a guide](@/guides.md) also covers installation, offline help and which
-commands can make an acceptance decision. These guides describe the current
-**unreleased Git version**; pin the reviewed revision for a reproducible study.
-
-## Begin with a Rust comparison
-
-```sh
-cargo bench --bench my_bench -- --help
-cargo bench --bench my_bench -- --group=sort
-```
-
-Create `my_bench` using the [first benchmark tutorial](@/getting-started.md).
-Exit 0 in Iterate means execution succeeded. A comparison interval in an
-exploratory report does not accept a candidate for CI.
+commands can make an acceptance decision. These guides describe zenbench **0.1.11**.
 
 ## Begin with the CLI
 
 ```sh
-cargo install --git https://github.com/imazen/zenbench --locked --bin zenbench
+cargo install zenbench --version 0.1.11 --locked --bin zenbench
 zenbench guide
 zenbench pair --help
 ```
