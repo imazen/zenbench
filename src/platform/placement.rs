@@ -190,6 +190,51 @@ pub struct CpuPlacement {
 }
 
 impl CpuPlacement {
+    /// Logical CPUs inside this already-verified process boundary but
+    /// **outside the coordinator/measurement mask**, offered to the resource
+    /// observer when measurement threads are pinned to a subset.
+    ///
+    /// Returns the difference `effective_cpus - measurement`: only on
+    /// Linux/Windows, only when the boundary is verified
+    /// ([`PlacementStatus::UniformHardware`] or
+    /// [`PlacementStatus::EnforcedUniform`]), and only when it is non-empty.
+    /// `None` keeps ordinary inherited affinity: no explicit measurement pin,
+    /// an unverified/unrestricted boundary, or nothing outside the pin.
+    ///
+    /// This is selection *outside the coordinator mask*, not proven dedicated
+    /// isolation: pre-existing opaque external thread pools (created before
+    /// the group pin, never queried by zenbench) may already run on those
+    /// CPUs. See `docs/cpu-placement-verification.md` "Existing external
+    /// workers".
+    pub(crate) fn observer_cpus(&self, measurement: Option<&[usize]>) -> Option<Vec<usize>> {
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
+        {
+            if !matches!(
+                self.status,
+                PlacementStatus::UniformHardware | PlacementStatus::EnforcedUniform
+            ) {
+                return None;
+            }
+            let measurement = measurement?;
+            let mut spare: Vec<usize> = self
+                .effective_cpus
+                .iter()
+                .copied()
+                .filter(|cpu| !measurement.contains(cpu))
+                .collect();
+            spare.sort_unstable();
+            spare.dedup();
+            (!spare.is_empty()).then_some(spare)
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+        {
+            let _ = measurement;
+            None
+        }
+    }
+}
+
+impl CpuPlacement {
     pub(crate) fn llm(&self) -> String {
         format!(
             "cpu_policy={} cpu_placement={} cpu_class={} cpu_enforcement={} cpu_effective_set={} cpu_requested_set={} cpu_thread_requested={} cpu_thread_effective={} cpu_class_uniform={} pool_thread_count=unknown cpu_frequency_verified=false",
@@ -958,5 +1003,119 @@ mod tests {
                 .unwrap_err()
                 .contains("coordinator affinity changed")
         );
+    }
+
+    fn uniform_topology(cpus: &[usize]) -> CpuTopology {
+        group_classes(
+            cpus.iter()
+                .map(|&cpu| (cpu, "uniform".into(), Some(0)))
+                .collect(),
+            "fixture",
+            false,
+        )
+    }
+
+    fn four_uniform() -> CpuTopology {
+        uniform_topology(&[0, 1, 2, 3])
+    }
+
+    fn enforced_uniform(cpus: &[usize]) -> CpuPlacement {
+        resolve(
+            uniform_topology(cpus),
+            CpuPolicy::Auto,
+            Some(cpus),
+            Ok((cpus.to_vec(), "cpuset")),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn observer_cpus_are_the_verified_boundary_minus_the_measurement_pin() {
+        let placement = enforced_uniform(&[0, 1, 2, 3]);
+        assert_eq!(
+            placement.status,
+            PlacementStatus::EnforcedUniform,
+            "fixture must be a verified single-class boundary"
+        );
+        // Exact difference: the sampler gets the spare CPUs, never the pin.
+        assert_eq!(placement.observer_cpus(Some(&[0])), Some(vec![1, 2, 3]));
+        assert_eq!(placement.observer_cpus(Some(&[1, 3])), Some(vec![0, 2]));
+        // Pin order and duplicates do not change the spare set.
+        assert_eq!(placement.observer_cpus(Some(&[3, 1, 1])), Some(vec![0, 2]));
+        // A pin naming CPUs outside the boundary subtracts nothing; the
+        // earlier admission panic is what rejects such pins at runtime.
+        assert_eq!(placement.observer_cpus(Some(&[0, 9])), Some(vec![1, 2, 3]));
+        // No explicit measurement pin keeps ordinary inherited affinity.
+        assert_eq!(placement.observer_cpus(None), None);
+    }
+
+    #[test]
+    fn observer_cpus_also_apply_on_verified_uniform_hardware() {
+        // Homogeneous hardware needs no OS boundary but is still verified
+        // single-class: the sampler may use the unmeasured CPUs.
+        let placement = resolve(
+            four_uniform(),
+            CpuPolicy::Auto,
+            None,
+            Ok((vec![0, 1, 2, 3], "cpuset")),
+        )
+        .unwrap();
+        assert_eq!(placement.status, PlacementStatus::UniformHardware);
+        assert_eq!(placement.observer_cpus(Some(&[0])), Some(vec![1, 2, 3]));
+        assert_eq!(placement.observer_cpus(None), None);
+    }
+
+    #[test]
+    fn observer_cpus_refuse_when_no_spare_or_boundary_is_unverified() {
+        // Pinning the whole boundary leaves the sampler nowhere safe to go.
+        assert_eq!(
+            enforced_uniform(&[0, 1, 2, 3]).observer_cpus(Some(&[0, 1, 2, 3])),
+            None
+        );
+        // Single-CPU boundary: the only spare candidate is the measured CPU.
+        assert_eq!(enforced_uniform(&[2]).observer_cpus(Some(&[2])), None);
+        // Unverified (opt-out) placement never selects an observer mask.
+        let unrestricted = resolve(
+            CpuTopology::unknown("unavailable"),
+            CpuPolicy::Unrestricted,
+            None,
+            Err("none".into()),
+        )
+        .unwrap();
+        assert_eq!(unrestricted.status, PlacementStatus::Unrestricted);
+        assert_eq!(unrestricted.observer_cpus(Some(&[0])), None);
+    }
+
+    #[test]
+    fn observer_cpus_proof_against_the_current_process_mask() {
+        // Real permitted CPUs on this host; every host executes real
+        // assertions, including the single-CPU fallback.
+        let permitted = crate::platform::current_thread_affinity()
+            .unwrap_or_else(|_| (0..std::thread::available_parallelism().unwrap().get()).collect());
+        assert!(!permitted.is_empty());
+        let placement = resolve(
+            uniform_topology(&permitted),
+            CpuPolicy::Auto,
+            Some(&permitted),
+            Ok((permitted.clone(), "cpuset")),
+        )
+        .unwrap();
+        let pin = [permitted[0]];
+        match placement.observer_cpus(Some(&pin)) {
+            Some(spare) => {
+                let mut expected = permitted.clone();
+                expected.retain(|cpu| *cpu != pin[0]);
+                assert_eq!(spare, expected);
+                assert!(
+                    !expected.is_empty(),
+                    "spare set exists only when it is non-empty"
+                );
+            }
+            None => assert_eq!(
+                permitted.len(),
+                1,
+                "no spare is legal only when the boundary is a single CPU"
+            ),
+        }
     }
 }

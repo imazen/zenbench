@@ -509,6 +509,17 @@ fn run_comparison_group(
         }
     }
     cpu_session.verify().unwrap_or_else(|e| panic!("{e}"));
+    let config = &group.config;
+    let n_benchmarks = group.benchmarks.len();
+    let group_start = Instant::now();
+
+    // The resource observer starts while the coordinator still carries the
+    // verified process-boundary affinity, so a narrowly pinned group does not
+    // force the sampler to compete on the measured CPUs. Its startup wait is
+    // still inside the group's time budget.
+    gate.wait_for_no_benchmarks();
+    gate.start_monitoring(cpu_session.placement.observer_cpus(cores));
+
     let _affinity = platform::GroupAffinityGuard::enter(cores)
         .unwrap_or_else(|e| panic!("benchmark group '{}' affinity: {e}", group.name));
     let mut group_placement = cpu_session.placement.clone();
@@ -525,12 +536,6 @@ fn run_comparison_group(
             .verify_thread()
             .unwrap_or_else(|e| panic!("{e}"));
     };
-    let config = &group.config;
-    let n_benchmarks = group.benchmarks.len();
-    let group_start = Instant::now();
-
-    gate.wait_for_no_benchmarks();
-    gate.start_monitoring();
 
     // Phase 1: Warmup + iteration estimation
     crate::report::status(&format!("[zenbench] warming up '{}'...", group.name));

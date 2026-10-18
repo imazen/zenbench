@@ -412,3 +412,18 @@ finite CPU stay enforced. The zombie-oracle lifecycle test is Linux-only; the
 pair_cli wiring test runs everywhere. Residual: the window whose counter refresh
 spans reaping is not admitted by CPU magnitude even when it still assigned the
 leader.
+
+### Known Bugs: sampler shared the measurement pin (2026-10-18)
+
+`run_comparison_group` entered the group affinity guard before starting the
+background resource monitor, so a single-CPU group pin (e.g. `ZENBENCH_PIN=2`
+inside a `{2,3}` process boundary) also confined the resource-sampler thread to
+the measured CPU. The monitor now starts while the coordinator still carries
+the verified process-boundary affinity, and the sampler pins itself to
+`effective_cpus - measurement pin` on Linux/Windows when placement is verified
+single-class — CPUs *outside the coordinator mask*, not proven dedicated:
+opaque external pools may already run there. No pin, no spare CPU, an unverified boundary, or a
+refused mask keeps/fails into ordinary behavior — mask failure aborts startup
+through the monitor's ready channel rather than silently sharing the measured
+CPU. Whether the inherited pin contributed to observed foreign-load flags is
+not established; no threshold or counter arithmetic changed.

@@ -159,10 +159,10 @@ impl ResourceGate {
         }
     }
 
-    pub(crate) fn start_monitoring(&mut self) {
+    pub(crate) fn start_monitoring(&mut self, observer_cpus: Option<Vec<usize>>) {
         if self.config.enabled && self.background.is_none() {
             let start = Instant::now();
-            self.background = Some(crate::monitor::Monitor::start());
+            self.background = Some(crate::monitor::Monitor::start(observer_cpus));
             self.total_wait_time += start.elapsed();
         }
     }

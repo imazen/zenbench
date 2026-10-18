@@ -20,7 +20,15 @@ pub(crate) struct Monitor {
 }
 
 impl Monitor {
-    pub(crate) fn start() -> Self {
+    /// `observer_cpus` pins the sampler thread to CPUs inside the already
+    /// verified process boundary but outside the coordinator/measurement
+    /// mask (see [`CpuPlacement::observer_cpus`](crate::platform::CpuPlacement)).
+    /// That is selection outside the coordinator mask, not guaranteed
+    /// dedicated isolation — external pools may already occupy those CPUs.
+    /// `None` keeps ordinary inherited affinity. A requested mask failure
+    /// propagates through the startup channel and aborts startup — never a
+    /// silent fallback onto the measured CPUs.
+    pub(crate) fn start(observer_cpus: Option<Vec<usize>>) -> Self {
         let latest = Arc::new(Mutex::new(None));
         let stop = Arc::new(AtomicBool::new(false));
         let target = latest.clone();
@@ -29,11 +37,31 @@ impl Monitor {
         let worker = std::thread::Builder::new()
             .name("resource-sampler".into())
             .spawn(move || {
+                let _pin = match &observer_cpus {
+                    Some(cpus) => match crate::platform::pin_current_thread(cpus) {
+                        Ok(guard) => {
+                            if std::env::var_os("ZENBENCH_GATE_TRACE").is_some() {
+                                eprintln!(
+                                    "[zenbench gate] sampler affinity requested={cpus:?} effective={:?}",
+                                    crate::platform::current_thread_affinity()
+                                );
+                            }
+                            Some(guard)
+                        }
+                        Err(error) => {
+                            let _ = ready.try_send(Err(format!(
+                                "resource sampler affinity {cpus:?} refused: {error}"
+                            )));
+                            return;
+                        }
+                    },
+                    None => None,
+                };
                 let monitor = SystemMonitor::for_benchmark();
                 while !done.load(Ordering::Acquire) {
                     let state = monitor.snapshot();
                     *target.lock().unwrap() = Some((Instant::now(), state));
-                    let _ = ready.try_send(());
+                    let _ = ready.try_send(Ok(()));
                 }
             })
             .expect("cannot start resource sampler");
@@ -41,7 +69,8 @@ impl Monitor {
         // startup wait precedes warmup, never occurs between measured rounds.
         receive
             .recv()
-            .expect("resource sampler failed before its initial observation");
+            .expect("resource sampler failed before its initial observation")
+            .unwrap_or_else(|error| panic!("{error}"));
         Self {
             latest,
             stop,
@@ -77,7 +106,7 @@ mod tests {
 
     #[test]
     fn repeated_reads_do_not_advance_or_wait_for_cpu_refresh() {
-        let monitor = Monitor::start();
+        let monitor = Monitor::start(None);
         let first = monitor.latest.lock().unwrap().as_ref().unwrap().0;
         for _ in 0..100 {
             assert!(monitor.latest().is_some());

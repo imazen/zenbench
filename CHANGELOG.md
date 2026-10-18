@@ -7,6 +7,7 @@
 ### Fixed
 
 - `pair --mode confirm` no longer counts a reaped worker leader's final counter window as foreign CPU. Only windows completing at or after the supervisor's owned exit observation are exit transitions; transitions waive only the whole-host CPU magnitude, and missing lifecycle evidence invalidates (632ce674, 010f14fd).
+- The resource sampler no longer inherits a narrow measurement pin. On Linux/Windows, when placement is verified `uniform_hardware` or `enforced_uniform` and a group/suite/environment pin leaves spare CPUs inside the process boundary, the sampler thread is confined to CPUs outside the coordinator/measurement mask before group affinity is entered; a refused mask aborts the run instead of falling back. Selection is outside the coordinator mask, not guaranteed dedicated isolation — external pools may already run there. No pin, no spare CPU, or an unverified boundary keeps ordinary inherited affinity. CPU arithmetic, thresholds, and gate behavior are unchanged (aae0990a, this commit).
 
 ## [0.1.11] - 2026-10-12
 
