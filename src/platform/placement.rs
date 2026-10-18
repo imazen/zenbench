@@ -1064,6 +1064,7 @@ mod tests {
         .unwrap()
     }
 
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[test]
     fn observer_cpus_are_boundary_intersect_original_minus_pin() {
         let placement = enforced_uniform(&[0, 1, 2, 3]);
@@ -1106,6 +1107,7 @@ mod tests {
         );
     }
 
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[test]
     fn observer_cpus_refuse_when_no_spare_or_boundary_is_unverified() {
         // Pinning the whole boundary leaves the sampler nowhere safe to go.
@@ -1153,6 +1155,7 @@ mod tests {
         );
     }
 
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[test]
     fn observer_cpus_also_apply_on_verified_uniform_hardware() {
         // Homogeneous hardware needs no OS boundary but is still verified
@@ -1175,6 +1178,35 @@ mod tests {
         );
     }
 
+    // Targets without OS CPU masks (macOS hints, wasm, others) never name
+    // observer CPUs, whatever the placement and pins.
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    #[test]
+    fn observer_selection_is_unsupported_without_os_masks() {
+        for placement in [
+            enforced_uniform(&[0, 1, 2, 3]),
+            resolve(
+                four_uniform(),
+                CpuPolicy::Auto,
+                None,
+                Ok((vec![0, 1, 2, 3], "cpuset")),
+            )
+            .unwrap(),
+        ] {
+            for (original, measurement) in [
+                (Some(&[0usize, 1, 2, 3][..]), Some(&[0usize][..])),
+                (Some(&[0, 1, 2, 3][..]), None),
+                (None, Some(&[0][..])),
+            ] {
+                assert_eq!(
+                    placement.select_observer(original, measurement),
+                    ObserverSelection::Inherited("unsupported_os")
+                );
+            }
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[test]
     fn observer_cpus_proof_against_the_current_process_mask() {
         // Real permitted CPUs on this host; every host executes real
@@ -1211,6 +1243,29 @@ mod tests {
                     "no spare is legal only when the boundary is a single CPU"
                 );
             }
+        }
+    }
+
+    impl CpuSession {
+        /// Test-only session over explicit CPUs and policy, built through the same
+        /// `resolve` as startup on a homogeneous fixture topology. It never reads
+        /// `ZENBENCH_CPU_POLICY`, `--cpu-set` or the host boundary, so engine tests
+        /// do not depend on the CI policy environment.
+        pub(crate) fn resolved_for_test(cpus: &[usize], policy: CpuPolicy) -> Self {
+            #[cfg(target_os = "windows")]
+            let enforcement = "process_mask";
+            #[cfg(not(target_os = "windows"))]
+            let enforcement = "cpuset";
+            let topology = group_classes(
+                cpus.iter()
+                    .map(|&cpu| (cpu, "uniform".into(), Some(0)))
+                    .collect(),
+                "fixture",
+                false,
+            );
+            let placement = resolve(topology, policy, None, Ok((cpus.to_vec(), enforcement)))
+                .expect("fixture placement resolves");
+            Self { placement }
         }
     }
 }

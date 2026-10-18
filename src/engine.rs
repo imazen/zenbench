@@ -1349,10 +1349,13 @@ fn default_lock_dir() -> Option<PathBuf> {
 mod observer_tests {
     use super::*;
 
+    /// One minimal round of a group pinned to the first CPU of `original`,
+    /// under an explicitly constructed session (never the CI policy env).
     #[cfg(any(target_os = "linux", target_os = "windows"))]
-    #[test]
-    fn observer_mask_lies_outside_the_group_pin_inside_the_boundary() {
-        let original = platform::current_thread_affinity().unwrap();
+    fn run_pinned_group(
+        session: &platform::CpuSession,
+        original: &[usize],
+    ) -> (ComparisonResult, crate::ResourceGate) {
         let mut suite = crate::Suite::new();
         suite.compare("obs", |g| {
             g.affinity(&[original[0]]);
@@ -1366,16 +1369,29 @@ mod observer_tests {
             config.auto_rounds = false;
         });
         let mut gate = crate::ResourceGate::new(GateConfig::default());
-        let session = platform::CpuSession::start(None, None).unwrap();
         let result = run_comparison_group(
             &mut suite.groups[0],
             &mut gate,
             0.0,
             None,
             platform::timer_resolution_ns(),
-            &session,
+            session,
             None,
         );
+        (result, gate)
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[test]
+    fn observer_mask_lies_outside_the_group_pin_inside_the_boundary() {
+        let original = platform::current_thread_affinity().unwrap();
+        // Verified single-class placement over the live launch mask.
+        let session = platform::CpuSession::resolved_for_test(&original, platform::CpuPolicy::Auto);
+        assert_eq!(
+            session.placement.status,
+            platform::PlacementStatus::UniformHardware
+        );
+        let (result, gate) = run_pinned_group(&session, &original);
         let group_mask = result
             .cpu_placement
             .as_ref()
@@ -1394,6 +1410,8 @@ mod observer_tests {
                     .all(|cpu| !group_mask.contains(cpu) && original.contains(cpu)),
                 "sampler {sampler:?} must avoid group pin {group_mask:?} and stay in {original:?}"
             );
+            // Exactly (boundary ∩ original) − pin for this session.
+            assert_eq!(sampler, original[1..].to_vec());
         } else {
             // Single-CPU boundary: the fallback is the pre-group inherited
             // mask, never the narrowed group mask (they coincide here).
@@ -1406,23 +1424,62 @@ mod observer_tests {
         );
     }
 
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[test]
+    fn unrestricted_session_keeps_the_pre_group_mask_for_the_sampler() {
+        let original = platform::current_thread_affinity().unwrap();
+        let session =
+            platform::CpuSession::resolved_for_test(&original, platform::CpuPolicy::Unrestricted);
+        assert_eq!(
+            session.placement.status,
+            platform::PlacementStatus::Unrestricted
+        );
+        assert_eq!(
+            session
+                .placement
+                .select_observer(Some(&original), Some(&[original[0]])),
+            platform::ObserverSelection::Inherited("unrestricted")
+        );
+        let (result, gate) = run_pinned_group(&session, &original);
+        let group_mask = result
+            .cpu_placement
+            .as_ref()
+            .and_then(|p| p.thread_affinity_effective.clone())
+            .expect("the group placement must record its effective mask");
+        assert_eq!(group_mask, vec![original[0]]);
+        // Unverified placement selects no observer CPUs: the sampler keeps the
+        // coordinator's pre-group mask, never the narrowed group pin.
+        let sampler = gate
+            .sampler_effective_cpus()
+            .expect("the resource monitor must be running");
+        assert_eq!(sampler, original);
+        if original.len() >= 2 {
+            assert_ne!(
+                sampler, group_mask,
+                "sampler must not inherit the group pin"
+            );
+        }
+        assert_eq!(
+            platform::current_thread_affinity().unwrap(),
+            original,
+            "the coordinator mask must be restored after the group"
+        );
+    }
+
     #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     #[test]
     fn observer_selection_declines_where_thread_masks_are_hints() {
-        // No OS mask to intersect: even a constructed verified placement must
-        // decline to name observer CPUs on this target.
-        let session = platform::CpuSession::start(None, None);
-        if let Ok(session) = session {
-            assert_eq!(
-                session.placement.select_observer(Some(&[0, 1]), Some(&[0])),
-                platform::ObserverSelection::Inherited("unsupported_os")
-            );
-        } else {
-            assert!(
-                session.is_err(),
-                "CpuSession itself may refuse unsupported targets"
-            );
-        }
+        // No OS mask to intersect: even a verified placement must decline to
+        // name observer CPUs on this target.
+        let session = platform::CpuSession::resolved_for_test(&[0, 1], platform::CpuPolicy::Auto);
+        assert_eq!(
+            session.placement.status,
+            platform::PlacementStatus::UniformHardware
+        );
+        assert_eq!(
+            session.placement.select_observer(Some(&[0, 1]), Some(&[0])),
+            platform::ObserverSelection::Inherited("unsupported_os")
+        );
     }
 }
 
