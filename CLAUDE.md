@@ -437,3 +437,15 @@ The first macOS ARM64 CI build of this change rejected the observer-selection
 variant as unused under `-D warnings`: only Linux and Windows construct it.
 The variant and its two match arms now share that platform cfg. Unsupported
 platforms keep the inherited-mask fallback; no warning allowance was added.
+
+### Mac process CPU percentage undercount (2026-10-18)
+
+A protected IQA diagnostic captured owner cumulative CPU advancing 1490→2353 ms
+across 202.086 ms, while sysinfo 0.36.1 reported 10.355% instead of the counter's
+427.046%. This falsely left the owner's work in foreign CPU load. Mac sampling
+now uses monotonic cumulative-counter deltas tied to PID and start time for
+process rates. Missing/reset/reused owner history authorizes no subtraction;
+unknown foreign work retains its raw signal and global CPU remains visible.
+Linux arithmetic, resource thresholds and the public API are unchanged.
+Mechanical controls replay the captured case and retain a busy foreign process.
+Native corrected-worker qualification is separate from the source controls.

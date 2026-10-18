@@ -6,6 +6,8 @@ use std::time::Instant;
 use sysinfo::System;
 
 mod affinity;
+#[cfg(any(target_os = "macos", test))]
+mod cpu_counters;
 mod placement;
 mod probe;
 #[cfg(target_os = "windows")]
@@ -51,12 +53,23 @@ pub struct SystemMonitor {
     /// two refreshes; reading it too soon after the previous one yields 0.0.
     last_cpu_refresh: Mutex<Instant>,
     exclude_benchmark_owner: bool,
+    #[cfg(target_os = "macos")]
+    cpu_counters: Mutex<cpu_counters::CpuCounters>,
 }
 
 impl SystemMonitor {
     pub fn new() -> Self {
         let sys = System::new_all(); // establishes the first CPU sample
+        #[cfg(target_os = "macos")]
+        let cpu_counters = cpu_counters::CpuCounters::new(
+            Instant::now(),
+            sys.processes()
+                .values()
+                .map(|p| (p.pid(), p.start_time(), p.accumulated_cpu_time())),
+        );
         Self {
+            #[cfg(target_os = "macos")]
+            cpu_counters: Mutex::new(cpu_counters),
             sys: Mutex::new(sys),
             last_cpu_refresh: Mutex::new(Instant::now()),
             exclude_benchmark_owner: false,
@@ -116,6 +129,8 @@ impl SystemMonitor {
         let memory_refresh_elapsed = memory_started.elapsed();
         let procs_started = Instant::now();
         sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        #[cfg(target_os = "macos")]
+        let process_sample_at = Instant::now();
         let procs_refresh_elapsed = procs_started.elapsed();
         *self.last_cpu_refresh.lock().unwrap() = Instant::now();
         let system_refresh_elapsed = refresh_started.elapsed();
@@ -185,13 +200,28 @@ impl SystemMonitor {
         // already aggregate their CPU use: count each process once, including
         // foreign processes, and retain foreign thread CPU in global load.
         let user_tasks = process_task_pids(&sys);
+        #[cfg(target_os = "macos")]
+        let process_rates = self.cpu_counters.lock().unwrap().refresh(
+            process_sample_at,
+            sys.processes()
+                .values()
+                .map(|p| (p.pid(), p.start_time(), p.accumulated_cpu_time())),
+        );
         let global_cpu_fraction = cpu_load;
         let (cpu_load, heavy_process_count) = foreign_activity(
             cpu_load,
             cpus.len(),
-            sys.processes()
-                .values()
-                .map(|p| (p.pid(), f64::from(p.cpu_usage()))),
+            sys.processes().values().map(|p| {
+                #[cfg(target_os = "macos")]
+                let percent = cpu_counters::conservative_percent(
+                    f64::from(p.cpu_usage()),
+                    process_rates.get(&p.pid()).copied(),
+                    owned.contains(&p.pid()),
+                );
+                #[cfg(not(target_os = "macos"))]
+                let percent = f64::from(p.cpu_usage());
+                (p.pid(), percent)
+            }),
             &owned,
             &user_tasks,
         );
