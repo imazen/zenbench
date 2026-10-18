@@ -509,6 +509,26 @@ fn run_comparison_group(
         }
     }
     cpu_session.verify().unwrap_or_else(|e| panic!("{e}"));
+    // The coordinator's pre-group mask: intersecting it with the verified
+    // boundary keeps the observer inside the launch mask even when the
+    // boundary is wider (e.g. taskset inside a larger cpuset).
+    let original_mask = platform::current_thread_affinity().ok();
+    let observer = cpu_session
+        .placement
+        .select_observer(original_mask.as_deref(), cores);
+    if std::env::var_os("ZENBENCH_GATE_TRACE").is_some() {
+        let (mask, reason) = match &observer {
+            platform::ObserverSelection::OutsideCoordinatorMask(mask) => {
+                (format!("{mask:?}"), "outside_coordinator_mask")
+            }
+            platform::ObserverSelection::Inherited(reason) => ("inherited".to_string(), *reason),
+        };
+        eprintln!(
+            "[zenbench gate] observer selection boundary={:?} original={:?} \
+             measurement={:?} -> mask={mask} reason={reason}",
+            cpu_session.placement.effective_cpus, original_mask, cores
+        );
+    }
     let config = &group.config;
     let n_benchmarks = group.benchmarks.len();
     let group_start = Instant::now();
@@ -518,7 +538,16 @@ fn run_comparison_group(
     // force the sampler to compete on the measured CPUs. Its startup wait is
     // still inside the group's time budget.
     gate.wait_for_no_benchmarks();
-    gate.start_monitoring(cpu_session.placement.observer_cpus(cores));
+    gate.start_monitoring(match &observer {
+        platform::ObserverSelection::OutsideCoordinatorMask(mask) => Some(mask.clone()),
+        platform::ObserverSelection::Inherited(_) => None,
+    });
+    if std::env::var_os("ZENBENCH_GATE_TRACE").is_some() {
+        eprintln!(
+            "[zenbench gate] sampler effective_cpus={:?}",
+            gate.sampler_effective_cpus()
+        );
+    }
 
     let _affinity = platform::GroupAffinityGuard::enter(cores)
         .unwrap_or_else(|e| panic!("benchmark group '{}' affinity: {e}", group.name));
@@ -1314,6 +1343,87 @@ fn is_leap(year: i64) -> bool {
 /// [`crate::exclusive::Lock`].
 fn default_lock_dir() -> Option<PathBuf> {
     Some(crate::paths::user_cache_dir())
+}
+
+#[cfg(test)]
+mod observer_tests {
+    use super::*;
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[test]
+    fn observer_mask_lies_outside_the_group_pin_inside_the_boundary() {
+        let original = platform::current_thread_affinity().unwrap();
+        let mut suite = crate::Suite::new();
+        suite.compare("obs", |g| {
+            g.affinity(&[original[0]]);
+            g.bench("b", |b| {
+                b.iter(|| std::hint::black_box(1u8));
+            });
+            let config = g.config();
+            config.max_rounds = 1;
+            config.min_rounds = 1;
+            config.warmup_time = std::time::Duration::ZERO;
+            config.auto_rounds = false;
+        });
+        let mut gate = crate::ResourceGate::new(GateConfig::default());
+        let session = platform::CpuSession::start(None, None).unwrap();
+        let result = run_comparison_group(
+            &mut suite.groups[0],
+            &mut gate,
+            0.0,
+            None,
+            platform::timer_resolution_ns(),
+            &session,
+            None,
+        );
+        let group_mask = result
+            .cpu_placement
+            .as_ref()
+            .and_then(|p| p.thread_affinity_effective.clone())
+            .expect("the group placement must record its effective mask");
+        assert_eq!(group_mask, vec![original[0]]);
+        let sampler = gate
+            .sampler_effective_cpus()
+            .expect("the resource monitor must be running");
+        if original.len() >= 2 {
+            // Disjoint from the group pin, and inside boundary ∩ original —
+            // never wider than the coordinator's launch mask.
+            assert!(
+                sampler
+                    .iter()
+                    .all(|cpu| !group_mask.contains(cpu) && original.contains(cpu)),
+                "sampler {sampler:?} must avoid group pin {group_mask:?} and stay in {original:?}"
+            );
+        } else {
+            // Single-CPU boundary: the fallback is the pre-group inherited
+            // mask, never the narrowed group mask (they coincide here).
+            assert_eq!(sampler, original);
+        }
+        assert_eq!(
+            platform::current_thread_affinity().unwrap(),
+            original,
+            "the coordinator mask must be restored after the group"
+        );
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    #[test]
+    fn observer_selection_declines_where_thread_masks_are_hints() {
+        // No OS mask to intersect: even a constructed verified placement must
+        // decline to name observer CPUs on this target.
+        let session = platform::CpuSession::start(None, None);
+        if let Ok(session) = session {
+            assert_eq!(
+                session.placement.select_observer(Some(&[0, 1]), Some(&[0])),
+                platform::ObserverSelection::Inherited("unsupported_os")
+            );
+        } else {
+            assert!(
+                session.is_err(),
+                "CpuSession itself may refuse unsupported targets"
+            );
+        }
+    }
 }
 
 #[cfg(test)]

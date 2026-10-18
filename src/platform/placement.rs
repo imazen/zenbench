@@ -189,47 +189,82 @@ pub struct CpuPlacement {
     pub enforcement: String,
 }
 
+/// Where the resource observer may run for one comparison group.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ObserverSelection {
+    /// CPUs inside the verified boundary *and* the coordinator's pre-group
+    /// mask, outside the measurement pin. Selection outside the coordinator
+    /// mask is not proven dedicated isolation: opaque external thread pools
+    /// (created before the group pin, never queried by zenbench) may already
+    /// run there. Selection is per logical CPU, not per core or cache domain.
+    OutsideCoordinatorMask(Vec<usize>),
+    /// No observer mask was selected; the sampler keeps the coordinator's
+    /// pre-group inherited mask. The label feeds the `ZENBENCH_GATE_TRACE`
+    /// `observer=inherited reason=..` line.
+    Inherited(&'static str),
+}
+
 impl CpuPlacement {
-    /// Logical CPUs inside this already-verified process boundary but
-    /// **outside the coordinator/measurement mask**, offered to the resource
-    /// observer when measurement threads are pinned to a subset.
+    /// Select observer CPUs for the resource sampler:
+    /// `(effective_cpus ∩ original coordinator mask) − measurement mask`.
     ///
-    /// Returns the difference `effective_cpus - measurement`: only on
-    /// Linux/Windows, only when the boundary is verified
-    /// ([`PlacementStatus::UniformHardware`] or
-    /// [`PlacementStatus::EnforcedUniform`]), and only when it is non-empty.
-    /// `None` keeps ordinary inherited affinity: no explicit measurement pin,
-    /// an unverified/unrestricted boundary, or nothing outside the pin.
-    ///
-    /// This is selection *outside the coordinator mask*, not proven dedicated
-    /// isolation: pre-existing opaque external thread pools (created before
-    /// the group pin, never queried by zenbench) may already run on those
-    /// CPUs. See `docs/cpu-placement-verification.md` "Existing external
-    /// workers".
-    pub(crate) fn observer_cpus(&self, measurement: Option<&[usize]>) -> Option<Vec<usize>> {
+    /// `original` is the coordinator's live mask read *before* the group pin
+    /// narrows it — intersecting it prevents a `taskset`-narrowed launch from
+    /// letting the sampler wander onto CPUs outside the launch mask even
+    /// though they sit inside the cpuset. `measurement` is the resolved
+    /// group/suite/`ZENBENCH_PIN` pin. Selection requires Linux or Windows,
+    /// a verified single-class placement ([`PlacementStatus::UniformHardware`]
+    /// or [`PlacementStatus::EnforcedUniform`]), a real OS boundary
+    /// (`cpuset`/`job_affinity`/`process_mask`; an empty `effective_cpus`
+    /// never means "all CPUs"), an explicit measurement pin, and a non-empty
+    /// result. Every refusal returns [`ObserverSelection::Inherited`] with a
+    /// reason label; the sampler then runs under the coordinator's pre-group
+    /// mask, which may be wider than the pin — that is ordinary inherited
+    /// affinity, never a widening beyond the launch mask.
+    pub(crate) fn select_observer(
+        &self,
+        original: Option<&[usize]>,
+        measurement: Option<&[usize]>,
+    ) -> ObserverSelection {
+        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+        {
+            let _ = (original, measurement);
+            return ObserverSelection::Inherited("unsupported_os");
+        }
         #[cfg(any(target_os = "linux", target_os = "windows"))]
         {
             if !matches!(
                 self.status,
                 PlacementStatus::UniformHardware | PlacementStatus::EnforcedUniform
             ) {
-                return None;
+                return ObserverSelection::Inherited("unrestricted");
             }
-            let measurement = measurement?;
+            if !matches!(
+                self.enforcement.as_str(),
+                "cpuset" | "job_affinity" | "process_mask"
+            ) || self.effective_cpus.is_empty()
+            {
+                return ObserverSelection::Inherited("no_boundary");
+            }
+            let Some(original) = original else {
+                return ObserverSelection::Inherited("unsupported_os");
+            };
+            let Some(measurement) = measurement else {
+                return ObserverSelection::Inherited("no_pin");
+            };
             let mut spare: Vec<usize> = self
                 .effective_cpus
                 .iter()
                 .copied()
-                .filter(|cpu| !measurement.contains(cpu))
+                .filter(|cpu| original.contains(cpu) && !measurement.contains(cpu))
                 .collect();
             spare.sort_unstable();
             spare.dedup();
-            (!spare.is_empty()).then_some(spare)
-        }
-        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
-        {
-            let _ = measurement;
-            None
+            if spare.is_empty() {
+                ObserverSelection::Inherited("no_spare")
+            } else {
+                ObserverSelection::OutsideCoordinatorMask(spare)
+            }
         }
     }
 }
@@ -1030,23 +1065,92 @@ mod tests {
     }
 
     #[test]
-    fn observer_cpus_are_the_verified_boundary_minus_the_measurement_pin() {
+    fn observer_cpus_are_boundary_intersect_original_minus_pin() {
         let placement = enforced_uniform(&[0, 1, 2, 3]);
+        assert_eq!(placement.status, PlacementStatus::EnforcedUniform);
+        // Exact difference when the launch mask covers the boundary.
         assert_eq!(
-            placement.status,
-            PlacementStatus::EnforcedUniform,
-            "fixture must be a verified single-class boundary"
+            placement.select_observer(Some(&[0, 1, 2, 3]), Some(&[0])),
+            ObserverSelection::OutsideCoordinatorMask(vec![1, 2, 3])
         );
-        // Exact difference: the sampler gets the spare CPUs, never the pin.
-        assert_eq!(placement.observer_cpus(Some(&[0])), Some(vec![1, 2, 3]));
-        assert_eq!(placement.observer_cpus(Some(&[1, 3])), Some(vec![0, 2]));
+        assert_eq!(
+            placement.select_observer(Some(&[0, 1, 2, 3]), Some(&[1, 3])),
+            ObserverSelection::OutsideCoordinatorMask(vec![0, 2])
+        );
         // Pin order and duplicates do not change the spare set.
-        assert_eq!(placement.observer_cpus(Some(&[3, 1, 1])), Some(vec![0, 2]));
-        // A pin naming CPUs outside the boundary subtracts nothing; the
-        // earlier admission panic is what rejects such pins at runtime.
-        assert_eq!(placement.observer_cpus(Some(&[0, 9])), Some(vec![1, 2, 3]));
-        // No explicit measurement pin keeps ordinary inherited affinity.
-        assert_eq!(placement.observer_cpus(None), None);
+        assert_eq!(
+            placement.select_observer(Some(&[0, 1, 2, 3]), Some(&[3, 1, 1])),
+            ObserverSelection::OutsideCoordinatorMask(vec![0, 2])
+        );
+        // D1: a taskset-narrowed launch must not widen the observer beyond
+        // the coordinator's pre-group mask even inside a larger boundary.
+        assert_eq!(
+            placement.select_observer(Some(&[0, 2]), Some(&[0])),
+            ObserverSelection::OutsideCoordinatorMask(vec![2]),
+            "observer must stay inside original mask [0,2], not leak to [1,2,3]"
+        );
+        // Original mask wider than the boundary: boundary wins.
+        assert_eq!(
+            placement.select_observer(Some(&[0, 1, 2, 3, 8, 9]), Some(&[0])),
+            ObserverSelection::OutsideCoordinatorMask(vec![1, 2, 3])
+        );
+        // A pin naming CPUs outside the boundary subtracts nothing.
+        assert_eq!(
+            placement.select_observer(Some(&[0, 1, 2, 3]), Some(&[0, 9])),
+            ObserverSelection::OutsideCoordinatorMask(vec![1, 2, 3])
+        );
+        // No explicit measurement pin keeps the inherited pre-group mask.
+        assert_eq!(
+            placement.select_observer(Some(&[0, 1, 2, 3]), None),
+            ObserverSelection::Inherited("no_pin")
+        );
+    }
+
+    #[test]
+    fn observer_cpus_refuse_when_no_spare_or_boundary_is_unverified() {
+        // Pinning the whole boundary leaves the sampler nowhere safe to go.
+        assert_eq!(
+            enforced_uniform(&[0, 1, 2, 3])
+                .select_observer(Some(&[0, 1, 2, 3]), Some(&[0, 1, 2, 3])),
+            ObserverSelection::Inherited("no_spare")
+        );
+        // Single-CPU boundary: the only candidate is the measured CPU, so the
+        // sampler necessarily still shares it — labelled, not hidden.
+        assert_eq!(
+            enforced_uniform(&[2]).select_observer(Some(&[2]), Some(&[2])),
+            ObserverSelection::Inherited("no_spare")
+        );
+        // Unverified (opt-out) placement never selects an observer mask.
+        let unrestricted = resolve(
+            CpuTopology::unknown("unavailable"),
+            CpuPolicy::Unrestricted,
+            None,
+            Err("none".into()),
+        )
+        .unwrap();
+        assert_eq!(unrestricted.status, PlacementStatus::Unrestricted);
+        assert_eq!(
+            unrestricted.select_observer(Some(&[0, 1, 2, 3]), Some(&[0])),
+            ObserverSelection::Inherited("unrestricted")
+        );
+        // enforcement `none` / empty boundary is never "all CPUs".
+        let no_boundary = resolve(
+            four_uniform(),
+            CpuPolicy::Auto,
+            None,
+            Err("no controller".into()),
+        )
+        .unwrap();
+        assert_eq!(no_boundary.enforcement, "none");
+        assert_eq!(
+            no_boundary.select_observer(Some(&[0, 1, 2, 3]), Some(&[0])),
+            ObserverSelection::Inherited("no_boundary")
+        );
+        // A missing pre-group mask read is not a silent "all CPUs" either.
+        assert_eq!(
+            enforced_uniform(&[0, 1, 2, 3]).select_observer(None, Some(&[0])),
+            ObserverSelection::Inherited("unsupported_os")
+        );
     }
 
     #[test]
@@ -1061,29 +1165,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(placement.status, PlacementStatus::UniformHardware);
-        assert_eq!(placement.observer_cpus(Some(&[0])), Some(vec![1, 2, 3]));
-        assert_eq!(placement.observer_cpus(None), None);
-    }
-
-    #[test]
-    fn observer_cpus_refuse_when_no_spare_or_boundary_is_unverified() {
-        // Pinning the whole boundary leaves the sampler nowhere safe to go.
         assert_eq!(
-            enforced_uniform(&[0, 1, 2, 3]).observer_cpus(Some(&[0, 1, 2, 3])),
-            None
+            placement.select_observer(Some(&[0, 1, 2, 3]), Some(&[0])),
+            ObserverSelection::OutsideCoordinatorMask(vec![1, 2, 3])
         );
-        // Single-CPU boundary: the only spare candidate is the measured CPU.
-        assert_eq!(enforced_uniform(&[2]).observer_cpus(Some(&[2])), None);
-        // Unverified (opt-out) placement never selects an observer mask.
-        let unrestricted = resolve(
-            CpuTopology::unknown("unavailable"),
-            CpuPolicy::Unrestricted,
-            None,
-            Err("none".into()),
-        )
-        .unwrap();
-        assert_eq!(unrestricted.status, PlacementStatus::Unrestricted);
-        assert_eq!(unrestricted.observer_cpus(Some(&[0])), None);
+        assert_eq!(
+            placement.select_observer(Some(&[0, 1, 2, 3]), None),
+            ObserverSelection::Inherited("no_pin")
+        );
     }
 
     #[test]
@@ -1101,8 +1190,8 @@ mod tests {
         )
         .unwrap();
         let pin = [permitted[0]];
-        match placement.observer_cpus(Some(&pin)) {
-            Some(spare) => {
+        match placement.select_observer(Some(&permitted), Some(&pin)) {
+            ObserverSelection::OutsideCoordinatorMask(spare) => {
                 let mut expected = permitted.clone();
                 expected.retain(|cpu| *cpu != pin[0]);
                 assert_eq!(spare, expected);
@@ -1110,12 +1199,18 @@ mod tests {
                     !expected.is_empty(),
                     "spare set exists only when it is non-empty"
                 );
+                // The observer is disjoint from the measurement pin and stays
+                // inside boundary ∩ original.
+                assert!(spare.iter().all(|cpu| permitted.contains(cpu)));
             }
-            None => assert_eq!(
-                permitted.len(),
-                1,
-                "no spare is legal only when the boundary is a single CPU"
-            ),
+            ObserverSelection::Inherited(reason) => {
+                assert_eq!(reason, "no_spare");
+                assert_eq!(
+                    permitted.len(),
+                    1,
+                    "no spare is legal only when the boundary is a single CPU"
+                );
+            }
         }
     }
 }

@@ -167,6 +167,15 @@ impl ResourceGate {
         }
     }
 
+    /// The resource sampler's reported effective mask after startup, when
+    /// the background monitor is running — whether pinned to observer CPUs
+    /// or the coordinator's inherited pre-group mask.
+    pub(crate) fn sampler_effective_cpus(&self) -> Option<Vec<usize>> {
+        self.background
+            .as_ref()
+            .and_then(|monitor| monitor.observer_effective_cpus.clone())
+    }
+
     pub(crate) fn observation_age_ns(&self) -> Option<u64> {
         self.observation_age_ns
     }

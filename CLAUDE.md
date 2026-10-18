@@ -420,10 +420,15 @@ background resource monitor, so a single-CPU group pin (e.g. `ZENBENCH_PIN=2`
 inside a `{2,3}` process boundary) also confined the resource-sampler thread to
 the measured CPU. The monitor now starts while the coordinator still carries
 the verified process-boundary affinity, and the sampler pins itself to
-`effective_cpus - measurement pin` on Linux/Windows when placement is verified
-single-class — CPUs *outside the coordinator mask*, not proven dedicated:
-opaque external pools may already run there. No pin, no spare CPU, an unverified boundary, or a
-refused mask keeps/fails into ordinary behavior — mask failure aborts startup
-through the monitor's ready channel rather than silently sharing the measured
-CPU. Whether the inherited pin contributed to observed foreign-load flags is
+`(effective_cpus ∩ coordinator pre-group mask) - measurement pin` on
+Linux/Windows when placement is verified single-class and backed by a real OS
+boundary (`cpuset`/`job_affinity`/`process_mask`) — CPUs *outside the
+coordinator mask*, never wider than a taskset-narrowed launch mask, and not
+proven dedicated: opaque external pools may already run there. The worker
+reports its effective mask back through the startup channel; a refused mask
+joins the worker and aborts startup — no unpinned fallback. No pin, no spare
+CPU, an unverified boundary, or an unreadable pre-group mask keeps the
+pre-group inherited mask, with the reason labelled in the `ZENBENCH_GATE_TRACE`
+`observer selection` / `sampler affinity` / `sampler effective_cpus` lines.
+Whether the inherited pin contributed to observed foreign-load flags is
 not established; no threshold or counter arithmetic changed.
