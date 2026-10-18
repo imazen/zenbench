@@ -18,6 +18,9 @@ fn pair_child_fixture() {
     if kind == "exit" {
         std::process::exit(7);
     }
+    if let Ok(ms) = std::env::var("PAIR_LINGER_MS") {
+        std::thread::sleep(std::time::Duration::from_millis(ms.parse().unwrap()));
+    }
     let values = if kind == "candidate" {
         [8.0, 12.0]
     } else {
@@ -416,4 +419,74 @@ fn confirmation_requires_frozen_contract_and_never_accepts_unverified_placement(
             .contains(&json!("unverified CPU placement"))
     );
     assert_eq!(packet["summaries"][0]["interval"]["blocks"], 5);
+}
+
+// Real supervisor wiring: every sampled window carries the owned lifecycle
+// bounds, and only windows completing at or after the exit observation are
+// terminal. Host load may make windows unclean; that is not asserted here.
+#[test]
+fn confirmation_windows_carry_the_owned_exit_lifecycle() {
+    let root = root();
+    let path = plan(&root, "base");
+    let mut p: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    p["blocks"] = json!(5);
+    p["deadline_seconds"] = json!(240);
+    p["env"] = json!({"PAIR_LINGER_MS":"800"});
+    p["baseline"]["timeout_seconds"] = json!(30);
+    p["candidates"][0]["timeout_seconds"] = json!(30);
+    p["metric"]["resolution"] = json!(0.001);
+    p["confirmation"] = json!({"margin_pct":1.0,"control_margin_pct":1.0,"family_confidence":0.95,"scope":"fixture"});
+    std::fs::write(&path, serde_json::to_vec(&p).unwrap()).unwrap();
+    let output = cli(&root)
+        .arg("pair")
+        .arg(&path)
+        .args(["--mode", "confirm", "--output"])
+        .arg(root.join("lifecycle"))
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    let packet = read(&root, "lifecycle");
+    let invocations = packet["invocations"].as_array().unwrap();
+    assert_eq!(invocations.len(), 15);
+    let ns = |v: &Value| v.as_str().unwrap().parse::<u128>().unwrap();
+    for invocation in invocations {
+        assert_eq!(invocation["status"], "completed", "{invocation}");
+        let observations = invocation["observations"].as_array().unwrap();
+        assert!(
+            observations
+                .iter()
+                .all(|o| o["phase"] != "lifecycle_unobserved"),
+            "{invocation}"
+        );
+        let sampled: Vec<_> = observations
+            .iter()
+            .filter(|o| o.get("sample_completed_after_start_ns").is_some())
+            .collect();
+        assert!(!sampled.is_empty(), "{invocation}");
+        let wall = (invocation["wall_seconds"].as_f64().unwrap() * 1e9) as u128;
+        for o in sampled {
+            let completed = ns(&o["sample_completed_after_start_ns"]);
+            let alive = ns(&o["leader_last_alive_after_start_ns"]);
+            let exit = ns(&o["leader_exit_observed_after_start_ns"]);
+            assert!(alive < exit && exit <= wall, "{o}");
+            match o["phase"].as_str().unwrap() {
+                "during" => assert!(completed < exit && o["used_for_admission"] == true, "{o}"),
+                "exit_transition" => assert!(completed >= exit, "{o}"),
+                "start_transition" => {}
+                phase => panic!("unexpected sampled phase {phase}: {o}"),
+            }
+            if o["used_for_admission"] == false {
+                assert_eq!(o["ownership_independent_clean"], true, "{o}");
+                assert_eq!(o["admission_waiver"], "cpu_load_magnitude", "{o}");
+            } else {
+                assert_eq!(o["used_for_admission"], true, "{o}");
+            }
+        }
+    }
+    assert!(
+        packet["summaries"][0]["validity_issues"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("unverified CPU placement"))
+    );
 }

@@ -72,7 +72,12 @@ impl Reservation {
         Self::at_controlled(directory()?, activity, timeout, true, poll)
     }
 
-    fn at(root: PathBuf, activity: &str, timeout: Duration, inherit: bool) -> io::Result<Self> {
+    pub(crate) fn at(
+        root: PathBuf,
+        activity: &str,
+        timeout: Duration,
+        inherit: bool,
+    ) -> io::Result<Self> {
         Self::at_controlled(root, activity, timeout, inherit, &mut || Ok(()))
     }
 

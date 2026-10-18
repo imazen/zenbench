@@ -540,7 +540,7 @@ fn invoke(
             }
             observations
         });
-        let mut last_alive = None;
+        let mut lifecycle = super::supervisor::Lifecycle::default();
         let result = super::supervisor::run_with_observer(
             command,
             Duration::from_secs(arm.timeout_seconds).min(deadline.saturating_sub(start.elapsed())),
@@ -556,14 +556,14 @@ fn invoke(
                     child_pid.store(pid, std::sync::atomic::Ordering::Release);
                     Ok(())
                 },
-                last_alive: Some(&mut last_alive),
+                lifecycle: Some(&mut lifecycle),
             },
         );
         event.wall_seconds = began.elapsed().as_secs_f64();
         done.store(true, std::sync::atomic::Ordering::Release);
         event.observations.extend(finish_resource_observations(
             observer.join().expect("resource observer panicked"),
-            last_alive,
+            lifecycle,
             began,
         ));
         result.map(|outcome| outcome.status)
@@ -662,63 +662,102 @@ fn observation(monitor: &zenbench::platform::SystemMonitor) -> Value {
     observe(monitor, &[std::process::id()], "boundary")
 }
 
+/// Classify sampled windows with the supervisor's owned leader lifecycle.
 fn finish_resource_observations(
     samples: Vec<(Instant, Value)>,
-    last_alive: Option<Instant>,
+    lifecycle: super::supervisor::Lifecycle,
     began: Instant,
 ) -> Vec<Value> {
-    samples
+    let relative = |t: Option<Instant>| {
+        t.map_or(Value::Null, |t| {
+            json!(t.saturating_duration_since(began).as_nanos().to_string())
+        })
+    };
+    let mut observations: Vec<Value> = samples
         .into_iter()
         .map(|(sampled_at, mut sample)| {
-            sample["sample_completed_after_start_ns"] = json!(
-                sampled_at
-                    .saturating_duration_since(began)
-                    .as_nanos()
-                    .to_string()
-            );
-            sample["leader_last_alive_after_start_ns"] = last_alive.map_or(Value::Null, |alive| {
-                json!(
-                    alive
-                        .saturating_duration_since(began)
-                        .as_nanos()
-                        .to_string()
-                )
-            });
-            // CPU counters cannot attribute a worker that disappeared during the
-            // window. The supervisor's last successful liveness probe bounds that
-            // uncertainty even if process-group cleanup delayed its return.
-            if sample["phase"] == "during" && last_alive.is_none_or(|alive| sampled_at >= alive) {
+            sample["sample_completed_after_start_ns"] = relative(Some(sampled_at));
+            sample["leader_last_alive_after_start_ns"] = relative(lifecycle.last_alive);
+            sample["leader_exit_observed_after_start_ns"] = relative(lifecycle.exit_observed);
+            // A reaped leader cannot be subtracted from CPU counters. Only a window
+            // completing at or after the owned exit observation can have refreshed
+            // after reaping; windows completing earlier, including those after the
+            // last live probe, remain subject to admission.
+            if sample["phase"] == "during"
+                && lifecycle
+                    .exit_observed
+                    .is_some_and(|exit| sampled_at >= exit)
+            {
                 sample["phase"] = json!("exit_transition");
                 sample["used_for_admission"] = json!(false);
             }
-            // Only CPU ownership becomes uncertain at a transition. RAM,
-            // temperature and snapshot freshness must still satisfy strict gates.
-            if sample["non_cpu_clean"] != true {
+            // Transitions waive only the whole-host CPU magnitude. Heavy foreign
+            // processes, RAM, temperature, freshness and finite CPU must still
+            // pass at every window; false or missing evidence rejects.
+            if sample["ownership_independent_clean"] != true {
                 sample["clean"] = json!(false);
                 sample["used_for_admission"] = json!(true);
             }
+            if matches!(
+                sample["phase"].as_str(),
+                Some("start_transition" | "exit_transition")
+            ) && sample["used_for_admission"] == false
+            {
+                sample["admission_waiver"] = json!("cpu_load_magnitude");
+            }
             sample
         })
-        .collect()
+        .collect();
+    // Without an owned live probe before the exit observation, these windows are
+    // not tied to the worker's lifetime: refuse them rather than trust clean values.
+    let observed = matches!(
+        (lifecycle.last_alive, lifecycle.exit_observed),
+        (Some(alive), Some(exit)) if alive < exit
+    );
+    if !observations.is_empty() && !observed {
+        observations.push(json!({"phase":"lifecycle_unobserved","clean":false,"used_for_admission":true,
+            "policy":"whole-host-strict-v1","leader_last_alive_after_start_ns":relative(lifecycle.last_alive),
+            "leader_exit_observed_after_start_ns":relative(lifecycle.exit_observed)}));
+    }
+    observations
+}
+/// Strict whole-host admission for one snapshot. Only the CPU-load magnitude
+/// depends on assigning worker CPU, so only it may be waived at transitions.
+#[derive(Debug, PartialEq)]
+struct Admission {
+    cpu_load_within_limit: bool,
+    ownership_independent: bool,
+}
+fn admission(state: &zenbench::platform::SystemState, sample_duration: Duration) -> Admission {
+    let config = zenbench::GateConfig::strict();
+    Admission {
+        cpu_load_within_limit: state.cpu_load <= config.max_cpu_load,
+        ownership_independent: state.cpu_load.is_finite()
+            && state.heavy_process_count <= config.max_heavy_processes
+            && state.available_ram_bytes >= config.min_available_ram_bytes
+            && state
+                .cpu_temp_c
+                .is_none_or(|t| t.is_finite() && t <= config.max_cpu_temp_c.unwrap())
+            && sample_duration <= Duration::from_secs(2),
+    }
 }
 fn observe(monitor: &zenbench::platform::SystemMonitor, workers: &[u32], phase: &str) -> Value {
     let began = Instant::now();
     let state = monitor.snapshot_excluding_processes(workers);
-    let config = zenbench::GateConfig::strict();
-    let sample_duration = began.elapsed();
-    let non_cpu_clean = state.available_ram_bytes >= config.min_available_ram_bytes
-        && state
-            .cpu_temp_c
-            .is_none_or(|t| t.is_finite() && t <= config.max_cpu_temp_c.unwrap())
-        && sample_duration <= Duration::from_secs(2);
-    let clean = state.cpu_load.is_finite()
-        && state.cpu_load <= config.max_cpu_load
-        && state.heavy_process_count <= config.max_heavy_processes
-        && non_cpu_clean;
+    observation_value(&state, began.elapsed(), phase)
+}
+fn observation_value(
+    state: &zenbench::platform::SystemState,
+    sample_duration: Duration,
+    phase: &str,
+) -> Value {
+    let admission = admission(state, sample_duration);
     json!({"observed_unix_ns":now().to_string(),"sample_duration_ns":sample_duration.as_nanos().min(u64::MAX as u128) as u64,
         "phase":phase,"cpu_load":state.cpu_load,"available_ram_bytes":state.available_ram_bytes,
         "heavy_process_count":state.heavy_process_count,"cpu_temp_c":state.cpu_temp_c,
-        "policy":"whole-host-strict-v1","used_for_admission":true,"clean":clean,"non_cpu_clean":non_cpu_clean,"cleanliness_certified":false})
+        "policy":"whole-host-strict-v1","used_for_admission":true,
+        "clean":admission.cpu_load_within_limit && admission.ownership_independent,
+        "ownership_independent_clean":admission.ownership_independent,"cleanliness_certified":false})
 }
 fn check_block(
     packet: &mut Packet,
@@ -1149,75 +1188,459 @@ fn load_interrupted(path: &Path) -> Result<Packet, String> {
 
 #[cfg(test)]
 mod confirmation_tests {
+    use super::super::supervisor::Lifecycle;
     use super::*;
+    use zenbench::platform::SystemState;
+    fn quiet() -> SystemState {
+        SystemState {
+            cpu_load: 0.01,
+            available_ram_bytes: 8 << 30,
+            total_ram_bytes: 16 << 30,
+            cpu_temp_c: Some(50.0),
+            heavy_process_count: 0,
+        }
+    }
+    fn at(start: Instant, ms: u64) -> Instant {
+        start + Duration::from_millis(ms)
+    }
+    fn lived(start: Instant, alive_ms: u64, exit_ms: u64) -> Lifecycle {
+        Lifecycle {
+            last_alive: Some(at(start, alive_ms)),
+            exit_observed: Some(at(start, exit_ms)),
+        }
+    }
+    // A sampled window as the observer records it.
+    fn window(state: SystemState, phase: &str) -> Value {
+        let mut value = observation_value(&state, Duration::from_millis(5), phase);
+        if phase == "start_transition" {
+            value["used_for_admission"] = json!(false);
+        }
+        value
+    }
+    fn analyzed(sampled: &[Value]) -> Packet {
+        let mut p = packet();
+        for invocation in &mut p.invocations {
+            invocation.observations = std::iter::once(window(quiet(), "boundary"))
+                .chain(sampled.iter().cloned())
+                .chain(std::iter::once(window(quiet(), "boundary")))
+                .collect();
+        }
+        p.summaries = summarize(&p);
+        p
+    }
+    fn resource_issue(p: &Packet) -> bool {
+        p.summaries[0]["validity_issues"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("missing, stale or unclean resource observations"))
+    }
     #[test]
     fn an_exit_during_a_counter_window_is_retained_as_a_transition() {
         let start = Instant::now();
-        let foreign = json!({"phase":"during","cpu_load":0.3,"heavy_process_count":1,"clean":false,"non_cpu_clean":true,"used_for_admission":true,"policy":"whole-host-strict-v1"});
-        let terminal = json!({"phase":"during","cpu_load":0.16,"heavy_process_count":0,"clean":false,"non_cpu_clean":true,"used_for_admission":true,"policy":"whole-host-strict-v1"});
+        let foreign = json!({"phase":"during","cpu_load":0.3,"heavy_process_count":1,"clean":false,"ownership_independent_clean":false,"used_for_admission":true,"policy":"whole-host-strict-v1"});
+        let terminal = json!({"phase":"during","cpu_load":0.16,"heavy_process_count":0,"clean":false,"ownership_independent_clean":true,"used_for_admission":true,"policy":"whole-host-strict-v1"});
         let samples = finish_resource_observations(
-            vec![
-                (start, foreign.clone()),
-                (start + Duration::from_millis(20), terminal.clone()),
-            ],
-            Some(start + Duration::from_millis(10)),
+            vec![(start, foreign.clone()), (at(start, 20), terminal.clone())],
+            lived(start, 10, 15),
             start,
         );
-        // A real foreign observation while the leader was known alive stays
+        assert_eq!(samples.len(), 2);
+        // A real foreign observation before the exit observation stays
         // unchanged and still rejects admission.
         let mut expected_foreign = foreign;
         expected_foreign["sample_completed_after_start_ns"] = json!("0");
         expected_foreign["leader_last_alive_after_start_ns"] = json!("10000000");
+        expected_foreign["leader_exit_observed_after_start_ns"] = json!("15000000");
         assert_eq!(samples[0], expected_foreign);
-        // The final window may contain the exited leader's unassignable CPU.
-        // Preserve its counters, without misclassifying them as foreign work.
+        // The window completing after the exit observation may contain the
+        // reaped leader's unassignable CPU. Preserve its counters, without
+        // misclassifying them as foreign work.
         assert_eq!(samples[1]["phase"], "exit_transition");
         assert_eq!(samples[1]["used_for_admission"], false);
+        assert_eq!(samples[1]["admission_waiver"], "cpu_load_magnitude");
         assert_eq!(samples[1]["cpu_load"], terminal["cpu_load"]);
         assert_eq!(samples[1]["clean"], false);
     }
     #[test]
     fn transitions_never_waive_global_resource_failures_or_unknowns() {
         let start = Instant::now();
-        for phase in ["during", "start_transition", "exit_transition"] {
-            for global in [Some(false), None] {
-                let mut sample =
-                    json!({"phase":phase,"cpu_load":0.16,"clean":false,"used_for_admission":true});
-                if let Some(global) = global {
-                    sample["non_cpu_clean"] = json!(global);
+        for lifecycle in [Lifecycle::default(), lived(start, 10, 15)] {
+            for phase in ["during", "start_transition", "exit_transition"] {
+                for global in [Some(false), None] {
+                    let mut sample = json!({"phase":phase,"cpu_load":0.16,"clean":false,"used_for_admission":true});
+                    if let Some(global) = global {
+                        sample["ownership_independent_clean"] = json!(global);
+                    }
+                    let result = finish_resource_observations(
+                        vec![(at(start, 20), sample)],
+                        lifecycle,
+                        start,
+                    );
+                    assert_eq!(result[0]["used_for_admission"], true);
+                    assert_eq!(result[0]["clean"], false);
+                    assert_eq!(result[0]["admission_waiver"], Value::Null);
                 }
-                let result = finish_resource_observations(vec![(start, sample)], None, start);
-                assert_eq!(result[0]["used_for_admission"], true);
-                assert_eq!(result[0]["clean"], false);
             }
         }
     }
     #[test]
     fn no_proved_live_window_cannot_authorize_confirmation() {
         let start = Instant::now();
-        let mut p = packet();
-        for invocation in &mut p.invocations {
-            invocation.observations = finish_resource_observations(
-                vec![
-                    (
-                        start,
-                        json!({"phase":"start_transition","non_cpu_clean":true,"clean":true,"used_for_admission":false,"policy":"whole-host-strict-v1"}),
-                    ),
-                    (
-                        start,
-                        json!({"phase":"during","non_cpu_clean":true,"clean":true,"used_for_admission":true,"policy":"whole-host-strict-v1"}),
-                    ),
-                    (
-                        start,
-                        json!({"phase":"exit_transition","non_cpu_clean":true,"clean":true,"used_for_admission":false,"policy":"whole-host-strict-v1"}),
-                    ),
-                ],
-                None,
+        let samples = vec![
+            (
                 start,
+                json!({"phase":"start_transition","ownership_independent_clean":true,"clean":true,"used_for_admission":false,"policy":"whole-host-strict-v1"}),
+            ),
+            (
+                at(start, 5),
+                json!({"phase":"during","ownership_independent_clean":true,"clean":true,"used_for_admission":true,"policy":"whole-host-strict-v1"}),
+            ),
+            (
+                at(start, 20),
+                json!({"phase":"exit_transition","ownership_independent_clean":true,"clean":true,"used_for_admission":false,"policy":"whole-host-strict-v1"}),
+            ),
+        ];
+        // Control: the same clean windows with an owned lifecycle are admissible.
+        let p = analyzed(&finish_resource_observations(
+            samples.clone(),
+            lived(start, 10, 15),
+            start,
+        ));
+        assert_eq!(exit_code(&p), 0);
+        for lifecycle in [
+            Lifecycle::default(),
+            Lifecycle {
+                last_alive: Some(at(start, 10)),
+                exit_observed: None,
+            },
+            Lifecycle {
+                last_alive: None,
+                exit_observed: Some(at(start, 15)),
+            },
+            lived(start, 15, 15),
+        ] {
+            let mut p = packet();
+            for invocation in &mut p.invocations {
+                invocation.observations =
+                    finish_resource_observations(samples.clone(), lifecycle, start);
+                assert_eq!(
+                    invocation.observations.last().unwrap()["phase"],
+                    "lifecycle_unobserved"
+                );
+            }
+            assert_eq!(analyze(&mut p), 2);
+            assert_eq!(p.summaries[0]["verdict"], "invalid");
+            assert!(resource_issue(&p));
+        }
+    }
+    #[test]
+    fn a_live_window_after_the_last_probe_stays_subject_to_admission() {
+        // Alive at 100 ms, a foreign-load window completes at 110 ms, the leader
+        // exits at 120 ms and the owned probe observes it at 125 ms.
+        let start = Instant::now();
+        let busy = SystemState {
+            cpu_load: 0.3,
+            ..quiet()
+        };
+        let classify = |at_110: Value| {
+            finish_resource_observations(
+                vec![
+                    (start, window(quiet(), "start_transition")),
+                    (at(start, 50), window(quiet(), "during")),
+                    (at(start, 110), at_110),
+                    (at(start, 130), window(busy.clone(), "during")),
+                ],
+                lived(start, 100, 125),
+                start,
+            )
+        };
+        let classified = classify(window(busy.clone(), "during"));
+        assert_eq!(classified.len(), 4);
+        assert_eq!(classified[2]["phase"], "during");
+        assert_eq!(classified[2]["used_for_admission"], true);
+        assert_eq!(classified[2]["clean"], false);
+        assert_eq!(classified[2]["cpu_load"], 0.3);
+        assert_eq!(classified[3]["phase"], "exit_transition");
+        assert_eq!(classified[3]["used_for_admission"], false);
+        let p = analyzed(&classified);
+        assert_eq!(exit_code(&p), 2);
+        assert_eq!(p.summaries[0]["verdict"], "invalid");
+        assert!(resource_issue(&p));
+        // Control: the same schedule with a quiet 110 ms window is admissible.
+        let p = analyzed(&classify(window(quiet(), "during")));
+        assert_eq!(exit_code(&p), 0);
+        assert!(!resource_issue(&p));
+    }
+    #[test]
+    fn only_windows_completing_at_or_after_the_exit_observation_are_terminal() {
+        let start = Instant::now();
+        let exit = at(start, 125);
+        let busy = window(
+            SystemState {
+                cpu_load: 0.3,
+                ..quiet()
+            },
+            "during",
+        );
+        let classified = finish_resource_observations(
+            vec![
+                (exit - Duration::from_nanos(1), busy.clone()),
+                (exit, busy.clone()),
+            ],
+            lived(start, 100, 125),
+            start,
+        );
+        assert_eq!(classified[0]["phase"], "during");
+        assert_eq!(classified[0]["used_for_admission"], true);
+        assert_eq!(classified[0]["clean"], false);
+        assert_eq!(classified[1]["phase"], "exit_transition");
+        assert_eq!(classified[1]["used_for_admission"], false);
+        assert_eq!(
+            classified[1]["leader_exit_observed_after_start_ns"],
+            "125000000"
+        );
+    }
+    #[test]
+    fn a_missing_exit_observation_never_relabels_or_admits() {
+        let start = Instant::now();
+        let busy = SystemState {
+            cpu_load: 0.3,
+            ..quiet()
+        };
+        let lifecycle = Lifecycle {
+            last_alive: Some(at(start, 100)),
+            exit_observed: None,
+        };
+        let classified = finish_resource_observations(
+            vec![
+                (at(start, 50), window(quiet(), "during")),
+                (at(start, 900), window(busy, "during")),
+            ],
+            lifecycle,
+            start,
+        );
+        assert_eq!(classified[1]["phase"], "during");
+        assert_eq!(classified[1]["used_for_admission"], true);
+        assert_eq!(classified[1]["clean"], false);
+        assert_eq!(
+            classified[1]["leader_exit_observed_after_start_ns"],
+            Value::Null
+        );
+        assert_eq!(classified[2]["phase"], "lifecycle_unobserved");
+        // All-clean windows without an owned exit observation are still refused.
+        let p = analyzed(&finish_resource_observations(
+            vec![(at(start, 50), window(quiet(), "during"))],
+            lifecycle,
+            start,
+        ));
+        assert_eq!(exit_code(&p), 2);
+        assert!(resource_issue(&p));
+    }
+    #[test]
+    fn foreign_heavy_processes_invalidate_start_and_exit_windows() {
+        let start = Instant::now();
+        let heavy = SystemState {
+            heavy_process_count: 1,
+            ..quiet()
+        };
+        // Unassignable worker CPU raises only the whole-host magnitude.
+        let start_cpu = SystemState {
+            cpu_load: 0.2,
+            ..quiet()
+        };
+        let exit_cpu = SystemState {
+            cpu_load: 0.3,
+            ..quiet()
+        };
+        let classify = |first: SystemState, last: SystemState| {
+            finish_resource_observations(
+                vec![
+                    (start, window(first, "start_transition")),
+                    (at(start, 50), window(quiet(), "during")),
+                    (at(start, 130), window(last, "during")),
+                ],
+                lived(start, 100, 125),
+                start,
+            )
+        };
+        // Control: transitions carrying only unassignable CPU are admissible.
+        let control = classify(start_cpu.clone(), exit_cpu.clone());
+        for transition in [&control[0], &control[2]] {
+            assert_eq!(transition["used_for_admission"], false);
+            assert_eq!(transition["admission_waiver"], "cpu_load_magnitude");
+        }
+        assert_eq!(exit_code(&analyzed(&control)), 0);
+        for (phase, first, last) in [
+            (
+                "start_transition",
+                SystemState {
+                    heavy_process_count: 1,
+                    ..start_cpu.clone()
+                },
+                exit_cpu.clone(),
+            ),
+            (
+                "exit_transition",
+                start_cpu.clone(),
+                SystemState {
+                    heavy_process_count: 1,
+                    ..exit_cpu.clone()
+                },
+            ),
+            ("exit_transition", quiet(), heavy.clone()),
+        ] {
+            let classified = classify(first, last);
+            let transition = classified.iter().find(|o| o["phase"] == phase).unwrap();
+            assert_eq!(transition["heavy_process_count"], 1);
+            assert_eq!(transition["used_for_admission"], true);
+            assert_eq!(transition["clean"], false);
+            assert_eq!(transition["admission_waiver"], Value::Null);
+            let p = analyzed(&classified);
+            assert_eq!(exit_code(&p), 2);
+            assert_eq!(p.summaries[0]["verdict"], "invalid");
+            assert!(resource_issue(&p));
+        }
+    }
+    #[test]
+    fn admission_checks_each_ownership_independent_resource() {
+        let config = zenbench::GateConfig::strict();
+        let ok = Duration::from_millis(5);
+        let both = Admission {
+            cpu_load_within_limit: true,
+            ownership_independent: true,
+        };
+        assert_eq!(admission(&quiet(), ok), both);
+        // Existing inclusive limits and unknown-temperature policy are unchanged.
+        let edge = SystemState {
+            cpu_load: config.max_cpu_load,
+            available_ram_bytes: config.min_available_ram_bytes,
+            cpu_temp_c: config.max_cpu_temp_c,
+            heavy_process_count: config.max_heavy_processes,
+            ..quiet()
+        };
+        assert_eq!(admission(&edge, Duration::from_secs(2)), both);
+        let unknown_temperature = SystemState {
+            cpu_temp_c: None,
+            ..quiet()
+        };
+        assert_eq!(admission(&unknown_temperature, ok), both);
+        let hot = config.max_cpu_temp_c.unwrap() + 0.1;
+        for (name, state, duration) in [
+            (
+                "low RAM",
+                SystemState {
+                    available_ram_bytes: config.min_available_ram_bytes - 1,
+                    ..quiet()
+                },
+                ok,
+            ),
+            (
+                "stale",
+                quiet(),
+                Duration::from_secs(2) + Duration::from_nanos(1),
+            ),
+            (
+                "over temperature",
+                SystemState {
+                    cpu_temp_c: Some(hot),
+                    ..quiet()
+                },
+                ok,
+            ),
+            (
+                "non-finite temperature",
+                SystemState {
+                    cpu_temp_c: Some(f64::NAN),
+                    ..quiet()
+                },
+                ok,
+            ),
+            (
+                "non-finite CPU",
+                SystemState {
+                    cpu_load: f64::NAN,
+                    ..quiet()
+                },
+                ok,
+            ),
+            (
+                "negative infinite CPU",
+                SystemState {
+                    cpu_load: f64::NEG_INFINITY,
+                    ..quiet()
+                },
+                ok,
+            ),
+            (
+                "foreign heavy process",
+                SystemState {
+                    heavy_process_count: config.max_heavy_processes + 1,
+                    ..quiet()
+                },
+                ok,
+            ),
+        ] {
+            assert!(!admission(&state, duration).ownership_independent, "{name}");
+            let value = observation_value(&state, duration, "during");
+            assert_eq!(value["ownership_independent_clean"], false, "{name}");
+            assert_eq!(value["clean"], false, "{name}");
+            assert_eq!(value["used_for_admission"], true, "{name}");
+            assert_eq!(
+                value["heavy_process_count"], state.heavy_process_count,
+                "{name}"
+            );
+            assert_eq!(
+                value["available_ram_bytes"], state.available_ram_bytes,
+                "{name}"
             );
         }
-        assert_eq!(analyze(&mut p), 2);
-        assert_eq!(p.summaries[0]["verdict"], "invalid");
+        // Only the whole-host CPU magnitude depends on assigning worker CPU.
+        let busy = SystemState {
+            cpu_load: config.max_cpu_load + 0.01,
+            ..quiet()
+        };
+        assert_eq!(
+            admission(&busy, ok),
+            Admission {
+                cpu_load_within_limit: false,
+                ownership_independent: true,
+            }
+        );
+        let value = observation_value(&busy, ok, "during");
+        assert_eq!(value["clean"], false);
+        assert_eq!(value["ownership_independent_clean"], true);
+        let value = observation_value(&quiet(), ok, "during");
+        assert_eq!(value["clean"], true);
+        assert_eq!(value["ownership_independent_clean"], true);
+        assert_eq!(value["policy"], "whole-host-strict-v1");
+    }
+    #[test]
+    fn a_live_snapshot_reports_its_own_admission() {
+        let monitor = zenbench::platform::SystemMonitor::new();
+        let value = observe(&monitor, &[std::process::id()], "boundary");
+        let state = SystemState {
+            cpu_load: value["cpu_load"].as_f64().unwrap_or(f64::NAN),
+            available_ram_bytes: value["available_ram_bytes"].as_u64().unwrap(),
+            total_ram_bytes: 0,
+            cpu_temp_c: value["cpu_temp_c"].as_f64(),
+            heavy_process_count: value["heavy_process_count"].as_u64().unwrap() as usize,
+        };
+        let duration = Duration::from_nanos(value["sample_duration_ns"].as_u64().unwrap());
+        // A fresh monitor waits for the minimum CPU sampling interval.
+        assert!(
+            duration >= sysinfo::MINIMUM_CPU_UPDATE_INTERVAL / 2,
+            "{value}"
+        );
+        let expected = admission(&state, duration);
+        assert_eq!(
+            value["ownership_independent_clean"],
+            expected.ownership_independent
+        );
+        assert_eq!(
+            value["clean"],
+            expected.cpu_load_within_limit && expected.ownership_independent
+        );
+        assert_eq!(value["phase"], "boundary");
     }
     fn packet() -> Packet {
         let arm = |id| json!({"id":id,"program":"fixture","revision":"oracle"});

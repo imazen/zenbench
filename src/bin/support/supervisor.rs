@@ -12,12 +12,22 @@ pub(super) struct Outcome {
     pub windows_peaks: Option<Result<(u64, u64), String>>,
 }
 
-/// Private observation hooks; the liveness bound precedes a successful
-/// `try_wait() == None` probe, so the leader cannot have exited before it.
+/// Private observation hooks for the owned leader process.
 pub(super) struct ChildObservation<'a> {
     pub process_id: &'a mut Option<u32>,
     pub poll: &'a mut dyn FnMut(u32) -> io::Result<()>,
-    pub last_alive: Option<&'a mut Option<Instant>>,
+    pub lifecycle: Option<&'a mut Lifecycle>,
+}
+
+/// Owned leader lifecycle bounds from the supervisor's own exit probes.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct Lifecycle {
+    /// Taken before the last `try_wait() == None`: a lower bound on exit.
+    pub last_alive: Option<Instant>,
+    /// Taken after the owned `try_wait()` returned the exit status, before
+    /// cleanup: an upper bound on exit and, on Unix, on reaping the leader.
+    /// Absent on deadline, interruption and probe-error paths.
+    pub exit_observed: Option<Instant>,
 }
 
 pub(super) fn run(
@@ -78,7 +88,7 @@ pub(super) fn run_observed(
         ChildObservation {
             process_id,
             poll,
-            last_alive: None,
+            lifecycle: None,
         },
     )
 }
@@ -136,6 +146,9 @@ pub(super) fn run_with_observer(
         }
         let before_probe = Instant::now();
         if let Some(status) = child.try_wait()? {
+            if let Some(lifecycle) = observation.lifecycle.as_deref_mut() {
+                lifecycle.exit_observed = Some(Instant::now());
+            }
             #[cfg(windows)]
             let windows_peaks = {
                 use std::os::windows::io::AsRawHandle;
@@ -164,8 +177,8 @@ pub(super) fn run_with_observer(
                 windows_peaks,
             });
         }
-        if let Some(last_alive) = observation.last_alive.as_deref_mut() {
-            *last_alive = Some(before_probe);
+        if let Some(lifecycle) = observation.lifecycle.as_deref_mut() {
+            lifecycle.last_alive = Some(before_probe);
         }
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -265,5 +278,128 @@ fn wait_job_empty(job: &win32job::Job) -> io::Result<()> {
             ));
         }
         std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+// Owned-lifecycle oracle: the poll holds the leader until /proc reports it as a
+// zombie, so the next owned probe must observe exit and only earlier probes saw
+// it live. Linux-only because the oracle reads the kernel task state.
+#[cfg(all(test, target_os = "linux"))]
+mod lifecycle_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn state(pid: u32) -> Option<char> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        stat.rsplit_once(')')?.1.trim_start().chars().next()
+    }
+
+    fn root(name: &str) -> PathBuf {
+        let root = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join(format!("lifecycle-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("queue")).unwrap();
+        root
+    }
+
+    #[test]
+    fn exit_bounds_bracket_the_observed_zombie() {
+        let root = root("exit");
+        let release = root.join("release");
+        let _ = std::fs::remove_file(&release);
+        let mut reservation = crate::coordination::Reservation::at(
+            root.join("queue"),
+            "lifecycle test",
+            Duration::ZERO,
+            false,
+        )
+        .unwrap();
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", "while [ ! -e \"$1\" ]; do sleep 0.002; done", "sh"])
+            .arg(&release);
+        let mut polls: Vec<(Instant, Option<char>)> = Vec::new();
+        let mut zombie_seen = None;
+        let mut lifecycle = Lifecycle::default();
+        let result = run_with_observer(
+            command,
+            Duration::from_secs(20),
+            &mut reservation,
+            None,
+            &[],
+            ChildObservation {
+                process_id: &mut None,
+                poll: &mut |pid| {
+                    polls.push((Instant::now(), state(pid)));
+                    if polls.len() == 8 {
+                        std::fs::write(&release, b"").unwrap();
+                        let deadline = Instant::now() + Duration::from_secs(10);
+                        while state(pid) != Some('Z') && Instant::now() < deadline {
+                            std::thread::sleep(Duration::from_millis(1));
+                        }
+                        zombie_seen = (state(pid) == Some('Z')).then(Instant::now);
+                    }
+                    Ok(())
+                },
+                lifecycle: Some(&mut lifecycle),
+            },
+        );
+        let returned = Instant::now();
+        assert!(result.expect("child completes").status.success());
+        let zombie_seen = zombie_seen.expect("leader observed as a zombie before the final probe");
+        assert_eq!(polls.len(), 8, "the probe after release must observe exit");
+        assert!(polls.iter().all(|(_, s)| s.is_some_and(|c| c != 'Z')));
+        let alive = lifecycle
+            .last_alive
+            .expect("live probes record a lower bound");
+        let exit = lifecycle
+            .exit_observed
+            .expect("the owned exit probe records an upper bound");
+        // The lower bound comes from the last live probe, not a stale or exited one.
+        assert!(
+            alive > polls[6].0 && alive < polls[7].0,
+            "stale or late liveness bound"
+        );
+        // The upper bound follows the zombie the oracle observed, before return.
+        assert!(alive < zombie_seen && zombie_seen < exit && exit < returned);
+        reservation.reaped();
+    }
+
+    #[test]
+    fn a_deadline_records_no_exit_observation() {
+        let root = root("deadline");
+        let mut reservation = crate::coordination::Reservation::at(
+            root.join("queue"),
+            "lifecycle test",
+            Duration::ZERO,
+            false,
+        )
+        .unwrap();
+        let mut command = Command::new("sleep");
+        command.arg("30");
+        let mut lifecycle = Lifecycle::default();
+        let began = Instant::now();
+        let error = run_with_observer(
+            command,
+            Duration::from_millis(300),
+            &mut reservation,
+            None,
+            &[],
+            ChildObservation {
+                process_id: &mut None,
+                poll: &mut |_| Ok(()),
+                lifecycle: Some(&mut lifecycle),
+            },
+        )
+        .err()
+        .expect("the deadline must fail");
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        let alive = lifecycle
+            .last_alive
+            .expect("live probes before the deadline");
+        assert!(alive > began && alive < Instant::now());
+        assert!(lifecycle.exit_observed.is_none());
     }
 }
