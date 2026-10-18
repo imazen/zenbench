@@ -521,6 +521,7 @@ fn invoke(
                     continue;
                 }
                 let mut sample = observe(monitor, &[pid], "during");
+                let sampled_at = Instant::now();
                 // The worker may have exited during this OS counter window.
                 // Retain it, but do not mislabel unassignable CPU as foreign.
                 // A fixed fresh boundary window follows after the thread joins.
@@ -531,38 +532,40 @@ fn invoke(
                     sample["phase"] = json!("start_transition");
                     sample["used_for_admission"] = json!(false);
                 }
-                if done.load(Ordering::Acquire) {
-                    sample["phase"] = json!("exit_transition");
-                    sample["used_for_admission"] = json!(false);
-                }
-                observations.push(sample);
+                observations.push((sampled_at, sample));
                 if observations.len() >= 10000 {
-                    observations.push(json!({"phase":"observation_limit","clean":false,"used_for_admission":true}));
+                    observations.push((Instant::now(), json!({"phase":"observation_limit","clean":false,"used_for_admission":true})));
                     break;
                 }
             }
             observations
         });
-        let result = super::supervisor::run_observed(
+        let mut last_alive = None;
+        let result = super::supervisor::run_with_observer(
             command,
             Duration::from_secs(arm.timeout_seconds).min(deadline.saturating_sub(start.elapsed())),
             admission,
             None,
             &[dir.join("stdout.txt"), dir.join("stderr.txt")],
-            &mut event.process_id,
-            &mut |pid| {
-                if child_priority.is_null() {
-                    child_priority = priority(pid);
-                }
-                child_pid.store(pid, std::sync::atomic::Ordering::Release);
-                Ok(())
+            super::supervisor::ChildObservation {
+                process_id: &mut event.process_id,
+                poll: &mut |pid| {
+                    if child_priority.is_null() {
+                        child_priority = priority(pid);
+                    }
+                    child_pid.store(pid, std::sync::atomic::Ordering::Release);
+                    Ok(())
+                },
+                last_alive: Some(&mut last_alive),
             },
         );
         event.wall_seconds = began.elapsed().as_secs_f64();
         done.store(true, std::sync::atomic::Ordering::Release);
-        event
-            .observations
-            .extend(observer.join().expect("resource observer panicked"));
+        event.observations.extend(finish_resource_observations(
+            observer.join().expect("resource observer panicked"),
+            last_alive,
+            began,
+        ));
         result.map(|outcome| outcome.status)
     });
     event.priority = child_priority;
@@ -658,22 +661,64 @@ fn priority(pid: u32) -> Value {
 fn observation(monitor: &zenbench::platform::SystemMonitor) -> Value {
     observe(monitor, &[std::process::id()], "boundary")
 }
+
+fn finish_resource_observations(
+    samples: Vec<(Instant, Value)>,
+    last_alive: Option<Instant>,
+    began: Instant,
+) -> Vec<Value> {
+    samples
+        .into_iter()
+        .map(|(sampled_at, mut sample)| {
+            sample["sample_completed_after_start_ns"] = json!(
+                sampled_at
+                    .saturating_duration_since(began)
+                    .as_nanos()
+                    .to_string()
+            );
+            sample["leader_last_alive_after_start_ns"] = last_alive.map_or(Value::Null, |alive| {
+                json!(
+                    alive
+                        .saturating_duration_since(began)
+                        .as_nanos()
+                        .to_string()
+                )
+            });
+            // CPU counters cannot attribute a worker that disappeared during the
+            // window. The supervisor's last successful liveness probe bounds that
+            // uncertainty even if process-group cleanup delayed its return.
+            if sample["phase"] == "during" && last_alive.is_none_or(|alive| sampled_at >= alive) {
+                sample["phase"] = json!("exit_transition");
+                sample["used_for_admission"] = json!(false);
+            }
+            // Only CPU ownership becomes uncertain at a transition. RAM,
+            // temperature and snapshot freshness must still satisfy strict gates.
+            if sample["non_cpu_clean"] != true {
+                sample["clean"] = json!(false);
+                sample["used_for_admission"] = json!(true);
+            }
+            sample
+        })
+        .collect()
+}
 fn observe(monitor: &zenbench::platform::SystemMonitor, workers: &[u32], phase: &str) -> Value {
     let began = Instant::now();
     let state = monitor.snapshot_excluding_processes(workers);
     let config = zenbench::GateConfig::strict();
-    let clean = state.cpu_load.is_finite()
-        && state.cpu_load <= config.max_cpu_load
-        && state.heavy_process_count <= config.max_heavy_processes
-        && state.available_ram_bytes >= config.min_available_ram_bytes
+    let sample_duration = began.elapsed();
+    let non_cpu_clean = state.available_ram_bytes >= config.min_available_ram_bytes
         && state
             .cpu_temp_c
             .is_none_or(|t| t.is_finite() && t <= config.max_cpu_temp_c.unwrap())
-        && began.elapsed() <= Duration::from_secs(2);
-    json!({"observed_unix_ns":now().to_string(),"sample_duration_ns":began.elapsed().as_nanos().min(u64::MAX as u128) as u64,
+        && sample_duration <= Duration::from_secs(2);
+    let clean = state.cpu_load.is_finite()
+        && state.cpu_load <= config.max_cpu_load
+        && state.heavy_process_count <= config.max_heavy_processes
+        && non_cpu_clean;
+    json!({"observed_unix_ns":now().to_string(),"sample_duration_ns":sample_duration.as_nanos().min(u64::MAX as u128) as u64,
         "phase":phase,"cpu_load":state.cpu_load,"available_ram_bytes":state.available_ram_bytes,
         "heavy_process_count":state.heavy_process_count,"cpu_temp_c":state.cpu_temp_c,
-        "policy":"whole-host-strict-v1","used_for_admission":true,"clean":clean,"cleanliness_certified":false})
+        "policy":"whole-host-strict-v1","used_for_admission":true,"clean":clean,"non_cpu_clean":non_cpu_clean,"cleanliness_certified":false})
 }
 fn check_block(
     packet: &mut Packet,
@@ -1105,6 +1150,75 @@ fn load_interrupted(path: &Path) -> Result<Packet, String> {
 #[cfg(test)]
 mod confirmation_tests {
     use super::*;
+    #[test]
+    fn an_exit_during_a_counter_window_is_retained_as_a_transition() {
+        let start = Instant::now();
+        let foreign = json!({"phase":"during","cpu_load":0.3,"heavy_process_count":1,"clean":false,"non_cpu_clean":true,"used_for_admission":true,"policy":"whole-host-strict-v1"});
+        let terminal = json!({"phase":"during","cpu_load":0.16,"heavy_process_count":0,"clean":false,"non_cpu_clean":true,"used_for_admission":true,"policy":"whole-host-strict-v1"});
+        let samples = finish_resource_observations(
+            vec![
+                (start, foreign.clone()),
+                (start + Duration::from_millis(20), terminal.clone()),
+            ],
+            Some(start + Duration::from_millis(10)),
+            start,
+        );
+        // A real foreign observation while the leader was known alive stays
+        // unchanged and still rejects admission.
+        let mut expected_foreign = foreign;
+        expected_foreign["sample_completed_after_start_ns"] = json!("0");
+        expected_foreign["leader_last_alive_after_start_ns"] = json!("10000000");
+        assert_eq!(samples[0], expected_foreign);
+        // The final window may contain the exited leader's unassignable CPU.
+        // Preserve its counters, without misclassifying them as foreign work.
+        assert_eq!(samples[1]["phase"], "exit_transition");
+        assert_eq!(samples[1]["used_for_admission"], false);
+        assert_eq!(samples[1]["cpu_load"], terminal["cpu_load"]);
+        assert_eq!(samples[1]["clean"], false);
+    }
+    #[test]
+    fn transitions_never_waive_global_resource_failures_or_unknowns() {
+        let start = Instant::now();
+        for phase in ["during", "start_transition", "exit_transition"] {
+            for global in [Some(false), None] {
+                let mut sample =
+                    json!({"phase":phase,"cpu_load":0.16,"clean":false,"used_for_admission":true});
+                if let Some(global) = global {
+                    sample["non_cpu_clean"] = json!(global);
+                }
+                let result = finish_resource_observations(vec![(start, sample)], None, start);
+                assert_eq!(result[0]["used_for_admission"], true);
+                assert_eq!(result[0]["clean"], false);
+            }
+        }
+    }
+    #[test]
+    fn no_proved_live_window_cannot_authorize_confirmation() {
+        let start = Instant::now();
+        let mut p = packet();
+        for invocation in &mut p.invocations {
+            invocation.observations = finish_resource_observations(
+                vec![
+                    (
+                        start,
+                        json!({"phase":"start_transition","non_cpu_clean":true,"clean":true,"used_for_admission":false,"policy":"whole-host-strict-v1"}),
+                    ),
+                    (
+                        start,
+                        json!({"phase":"during","non_cpu_clean":true,"clean":true,"used_for_admission":true,"policy":"whole-host-strict-v1"}),
+                    ),
+                    (
+                        start,
+                        json!({"phase":"exit_transition","non_cpu_clean":true,"clean":true,"used_for_admission":false,"policy":"whole-host-strict-v1"}),
+                    ),
+                ],
+                None,
+                start,
+            );
+        }
+        assert_eq!(analyze(&mut p), 2);
+        assert_eq!(p.summaries[0]["verdict"], "invalid");
+    }
     fn packet() -> Packet {
         let arm = |id| json!({"id":id,"program":"fixture","revision":"oracle"});
         let plan: Plan=serde_json::from_value(json!({"schema":1,"baseline":arm("base"),"candidates":[arm("edit")],

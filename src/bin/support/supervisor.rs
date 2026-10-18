@@ -12,6 +12,14 @@ pub(super) struct Outcome {
     pub windows_peaks: Option<Result<(u64, u64), String>>,
 }
 
+/// Private observation hooks; the liveness bound precedes a successful
+/// `try_wait() == None` probe, so the leader cannot have exited before it.
+pub(super) struct ChildObservation<'a> {
+    pub process_id: &'a mut Option<u32>,
+    pub poll: &'a mut dyn FnMut(u32) -> io::Result<()>,
+    pub last_alive: Option<&'a mut Option<Instant>>,
+}
+
 pub(super) fn run(
     command: Command,
     budget: Duration,
@@ -53,13 +61,35 @@ pub(super) fn run_controlled(
 }
 
 pub(super) fn run_observed(
-    mut command: Command,
+    command: Command,
     budget: Duration,
     reservation: &mut crate::coordination::Reservation,
     scope: Option<&str>,
     logs: &[std::path::PathBuf],
     process_id: &mut Option<u32>,
     poll: &mut dyn FnMut(u32) -> io::Result<()>,
+) -> io::Result<Outcome> {
+    run_with_observer(
+        command,
+        budget,
+        reservation,
+        scope,
+        logs,
+        ChildObservation {
+            process_id,
+            poll,
+            last_alive: None,
+        },
+    )
+}
+
+pub(super) fn run_with_observer(
+    mut command: Command,
+    budget: Duration,
+    reservation: &mut crate::coordination::Reservation,
+    scope: Option<&str>,
+    logs: &[std::path::PathBuf],
+    mut observation: ChildObservation<'_>,
 ) -> io::Result<Outcome> {
     reservation.command(&mut command);
     reservation.retain_until_reaped();
@@ -77,10 +107,10 @@ pub(super) fn run_observed(
     // A wrapper can fail after spawn; retain admission if no child handle
     // is available to prove cleanup.
     let mut child = wrapped.spawn()?;
-    *process_id = Some(child.id());
+    *observation.process_id = Some(child.id());
     let start = Instant::now();
     loop {
-        let interruption = poll(child.id()).err();
+        let interruption = (observation.poll)(child.id()).err();
         let oversized = logs
             .iter()
             .any(|p| std::fs::metadata(p).is_ok_and(|m| m.len() > 64 * 1024 * 1024));
@@ -104,6 +134,7 @@ pub(super) fn run_observed(
                 )
             }));
         }
+        let before_probe = Instant::now();
         if let Some(status) = child.try_wait()? {
             #[cfg(windows)]
             let windows_peaks = {
@@ -132,6 +163,9 @@ pub(super) fn run_observed(
                 status,
                 windows_peaks,
             });
+        }
+        if let Some(last_alive) = observation.last_alive.as_deref_mut() {
+            *last_alive = Some(before_probe);
         }
         std::thread::sleep(Duration::from_millis(10));
     }
