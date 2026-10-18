@@ -98,18 +98,28 @@ impl SystemMonitor {
     /// workers cannot be subtracted, so their remaining interval CPU is treated
     /// conservatively as foreign load. An empty list preserves [`Self::snapshot`].
     pub fn snapshot_excluding_processes(&self, workers: &[u32]) -> SystemState {
-        {
+        let since_last_refresh = {
             let last = *self.last_cpu_refresh.lock().unwrap();
             let since = last.elapsed();
             if since < sysinfo::MINIMUM_CPU_UPDATE_INTERVAL {
                 std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL - since);
             }
-        }
+            since
+        };
+        let refresh_started = Instant::now();
         let mut sys = self.sys.lock().unwrap();
         sys.refresh_cpu_all();
+        let cpu_refresh_elapsed = refresh_started.elapsed();
+        let global_agg_before_procs = f64::from(sys.global_cpu_usage());
+        let memory_started = Instant::now();
         sys.refresh_memory();
+        let memory_refresh_elapsed = memory_started.elapsed();
+        let procs_started = Instant::now();
         sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        let procs_refresh_elapsed = procs_started.elapsed();
         *self.last_cpu_refresh.lock().unwrap() = Instant::now();
+        let system_refresh_elapsed = refresh_started.elapsed();
+        let global_agg_after_procs = f64::from(sys.global_cpu_usage());
 
         let cpus = sys.cpus();
         let cpu_load = if cpus.is_empty() {
@@ -123,6 +133,7 @@ impl SystemMonitor {
 
         // CPU temperature: try to find it from components
         // sysinfo provides component temperatures on Linux and macOS
+        let components_started = Instant::now();
         let cpu_temp_c = {
             let components = sysinfo::Components::new_with_refreshed_list();
             components
@@ -138,6 +149,7 @@ impl SystemMonitor {
                 .map(|t| t as f64)
                 .reduce(f64::max)
         };
+        let components_elapsed = components_started.elapsed();
 
         // Registered launcher/worker PIDs are part of this benchmark's work.
         // Their CPU counters use the same refresh interval as global CPU use.
@@ -173,6 +185,7 @@ impl SystemMonitor {
         // already aggregate their CPU use: count each process once, including
         // foreign processes, and retain foreign thread CPU in global load.
         let user_tasks = process_task_pids(&sys);
+        let global_cpu_fraction = cpu_load;
         let (cpu_load, heavy_process_count) = foreign_activity(
             cpu_load,
             cpus.len(),
@@ -183,14 +196,55 @@ impl SystemMonitor {
             &user_tasks,
         );
         if std::env::var_os("ZENBENCH_GATE_TRACE").is_some() {
-            for process in sys.processes().values().filter(|p| {
-                !owned.contains(&p.pid()) && !user_tasks.contains(&p.pid()) && p.cpu_usage() > 10.0
-            }) {
+            let owned_cpu_pct: f64 = sys
+                .processes()
+                .values()
+                .filter(|p| owned.contains(&p.pid()))
+                .map(|p| f64::from(p.cpu_usage()))
+                .sum();
+            eprintln!(
+                "[zenbench gate] sampler raw: since_last_refresh={since_last_refresh:?} \
+                 cpu_refresh={cpu_refresh_elapsed:?} mem_refresh={memory_refresh_elapsed:?} \
+                 procs_refresh={procs_refresh_elapsed:?} system_refresh={system_refresh_elapsed:?} \
+                 components_refresh={components_elapsed:?} logical_cores={} \
+                 per_core_avg_frac={global_cpu_fraction} \
+                 global_agg_frac_before_procs={} global_agg_frac_after_procs={} \
+                 owned_cpu_pct={owned_cpu_pct} foreign_cpu_frac={cpu_load} \
+                 heavy_processes={heavy_process_count}",
+                cpus.len(),
+                global_agg_before_procs / 100.0,
+                global_agg_after_procs / 100.0
+            );
+            for process in sys
+                .processes()
+                .values()
+                .filter(|p| owned.contains(&p.pid()))
+            {
                 eprintln!(
-                    "[zenbench gate] foreign pid={} name={:?} cpu_pct={}",
+                    "[zenbench gate] owned pid={} name={:?} cpu_pct={} thread_kind={:?}",
                     process.pid(),
                     process.name(),
-                    process.cpu_usage()
+                    process.cpu_usage(),
+                    process.thread_kind()
+                );
+            }
+            let mut foreign: Vec<_> = sys
+                .processes()
+                .values()
+                .filter(|p| {
+                    !owned.contains(&p.pid())
+                        && !user_tasks.contains(&p.pid())
+                        && p.cpu_usage() > 0.0
+                })
+                .collect();
+            foreign.sort_by(|a, b| b.cpu_usage().total_cmp(&a.cpu_usage()));
+            for process in foreign.into_iter().take(8) {
+                eprintln!(
+                    "[zenbench gate] foreign pid={} name={:?} cpu_pct={} thread_kind={:?}",
+                    process.pid(),
+                    process.name(),
+                    process.cpu_usage(),
+                    process.thread_kind()
                 );
             }
         }

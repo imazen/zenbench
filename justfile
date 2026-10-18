@@ -267,6 +267,12 @@ cpu-probe-check:
 cpu-probe-example *cpus:
     cargo run --release --example cpu_probe -- {{cpus}}
 
+# Mechanical resource-sampler diagnostic: owned busy/idle phases on a
+# same-process thread, raw sampler arithmetic on stderr via ZENBENCH_GATE_TRACE.
+# Diagnostic only; not a performance measurement.
+sampler-probe *args:
+    ZENBENCH_GATE_TRACE=1 ZENBENCH_NO_SAVE=1 cargo run --release --example sampler_probe -- {{args}}
+
 cpu-probe-info:
     cargo run --bin zenbench -- cpu-info --probe --workers 2
 
