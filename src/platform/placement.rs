@@ -197,6 +197,7 @@ pub(crate) enum ObserverSelection {
     /// mask is not proven dedicated isolation: opaque external thread pools
     /// (created before the group pin, never queried by zenbench) may already
     /// run there. Selection is per logical CPU, not per core or cache domain.
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     OutsideCoordinatorMask(Vec<usize>),
     /// No observer mask was selected; the sampler keeps the coordinator's
     /// pre-group inherited mask. The label feeds the `ZENBENCH_GATE_TRACE`

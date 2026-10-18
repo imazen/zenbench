@@ -518,6 +518,7 @@ fn run_comparison_group(
         .select_observer(original_mask.as_deref(), cores);
     if std::env::var_os("ZENBENCH_GATE_TRACE").is_some() {
         let (mask, reason) = match &observer {
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
             platform::ObserverSelection::OutsideCoordinatorMask(mask) => {
                 (format!("{mask:?}"), "outside_coordinator_mask")
             }
@@ -539,6 +540,7 @@ fn run_comparison_group(
     // still inside the group's time budget.
     gate.wait_for_no_benchmarks();
     gate.start_monitoring(match &observer {
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
         platform::ObserverSelection::OutsideCoordinatorMask(mask) => Some(mask.clone()),
         platform::ObserverSelection::Inherited(_) => None,
     });

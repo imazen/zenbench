@@ -432,3 +432,8 @@ pre-group inherited mask, with the reason labelled in the `ZENBENCH_GATE_TRACE`
 `observer selection` / `sampler affinity` / `sampler effective_cpus` lines.
 Whether the inherited pin contributed to observed foreign-load flags is
 not established; no threshold or counter arithmetic changed.
+
+The first macOS ARM64 CI build of this change rejected the observer-selection
+variant as unused under `-D warnings`: only Linux and Windows construct it.
+The variant and its two match arms now share that platform cfg. Unsupported
+platforms keep the inherited-mask fallback; no warning allowance was added.
