@@ -207,11 +207,26 @@ unknown, matching the existing policy, not invented as a cool reading.
 At least one complete during-process observation is required after the initial
 process-counter calibration window. A process shorter than two OS sampling
 intervals may be unresolved: increase its predeclared internal
-work budget while retaining the same estimand, or use Iterate. The first process-counter window (`start_transition`) and final window
-crossing process exit are retained (`exit_transition` for the final window) and excluded from admission
-because new/exited process CPU cannot reliably be assigned. A fixed fresh post-exit sample
-follows. Sampling cannot certify absence of interference between observations;
-this blind interval and OS counter limitations remain visible in raw evidence.
+work budget while retaining the same estimand, or use Iterate.
+
+New and reaped worker CPU cannot reliably be assigned. The first process-counter
+window (`start_transition`) and every window completing at or after the
+supervisor's owned exit observation (`exit_transition`) therefore waive only the
+whole-host CPU-load magnitude (`admission_waiver: cpu_load_magnitude`). Foreign
+heavy processes, RAM, temperature, sample freshness and a finite CPU reading stay
+enforced at every window. The exit observation is taken after the supervisor's own
+`try_wait` returns the leader's status, before cleanup. Windows completing
+earlier, including those after the last successful liveness probe, remain subject
+to full admission. Each sampled window keeps its raw counters plus
+`sample_completed_after_start_ns`, `leader_last_alive_after_start_ns` (a lower
+bound on exit) and `leader_exit_observed_after_start_ns` (an upper bound).
+Missing owned lifecycle evidence adds a failing `lifecycle_unobserved`
+observation. A fixed fresh post-exit sample follows.
+
+Sampling cannot certify absence of interference between observations. Completion
+times trail the OS counter refresh, so the window whose refresh spans reaping is
+not admitted by CPU magnitude even when its counters still assigned the leader.
+These blind intervals and OS counter limitations remain visible in raw evidence.
 
 Unix nice values are queried for each child; unavailable values and unsupported
 platform queries have explicit reasons. Children inherit priority and must not

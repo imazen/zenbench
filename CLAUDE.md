@@ -395,3 +395,20 @@ and evidence references, fails on export I/O errors, and explicitly rejects pair
 packets for these suite renderers. Themed chart bars show means; they do not draw
 confirmation confidence intervals. Matrix MAD comments in themed SVG source are
 not visible error bars. Use the chart guide to keep these quantities distinct.
+
+### Known Bugs: external exit-window admission (2026-10-18)
+
+Confirm's resource sampler counted a reaped worker leader's final-window CPU as
+foreign: exited processes cannot be subtracted, so a window refreshed after
+reaping showed the worker's own CPU. On r7900x an 8-thread single-process
+control child showed 0.30-0.35 whole-host CPU in 13 of 15 windows completing
+after its exit (two still assigned the leader), while all 45 live windows read
+below 0.03. Only windows completing at or after the supervisor's owned exit
+observation (after `try_wait` returns the status, before cleanup) are now
+`exit_transition`; windows after the last live probe stay subject to admission,
+and missing lifecycle evidence invalidates. Transitions waive only the
+`cpu_load` magnitude: heavy foreign processes, RAM, temperature, freshness and
+finite CPU stay enforced. The zombie-oracle lifecycle test is Linux-only; the
+pair_cli wiring test runs everywhere. Residual: the window whose counter refresh
+spans reaping is not admitted by CPU magnitude even when it still assigned the
+leader.

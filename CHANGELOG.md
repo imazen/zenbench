@@ -4,6 +4,10 @@
 
 ### QUEUED BREAKING CHANGES
 
+### Fixed
+
+- `pair --mode confirm` no longer counts a reaped worker leader's final counter window as foreign CPU. Only windows completing at or after the supervisor's owned exit observation are exit transitions; transitions waive only the whole-host CPU magnitude, and missing lifecycle evidence invalidates (632ce674, 010f14fd).
+
 ## [0.1.11] - 2026-10-12
 
 ### Changed

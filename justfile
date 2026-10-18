@@ -523,6 +523,14 @@ pair-confirm-check:
     cargo test --test pair_cli
     cargo clippy --all-features --all-targets -- -D warnings
 
+# Exit-window resource classification: admission predicate, lifecycle finisher,
+# Linux zombie-oracle supervisor bounds and real pair wiring (use run-heavy).
+pair-exit-window-check:
+    cargo test --bin zenbench support::pair::confirmation_tests
+    cargo test --bin zenbench support::supervisor::lifecycle_tests
+    cargo test --test pair_cli confirmation_windows_carry_the_owned_exit_lifecycle
+    cargo clippy --bin zenbench --tests -- -D warnings
+
 # Run the real decoder and Rust/C encoder adapter acceptance on prebuilt artifacts.
 # Revisions describe artifacts; this recipe never builds the codecs.
 pair-codec-acceptance profile encode cencode input output profile_rev encode_rev c_rev:
