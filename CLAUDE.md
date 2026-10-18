@@ -415,7 +415,7 @@ leader.
 
 ### Known Bugs: sampler shared the measurement pin (2026-10-18)
 
-`run_comparison_group` entered the group affinity guard before starting the
+On Linux, `run_comparison_group` entered the group affinity guard before starting the
 background resource monitor, so a single-CPU group pin (e.g. `ZENBENCH_PIN=2`
 inside a `{2,3}` process boundary) also confined the resource-sampler thread to
 the measured CPU. The monitor now starts while the coordinator still carries
