@@ -6,6 +6,8 @@
 
 ### Fixed
 
+- Derive macOS process CPU rates from monotonic cumulative counters tied to PID/start time, preserving foreign-load checks and conservative missing-owner behavior without gate or public API changes (`3b1d0f71`).
+
 - `pair --mode confirm` no longer counts a reaped worker leader's final counter window as foreign CPU. Only windows completing at or after the supervisor's owned exit observation are exit transitions; transitions waive only the whole-host CPU magnitude, and missing lifecycle evidence invalidates (632ce674, 010f14fd).
 - On Linux, the resource sampler no longer inherits a narrow measurement pin. On Linux/Windows, when placement is verified `uniform_hardware` or `enforced_uniform` with a real OS boundary (cpuset/job/process mask) and a group/suite/environment pin leaves spare CPUs inside `boundary ∩ coordinator pre-group mask`, the sampler thread is confined to CPUs outside the coordinator/measurement mask before group affinity is entered — never wider than a taskset-narrowed launch mask. It reports its effective mask back through startup; a refused mask joins the worker and aborts the run instead of falling back unpinned. Selection is outside the coordinator mask, not guaranteed dedicated isolation — external pools may already run there. No pin, no spare CPU, or an unverified boundary keeps the pre-group inherited mask (the trace labels the reason). CPU arithmetic, thresholds, and gate behavior are unchanged (aae0990a, f5f490c5, 0673d448, 4b58c43d).
 
