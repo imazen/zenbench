@@ -230,7 +230,7 @@ impl CpuPlacement {
         #[cfg(not(any(target_os = "linux", target_os = "windows")))]
         {
             let _ = (original, measurement);
-            return ObserverSelection::Inherited("unsupported_os");
+            ObserverSelection::Inherited("unsupported_os")
         }
         #[cfg(any(target_os = "linux", target_os = "windows"))]
         {

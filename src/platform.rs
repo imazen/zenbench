@@ -53,13 +53,41 @@ pub struct SystemMonitor {
     /// two refreshes; reading it too soon after the previous one yields 0.0.
     last_cpu_refresh: Mutex<Instant>,
     exclude_benchmark_owner: bool,
+    #[cfg(not(target_os = "windows"))]
+    components: Mutex<Option<sysinfo::Components>>,
+    #[cfg(target_os = "windows")]
+    has_cpu_temp: std::sync::atomic::AtomicBool,
     #[cfg(target_os = "macos")]
     cpu_counters: Mutex<cpu_counters::CpuCounters>,
+}
+
+const _: fn() = || {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<SystemMonitor>();
+};
+
+fn is_cpu_temp_label(label: &str) -> bool {
+    let label = label.to_ascii_lowercase();
+    label.contains("cpu")
+        || label.contains("core")
+        || label.contains("package")
+        || label.contains("tctl")
+}
+
+fn read_cpu_temp(components: &sysinfo::Components) -> Option<f64> {
+    components
+        .iter()
+        .filter(|c| is_cpu_temp_label(c.label()))
+        .filter_map(|c| c.temperature())
+        .map(f64::from)
+        .reduce(f64::max)
 }
 
 impl SystemMonitor {
     pub fn new() -> Self {
         let sys = System::new_all(); // establishes the first CPU sample
+        let initial_components = sysinfo::Components::new_with_refreshed_list();
+        let has_sensor = read_cpu_temp(&initial_components).is_some();
         #[cfg(target_os = "macos")]
         let cpu_counters = cpu_counters::CpuCounters::new(
             Instant::now(),
@@ -70,6 +98,10 @@ impl SystemMonitor {
         Self {
             #[cfg(target_os = "macos")]
             cpu_counters: Mutex::new(cpu_counters),
+            #[cfg(not(target_os = "windows"))]
+            components: Mutex::new(has_sensor.then_some(initial_components)),
+            #[cfg(target_os = "windows")]
+            has_cpu_temp: std::sync::atomic::AtomicBool::new(has_sensor),
             sys: Mutex::new(sys),
             last_cpu_refresh: Mutex::new(Instant::now()),
             exclude_benchmark_owner: false,
@@ -146,23 +178,29 @@ impl SystemMonitor {
         let available_ram_bytes = sys.available_memory();
         let total_ram_bytes = sys.total_memory();
 
-        // CPU temperature: try to find it from components
-        // sysinfo provides component temperatures on Linux and macOS
+        // CPU temperature: reuse discovered sensor handles when present; skip
+        // repeated IOKit/sysfs discovery when the platform exposes no CPU temp
+        // sensor (e.g. Apple Silicon M-series returning None after ~40ms IOHID scan).
         let components_started = Instant::now();
+        #[cfg(not(target_os = "windows"))]
         let cpu_temp_c = {
-            let components = sysinfo::Components::new_with_refreshed_list();
-            components
-                .iter()
-                .filter(|c| {
-                    let label = c.label().to_lowercase();
-                    label.contains("cpu")
-                        || label.contains("core")
-                        || label.contains("package")
-                        || label.contains("tctl")
-                })
-                .filter_map(|c| c.temperature())
-                .map(|t| t as f64)
-                .reduce(f64::max)
+            let mut guard = self.components.lock().unwrap();
+            if let Some(components) = guard.as_mut() {
+                for component in components.list_mut() {
+                    if is_cpu_temp_label(component.label()) {
+                        component.refresh();
+                    }
+                }
+                read_cpu_temp(components)
+            } else {
+                None
+            }
+        };
+        #[cfg(target_os = "windows")]
+        let cpu_temp_c = if self.has_cpu_temp.load(std::sync::atomic::Ordering::Relaxed) {
+            read_cpu_temp(&sysinfo::Components::new_with_refreshed_list())
+        } else {
+            None
         };
         let components_elapsed = components_started.elapsed();
 
@@ -232,6 +270,17 @@ impl SystemMonitor {
                 .filter(|p| owned.contains(&p.pid()))
                 .map(|p| f64::from(p.cpu_usage()))
                 .sum();
+            let visible_foreign_cpu_pct: f64 = sys
+                .processes()
+                .values()
+                .filter(|p| !owned.contains(&p.pid()) && !user_tasks.contains(&p.pid()))
+                .map(|p| f64::from(p.cpu_usage()))
+                .sum();
+            let unattributed_cpu_frac = if cpus.is_empty() {
+                0.0
+            } else {
+                (cpu_load - visible_foreign_cpu_pct / cpus.len() as f64 / 100.0).max(0.0)
+            };
             eprintln!(
                 "[zenbench gate] sampler raw: since_last_refresh={since_last_refresh:?} \
                  cpu_refresh={cpu_refresh_elapsed:?} mem_refresh={memory_refresh_elapsed:?} \
@@ -239,7 +288,8 @@ impl SystemMonitor {
                  components_refresh={components_elapsed:?} logical_cores={} \
                  per_core_avg_frac={global_cpu_fraction} \
                  global_agg_frac_before_procs={} global_agg_frac_after_procs={} \
-                 owned_cpu_pct={owned_cpu_pct} foreign_cpu_frac={cpu_load} \
+                 owned_cpu_pct={owned_cpu_pct} visible_foreign_cpu_pct={visible_foreign_cpu_pct} \
+                 unattributed_cpu_frac={unattributed_cpu_frac} foreign_cpu_frac={cpu_load} \
                  heavy_processes={heavy_process_count}",
                 cpus.len(),
                 global_agg_before_procs / 100.0,

@@ -551,8 +551,16 @@ fn run_comparison_group(
         );
     }
 
-    let _affinity = platform::GroupAffinityGuard::enter(cores)
-        .unwrap_or_else(|e| panic!("benchmark group '{}' affinity: {e}", group.name));
+    let _affinity =
+        platform::GroupAffinityGuard::enter_for_policy(cores, cpu_session.placement.policy)
+            .unwrap_or_else(|e| panic!("benchmark group '{}' affinity: {e}", group.name));
+    #[cfg(target_os = "macos")]
+    if std::env::var_os("ZENBENCH_GATE_TRACE").is_some() {
+        eprintln!(
+            "[zenbench gate] coordinator qos={:?}",
+            platform::current_thread_qos().ok()
+        );
+    }
     let mut group_placement = cpu_session.placement.clone();
     group_placement.thread_affinity_requested = cores.map(|cores| {
         let mut cores = cores.to_vec();

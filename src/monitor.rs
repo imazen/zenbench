@@ -55,6 +55,11 @@ impl Monitor {
                     },
                     None => None,
                 };
+                #[cfg(target_os = "macos")]
+                let _qos = crate::platform::set_current_thread_qos(
+                    crate::platform::ThreadQos::Background,
+                )
+                .ok();
                 let effective = crate::platform::current_thread_affinity().ok();
                 if std::env::var_os("ZENBENCH_GATE_TRACE").is_some() {
                     match &observer_cpus {
@@ -65,6 +70,11 @@ impl Monitor {
                             "[zenbench gate] sampler affinity inherited effective={effective:?}"
                         ),
                     }
+                    #[cfg(target_os = "macos")]
+                    eprintln!(
+                        "[zenbench gate] sampler qos={:?}",
+                        crate::platform::current_thread_qos().ok()
+                    );
                 }
                 let monitor = SystemMonitor::for_benchmark();
                 while !done.load(Ordering::Acquire) {

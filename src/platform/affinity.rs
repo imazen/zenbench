@@ -524,15 +524,53 @@ pub(crate) fn benchmark_affinity() -> Option<Vec<usize>> {
 }
 
 pub(crate) struct GroupAffinityGuard {
+    // Dropped first so nested thread guards unwind in LIFO order.
+    _qos: Option<QosGuard>,
     _pin: Option<AffinityGuard>,
     previous: Option<Vec<usize>>,
 }
 
 impl GroupAffinityGuard {
+    #[cfg(all(test, any(target_os = "linux", target_os = "windows")))]
     pub(crate) fn enter(cores: Option<&[usize]>) -> Result<Self, AffinityError> {
         let pin = cores.map(pin_current_thread).transpose()?;
         let previous = BENCHMARK_AFFINITY.with(|value| value.replace(cores.map(<[usize]>::to_vec)));
         Ok(Self {
+            _qos: None,
+            _pin: pin,
+            previous,
+        })
+    }
+
+    pub(crate) fn enter_for_policy(
+        cores: Option<&[usize]>,
+        policy: super::CpuPolicy,
+    ) -> Result<Self, AffinityError> {
+        let pin = cores.map(pin_current_thread).transpose()?;
+        #[cfg(target_os = "macos")]
+        let qos = match current_thread_qos() {
+            Ok(state) if policy == super::CpuPolicy::Efficiency && state.class != 0x09 => {
+                set_current_thread_qos(ThreadQos::Background).ok()
+            }
+            // Request USER_INTERACTIVE (0x21) for non-efficiency benchmark runs
+            // unless the caller already requested interactive (0x21) or explicitly
+            // placed the thread in background (0x09).
+            Ok(state)
+                if policy != super::CpuPolicy::Efficiency
+                    && matches!(state.class, 0x19 | 0x15 | 0x11) =>
+            {
+                set_current_thread_qos(ThreadQos::UserInteractive).ok()
+            }
+            _ => None,
+        };
+        #[cfg(not(target_os = "macos"))]
+        let qos = {
+            let _ = policy;
+            None
+        };
+        let previous = BENCHMARK_AFFINITY.with(|value| value.replace(cores.map(<[usize]>::to_vec)));
+        Ok(Self {
+            _qos: qos,
             _pin: pin,
             previous,
         })
@@ -681,6 +719,39 @@ mod tests {
         }
         assert_eq!(calls.load(Ordering::Relaxed), 0);
         assert_eq!(current_thread_affinity().unwrap(), before);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn group_policy_steers_macos_qos_and_restores_on_drop() {
+        let before = current_thread_qos().unwrap();
+        if matches!(before.class, 0x21 | 0x19 | 0x15 | 0x11) {
+            {
+                let _g = GroupAffinityGuard::enter_for_policy(
+                    None,
+                    super::super::CpuPolicy::Unrestricted,
+                )
+                .unwrap();
+                assert_eq!(current_thread_qos().unwrap().class, 0x21);
+            }
+            assert_eq!(current_thread_qos().unwrap(), before);
+            {
+                let _g =
+                    GroupAffinityGuard::enter_for_policy(None, super::super::CpuPolicy::Efficiency)
+                        .unwrap();
+                assert_eq!(current_thread_qos().unwrap().class, 0x09);
+            }
+            assert_eq!(current_thread_qos().unwrap(), before);
+            // Explicit caller Background QoS is preserved under non-Efficiency policy.
+            let _bg = set_current_thread_qos(ThreadQos::Background).unwrap();
+            {
+                let _g = GroupAffinityGuard::enter_for_policy(None, super::super::CpuPolicy::Auto)
+                    .unwrap();
+                assert_eq!(current_thread_qos().unwrap().class, 0x09);
+            }
+            drop(_bg);
+            assert_eq!(current_thread_qos().unwrap(), before);
+        }
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
