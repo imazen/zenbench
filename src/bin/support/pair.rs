@@ -154,8 +154,9 @@ pub(crate) fn run(options: Options<'_>) -> Result<i32, String> {
         json!({"plan":plan,"identity":identity,"mode":options.mode})
     };
     let fingerprint = digest(&serde_json::to_vec(&fingerprint_record).map_err(|e| e.to_string())?);
-    let placement = serde_json::to_value(zenbench::platform::check_cpu_placement()?)
-        .map_err(|e| e.to_string())?;
+    let placement = zenbench::platform::check_cpu_placement()?;
+    crate::warn_unverified_auto(&placement);
+    let placement = serde_json::to_value(placement).map_err(|e| e.to_string())?;
     let mut prior = if let Some(path) = options.resume {
         Some(load(path)?)
     } else {

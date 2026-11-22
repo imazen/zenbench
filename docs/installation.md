@@ -32,8 +32,9 @@ that directory is on PATH. Windows uses `zenbench.exe`. The package supports Rus
 1.85 or newer. `cargo install` builds for the machine where it runs; Windows ARM64
 should use a native ARM64 Rust toolchain. Native Windows ARM64 discovers OS
 core/cache classes and enforces a selected class with an inherited Job boundary
-on supported single-group topology. Unknown topology and multiple processor
-groups still fail closed. Inspect `zenbench cpu-info` before choosing a class.
+on supported single-group topology. With unknown topology or multiple processor
+groups, default runs continue with unverified placement. Inspect
+`zenbench cpu-info` before choosing a class.
 
 Linux `nice` requires a working systemd user manager, `nice`, `ionice`, `ps` and
 `systemctl`; it fails rather than dropping its hard memory ceiling. macOS uses

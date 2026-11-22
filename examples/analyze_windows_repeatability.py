@@ -12,8 +12,18 @@ import statistics
 def analyze(packet):
     groups = {}
     refusals = 0
+    qualified_defaults = 0
     for run in packet['runs']:
         cpus = run['cpu_set']
+        if cpus == 'default' and run['exit_code'] == 0:
+            evidence = run['evidence']
+            placement = evidence['result']['cpu_placement']
+            assert placement['policy'] == 'auto'
+            assert placement['status'] == 'unrestricted'
+            assert placement['effective_cpus'] == evidence['process_after']
+            assert 'cpu_placement=UNVERIFIED_AUTO' in run['stderr']
+            qualified_defaults += 1
+            continue
         if cpus in ['default', '0,2']:
             assert run['exit_code'] != 0
             expected = ('CPU placement refused: Asymmetric topology' if cpus == 'default'
@@ -103,9 +113,12 @@ def analyze(packet):
             'double_change_max_pct': max(r['double_change_pct'] for r in runs),
             'runs': runs,
         })
-    return {'binary_sha256': packet['binary_sha256'], 'default_refusals': refusals,
-            'memory_limit_bytes': packet['memory_limit_bytes'],
-            'peak_job_commit_bytes': packet['peak_job_commit_bytes'], 'groups': summary}
+    result = {'binary_sha256': packet['binary_sha256'], 'default_refusals': refusals,
+              'memory_limit_bytes': packet['memory_limit_bytes'],
+              'peak_job_commit_bytes': packet['peak_job_commit_bytes'], 'groups': summary}
+    if qualified_defaults:
+        result['qualified_default_runs'] = qualified_defaults
+    return result
 
 
 def main():

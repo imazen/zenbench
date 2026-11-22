@@ -297,6 +297,8 @@ impl<'a> BenchmarkGroup<'a> {
                 previous.compatible(&placement),
                 "CPU placement changed within immediate-mode group"
             );
+        } else {
+            placement.warn_if_unverified_auto();
         }
         self.immediate_cpu_placement = Some(placement);
         let mut bencher = crate::bench::Bencher::new(1);

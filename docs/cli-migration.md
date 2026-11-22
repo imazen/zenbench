@@ -74,11 +74,11 @@ Confirm uses fixed independent processes. These settings are budgets, not runtim
 speedup predictions. Raw evidence lives in ignored durable storage; export selected
 small summaries for Git. See [storage](result-storage.md).
 
-On asymmetric or unknown CPUs, inspect `cpu-info` and configure verified placement.
+On asymmetric or unknown CPUs, default runs warn when placement is unverified.
+Use `cpu-info` to inspect topology and configure verified placement for confirmation.
 Linux requires a suitable cpuset; native Windows ARM64 now supports OS core/cache
 classification and inherited Job confinement within one processor group. Windows
-multiple groups and macOS hard P/E binding remain unsupported. Explicit
-unrestricted exploration cannot authorize confirmation.
+multiple groups and macOS hard P/E binding remain unsupported for verification.
 
 Old 0.1.10 and current builds use different default lock locations; upgrading one
 participant does not make mixed versions coordinate automatically. Avoid concurrent

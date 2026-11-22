@@ -33,7 +33,7 @@ Compare external programs/environments: zenbench pair --help
 Measure heap and deploy fleet cases: zenbench guide --topic fleet
 Quick edit loop: cargo bench --bench NAME -- --group=GROUP
 Before accepting a change: freeze inputs, then use --mode=confirm --workload-id=ID.
-Inspect asymmetric CPUs: zenbench cpu-info; choose a verified boundary with exec.
+Default CPU placement warns when unverified. Use zenbench cpu-info to inspect it.
 Benchmark-binary options: cargo bench --bench NAME -- --help
 Iterate exit 0 means execution succeeded, not a confirmed performance result."
 )]
@@ -1520,13 +1520,22 @@ fn run_bench_in_dir(
     }
 }
 
-/// Print a colored comparison between two suite results.
+fn warn_unverified_auto(placement: &zenbench::platform::CpuPlacement) {
+    use zenbench::platform::{CpuPolicy, PlacementStatus};
+    if placement.policy == CpuPolicy::Auto && placement.status == PlacementStatus::Unrestricted {
+        eprintln!(
+            "[zenbench] warning: CPU placement is unverified. Scheduling across CPU classes may affect timings. Verified placement is required for confirmation."
+        );
+    }
+}
+
 fn print_cpu_evidence(label: &str, placement: &Option<zenbench::platform::CpuPlacement>) {
-    use zenbench::platform::PlacementStatus;
-    let status = match placement.as_ref().map(|p| p.status) {
-        Some(PlacementStatus::UniformHardware) => "uniform_hardware",
-        Some(PlacementStatus::EnforcedUniform) => "enforced_uniform",
-        Some(PlacementStatus::Unrestricted) => "UNVERIFIED_UNRESTRICTED",
+    use zenbench::platform::{CpuPolicy, PlacementStatus};
+    let status = match placement.as_ref().map(|p| (p.status, p.policy)) {
+        Some((PlacementStatus::UniformHardware, _)) => "uniform_hardware",
+        Some((PlacementStatus::EnforcedUniform, _)) => "enforced_uniform",
+        Some((PlacementStatus::Unrestricted, CpuPolicy::Auto)) => "UNVERIFIED_AUTO",
+        Some((PlacementStatus::Unrestricted, _)) => "UNVERIFIED_UNRESTRICTED",
         _ => "LEGACY_UNKNOWN",
     };
     eprintln!(
@@ -1535,6 +1544,7 @@ fn print_cpu_evidence(label: &str, placement: &Option<zenbench::platform::CpuPla
     );
 }
 
+/// Print a colored comparison between two suite results.
 fn print_comparison(baseline: &zenbench::SuiteResult, candidate: &zenbench::SuiteResult) -> i32 {
     print_cpu_evidence("baseline CPU", &baseline.cpu_placement);
     print_cpu_evidence("candidate CPU", &candidate.cpu_placement);

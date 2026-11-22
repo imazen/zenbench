@@ -11,7 +11,7 @@ env:
   ZENBENCH_NO_SAVE: "1"
   # Functional/statistical fixtures exercise measurements intentionally without
   # enforcing a core class. CPU-policy subprocess tests remove this opt-out and
-  # verify fail-closed defaults independently.
+  # verify default qualification and explicit refusals independently.
   ZENBENCH_CPU_POLICY: unrestricted
 
 # Superseded runs only waste runner queue — particularly the macOS

@@ -154,6 +154,7 @@ impl Engine {
         let cpu_session =
             platform::CpuSession::start(self.suite.cpu_policy, self.suite.cpu_set.as_deref())
                 .unwrap_or_else(|e| panic!("{e}"));
+        cpu_session.placement.warn_if_unverified_auto();
         eprintln!("[zenbench] {}", cpu_session.placement.llm());
         if dry_run {
             let groups: Vec<_> = self

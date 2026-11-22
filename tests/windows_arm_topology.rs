@@ -109,16 +109,21 @@ fn native_class_selection_is_enforced() {
                 .map(|n| n.parse().unwrap())
                 .collect()),
             "auto" => {
-                let placement = zenbench::platform::check_cpu_placement();
-                if topology
+                let placement = zenbench::platform::check_cpu_placement().unwrap();
+                let status = if topology.kind == TopologyKind::Homogeneous {
+                    PlacementStatus::UniformHardware
+                } else if topology
                     .classes
                     .iter()
                     .any(|c| before.iter().all(|cpu| c.cpus.contains(cpu)))
                 {
-                    assert!(placement.is_ok(), "{placement:?}");
+                    PlacementStatus::EnforcedUniform
                 } else {
-                    assert!(placement.is_err(), "{placement:?}");
-                }
+                    PlacementStatus::Unrestricted
+                };
+                assert_eq!(placement.policy, CpuPolicy::Auto);
+                assert_eq!(placement.status, status, "{placement:?}");
+                assert_eq!(affinity::get_process_affinity().unwrap(), before);
                 return;
             }
             _ => panic!("unknown control mode"),

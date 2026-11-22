@@ -77,8 +77,8 @@ they do not prove coverage for every real workload.
 
 CPU-class admission is separate from resource observation. Linux strict placement
 uses a hard cpuset; supported Windows topology uses an inherited Job boundary.
-macOS advisory hints cannot certify P/E class confinement. Explicit unrestricted
-placement permits exploration only. A boundary does not reserve the CPU, shared
+macOS advisory hints cannot certify P/E class confinement. The default records
+unverified placement when it cannot verify one class. A boundary does not reserve the CPU, shared
 cache, SMT sibling or memory bandwidth.
 
 The engine primes a background resource sampler before warmup; rounds read cached

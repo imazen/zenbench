@@ -120,7 +120,8 @@ removal, fastest-process selection or optional stopping is performed. The legacy
 accepts a change. Statistical details and numerical/model controls are in
 [pair inference validation](pair-inference.md).
 
-Acceptance requires all planned blocks, verified uniform CPU placement, fresh
+Default placement allows measurement with a warning when uniform placement is
+unverified. Acceptance requires all planned blocks, verified uniform CPU placement, fresh
 strict resource observations, and the A/A interval wholly inside its control
 margin. An unresolved control makes the cell inconclusive. Exit 0 means the
 selected acceptance rule passed for all candidate cells; 1 means a regression;
@@ -138,8 +139,7 @@ for correlated observations.
 ## Busy machines, deadlines and resume
 
 CPU-class validation is the same process-boundary check used by the benchmark
-harness. Use `zenbench exec` for a verified inherited boundary; an explicit
-`ZENBENCH_CPU_POLICY=unrestricted` permits unverified exploration. Keep different
+harness. Use `zenbench exec` for a verified inherited boundary. Keep different
 CPU/cache classes in separate experiments. Ordinary load is observed, not treated
 as proof of cleanliness or silently subtracted from the metric.
 

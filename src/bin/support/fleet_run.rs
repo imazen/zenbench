@@ -198,6 +198,7 @@ fn execute(
     receipt["plan"] = serde_json::to_value(&plan).map_err(error)?;
     let placement = zenbench::platform::check_cpu_placement()
         .map_err(|e| failure("unsupported_placement", e))?;
+    crate::warn_unverified_auto(&placement);
     receipt["placement"] = serde_json::to_value(&placement).map_err(error)?;
     let mut reservation = crate::coordination::Reservation::acquire_controlled(
         "fleet observation",

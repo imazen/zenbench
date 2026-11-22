@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum CpuPolicy {
-    /// Require uniform hardware, or an enforced process set in one known class.
+    /// Verify uniform placement when possible. Otherwise qualify the measurements.
     #[default]
     Auto,
     /// Require enforced placement on the highest reported performance class.
@@ -167,7 +167,7 @@ pub enum PlacementStatus {
     UniformHardware,
     /// An OS process boundary was verified to contain one known CPU class.
     EnforcedUniform,
-    /// The caller explicitly opted out; uniform placement is not certified.
+    /// Uniform placement is unverified under `Auto` or explicitly unrestricted.
     Unrestricted,
 }
 
@@ -278,6 +278,9 @@ impl CpuPlacement {
             match self.status {
                 PlacementStatus::UniformHardware => "uniform_hardware",
                 PlacementStatus::EnforcedUniform => "enforced_uniform",
+                PlacementStatus::Unrestricted if self.policy == CpuPolicy::Auto => {
+                    "UNVERIFIED_AUTO"
+                }
                 PlacementStatus::Unrestricted => "UNVERIFIED_UNRESTRICTED",
             },
             serde_json::to_string(&self.core_class).expect("serializing CPU class"),
@@ -290,6 +293,14 @@ impl CpuPlacement {
                 .expect("serializing effective thread CPUs"),
             self.status != PlacementStatus::Unrestricted
         )
+    }
+
+    pub(crate) fn warn_if_unverified_auto(&self) {
+        if self.policy == CpuPolicy::Auto && self.status == PlacementStatus::Unrestricted {
+            eprintln!(
+                "[zenbench] warning: CPU placement is unverified. Scheduling across CPU classes may affect timings. Verified placement is required for confirmation."
+            );
+        }
     }
 
     pub(crate) fn compatible(&self, other: &Self) -> bool {
@@ -742,64 +753,58 @@ fn resolve(
 ) -> Result<CpuPlacement, String> {
     let boundary_error = enforced.as_ref().err().cloned();
     let (effective, enforcement) = enforced.unwrap_or((vec![], "none"));
-    if policy == CpuPolicy::Unrestricted {
+    let automatic = policy == CpuPolicy::Auto && requested.is_none();
+    let (status, core_class) = if policy == CpuPolicy::Unrestricted {
         if requested.is_some() {
             return Err("unrestricted policy cannot certify a requested --cpu-set; remove the set or use a checked policy".into());
         }
-        return Ok(CpuPlacement {
-            policy,
-            core_class: None,
-            topology,
-            status: PlacementStatus::Unrestricted,
-            effective_cpus: effective,
-            requested_cpus: requested.map(Vec::from),
-            thread_affinity_requested: None,
-            thread_affinity_effective: None,
-            enforcement: enforcement.into(),
-        });
-    }
-    if topology.kind == TopologyKind::Homogeneous
-        && policy == CpuPolicy::Auto
-        && requested.is_none()
+        (PlacementStatus::Unrestricted, None)
+    } else if automatic
+        && topology.kind == TopologyKind::Homogeneous
         && topology.source != "windows_process_cpuid"
     {
-        return Ok(CpuPlacement {
-            policy,
-            core_class: topology.classes.first().map(|c| c.name.clone()),
-            topology,
-            status: PlacementStatus::UniformHardware,
-            effective_cpus: effective,
-            requested_cpus: requested.map(Vec::from),
-            thread_affinity_requested: None,
-            thread_affinity_effective: None,
-            enforcement: enforcement.into(),
-        });
-    }
-    let class = topology.class_for(&effective).ok_or_else(|| format!(
-        "CPU placement refused: {:?} topology; the process is not confined to one known class. Classes: {}. Launch with `zenbench exec --cpu-policy performance PROGRAM -- ARGS`, or supply an enabled cpuset/process mask and --cpu-set=IDs. A group affinity mask and ZENBENCH_PIN are insufficient. Inspect `zenbench cpu-info` and `zenbench exec --help`. Exploratory opt-out: --cpu-policy=unrestricted (UNVERIFIED_UNRESTRICTED; cannot confirm or promote baselines).",
-        topology.kind, format_args!("{}; process boundary {effective:?}; {}", topology.classes.iter().map(|c| format!("{}={:?}", c.name, c.cpus)).collect::<Vec<_>>().join("; "), boundary_error.unwrap_or_default())))?;
-    if let Some(cpus) = requested {
-        if effective != cpus {
-            return Err(format!(
-                "CPU placement refused: requested {cpus:?}, OS process boundary is {effective:?}; the exact set was not enforced"
-            ));
+        (
+            PlacementStatus::UniformHardware,
+            topology.classes.first().map(|c| c.name.clone()),
+        )
+    } else if let Some(class) = topology.class_for(&effective) {
+        if let Some(cpus) = requested {
+            if effective != cpus {
+                return Err(format!(
+                    "CPU placement refused: requested {cpus:?}, OS process boundary is {effective:?}; the exact set was not enforced"
+                ));
+            }
         }
-    }
-    if matches!(policy, CpuPolicy::Performance | CpuPolicy::Efficiency) {
-        let selected = topology.select(policy)?;
-        if !effective.iter().all(|cpu| selected.contains(cpu)) {
-            return Err(format!(
-                "CPU placement refused: {} class requested, process boundary {effective:?} is in {}",
-                policy.name(),
-                class.name
-            ));
+        if matches!(policy, CpuPolicy::Performance | CpuPolicy::Efficiency) {
+            let selected = topology.select(policy)?;
+            if !effective.iter().all(|cpu| selected.contains(cpu)) {
+                return Err(format!(
+                    "CPU placement refused: {} class requested, process boundary {effective:?} is in {}",
+                    policy.name(),
+                    class.name
+                ));
+            }
         }
-    }
-    let core_class = Some(class.name.clone());
+        (PlacementStatus::EnforcedUniform, Some(class.name.clone()))
+    } else if automatic {
+        (PlacementStatus::Unrestricted, None)
+    } else {
+        let classes = topology
+            .classes
+            .iter()
+            .map(|c| format!("{}={:?}", c.name, c.cpus))
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(format!(
+            "CPU placement refused: {:?} topology; the process is not confined to one known class. Classes: {classes}; process boundary {effective:?}; {}. Inspect `zenbench cpu-info` and `zenbench exec --help`.",
+            topology.kind,
+            boundary_error.unwrap_or_default()
+        ));
+    };
     Ok(CpuPlacement {
         policy,
         topology,
-        status: PlacementStatus::EnforcedUniform,
+        status,
         core_class,
         effective_cpus: effective,
         requested_cpus: requested.map(Vec::from),
@@ -809,8 +814,10 @@ fn resolve(
     })
 }
 
-/// Check the default/CLI/environment process policy. Errors occur before any
-/// timed work, and a calling-thread mask never substitutes for a process bound.
+/// Resolve the default/CLI/environment process policy. With `auto` and no
+/// explicit CPU set, unverified placement is returned with
+/// [`PlacementStatus::Unrestricted`]. Explicit class or set requests must be
+/// verified before timed work.
 pub fn check_cpu_placement() -> Result<CpuPlacement, String> {
     CpuSession::start(None, None).map(|session| session.placement)
 }
@@ -868,7 +875,14 @@ impl CpuSession {
             {
                 return Err("process CPU boundary changed since first admission".into());
             }
-            super::windows_job::install(&placement.effective_cpus)?;
+            if let Err(error) = super::windows_job::install(&placement.effective_cpus) {
+                if policy == CpuPolicy::Auto && cpus.is_none() && !super::windows_job::installed() {
+                    placement.status = PlacementStatus::Unrestricted;
+                    placement.core_class = None;
+                    return Ok(Self { placement });
+                }
+                return Err(error);
+            }
             let (actual, enforcement) = boundary()?;
             if actual != placement.effective_cpus {
                 return Err(
@@ -905,16 +919,28 @@ mod tests {
         )
     }
     #[test]
-    fn mixed_process_rejected_even_if_caller_was_pinned() {
-        assert!(
-            resolve(hybrid(), CpuPolicy::Auto, None, Ok((vec![0, 1], "cpuset")))
-                .unwrap_err()
-                .contains("not confined")
-        );
-        assert!(resolve(hybrid(), CpuPolicy::Auto, None, Err("no controller".into())).is_err());
+    fn automatic_mixed_process_is_qualified() {
+        let placement =
+            resolve(hybrid(), CpuPolicy::Auto, None, Ok((vec![0, 1], "cpuset"))).unwrap();
+        assert_eq!(placement.policy, CpuPolicy::Auto);
+        assert_eq!(placement.status, PlacementStatus::Unrestricted);
+        assert_eq!(placement.topology.kind, TopologyKind::Asymmetric);
+        assert_eq!(placement.effective_cpus, [0, 1]);
+        assert_eq!(placement.core_class, None);
+        assert!(placement.llm().contains("cpu_placement=UNVERIFIED_AUTO"));
+        assert!(placement.llm().contains("cpu_class_uniform=false"));
     }
     #[test]
-    fn only_verified_single_class_passes() {
+    fn automatic_without_a_process_boundary_is_qualified() {
+        assert_eq!(
+            resolve(hybrid(), CpuPolicy::Auto, None, Err("no controller".into()))
+                .unwrap()
+                .status,
+            PlacementStatus::Unrestricted
+        );
+    }
+    #[test]
+    fn verified_single_class_and_explicit_requests() {
         let placement = resolve(hybrid(), CpuPolicy::Auto, None, Ok((vec![0], "cpuset"))).unwrap();
         assert_eq!(placement.status, PlacementStatus::EnforcedUniform);
         assert_eq!(placement.core_class.as_deref(), Some("P"));
@@ -932,6 +958,16 @@ mod tests {
                 hybrid(),
                 CpuPolicy::Auto,
                 Some(&[0, 1]),
+                Ok((vec![0, 1], "cpuset"))
+            )
+            .unwrap_err()
+            .contains("not confined")
+        );
+        assert!(
+            resolve(
+                hybrid(),
+                CpuPolicy::Auto,
+                Some(&[0, 1]),
                 Ok((vec![0], "cpuset"))
             )
             .is_err()
@@ -940,7 +976,23 @@ mod tests {
     #[test]
     fn unknown_is_not_uniform_and_opt_out_is_labeled() {
         let topology = CpuTopology::unknown("unavailable");
-        assert!(resolve(topology.clone(), CpuPolicy::Auto, None, Err("none".into())).is_err());
+        let automatic =
+            resolve(topology.clone(), CpuPolicy::Auto, None, Err("none".into())).unwrap();
+        assert_eq!(automatic.status, PlacementStatus::Unrestricted);
+        assert_eq!(automatic.topology.kind, TopologyKind::Unknown);
+        assert_eq!(
+            automatic.topology.diagnostic.as_deref(),
+            Some("unavailable")
+        );
+        assert!(
+            resolve(
+                topology.clone(),
+                CpuPolicy::Performance,
+                None,
+                Err("none".into())
+            )
+            .is_err()
+        );
         let placement =
             resolve(topology, CpuPolicy::Unrestricted, None, Err("none".into())).unwrap();
         assert_eq!(placement.status, PlacementStatus::Unrestricted);
@@ -959,7 +1011,7 @@ mod tests {
     }
     #[cfg(target_os = "linux")]
     #[test]
-    fn cache_asymmetry_requires_explicit_class_and_cpu_ids_are_not_inferred() {
+    fn cache_asymmetry_is_qualified_and_performance_rank_is_not_inferred() {
         let directory = crate::paths::target_zenbench_dir()
             .join(format!("cpu-topology-test-{}", std::process::id()));
         std::fs::create_dir_all(&directory).unwrap();
@@ -975,14 +1027,16 @@ mod tests {
         let topology = linux_topology(&directory, &directory);
         assert_eq!(topology.kind, TopologyKind::Asymmetric);
         assert!(topology.select(CpuPolicy::Performance).is_err());
-        assert!(
+        assert_eq!(
             resolve(
                 topology.clone(),
                 CpuPolicy::Auto,
                 None,
                 Ok((vec![0, 1], "cpuset"))
             )
-            .is_err()
+            .unwrap()
+            .status,
+            PlacementStatus::Unrestricted
         );
         assert!(
             resolve(
@@ -1011,16 +1065,37 @@ mod tests {
         assert!(topology.select(CpuPolicy::Performance).is_err());
         let partial = group_classes(vec![(7, "known".into(), Some(2))], "fixture", true);
         assert_eq!(partial.kind, TopologyKind::Unknown);
-        assert!(
+        assert_eq!(
             resolve(
                 partial.clone(),
                 CpuPolicy::Auto,
                 None,
                 Ok((vec![7], "cpuset"))
             )
-            .is_ok()
+            .unwrap()
+            .status,
+            PlacementStatus::EnforcedUniform
         );
-        assert!(resolve(partial, CpuPolicy::Auto, None, Ok((vec![7, 8], "cpuset"))).is_err());
+        assert_eq!(
+            resolve(
+                partial.clone(),
+                CpuPolicy::Auto,
+                None,
+                Ok((vec![7, 8], "cpuset"))
+            )
+            .unwrap()
+            .status,
+            PlacementStatus::Unrestricted
+        );
+        assert!(
+            resolve(
+                partial,
+                CpuPolicy::Auto,
+                Some(&[7, 8]),
+                Ok((vec![7, 8], "cpuset"))
+            )
+            .is_err()
+        );
     }
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[test]

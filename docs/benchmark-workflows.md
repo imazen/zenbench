@@ -97,8 +97,9 @@ ZENBENCH_RESULT_PATH="$PWD/after.json.gz" ./builds/after/kernels --mode=confirm 
 zenbench data compare before.json.gz after.json.gz
 ```
 
-Choose fresh output paths for each attempt. On asymmetric machines launch each
-through the same verified `zenbench exec` configuration. In PowerShell, set
+Choose fresh output paths for each attempt. For a confirmation verdict on
+asymmetric machines, launch each through the same verified `zenbench exec`
+configuration. In PowerShell, set
 `$env:ZENBENCH_RESULT_PATH` before each executable invocation. Retaining executables
 does not make arbitrary command-line programs into zenbench benchmarks: these
 commands require benchmark binaries using the zenbench protocol.

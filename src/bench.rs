@@ -98,7 +98,7 @@ impl Suite {
         &mut self.plan
     }
     /// Configure process CPU-class admission for all groups. Auto (default)
-    /// refuses unknown/asymmetric placement without a verified uniform boundary.
+    /// qualifies measurements when uniform placement cannot be verified.
     pub fn cpu_policy(&mut self, policy: crate::platform::CpuPolicy) -> &mut Self {
         self.cpu_policy = Some(policy);
         self

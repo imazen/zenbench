@@ -4,10 +4,13 @@ Use this guide for process-wide core/cache classes. For scoped thread masks,
 see [thread pinning](https://docs.rs/zenbench/latest/zenbench/platform/index.html#thread-pinning).
 
 Zenbench checks CPU placement before calibration, warmup, or timed callbacks.
-The default `auto` policy accepts known homogeneous hardware, or an OS process
-boundary containing one known CPU class. Asymmetric or unknown topology without
-that evidence aborts the run. A calling-thread mask, `ZENBENCH_PIN`, `taskset`,
-and macOS Mach tags cannot satisfy that check.
+The default `auto` policy verifies placement on known homogeneous hardware or
+inside an OS process boundary containing one known CPU class. Without that
+evidence, measurements proceed with a warning because scheduling across classes
+can affect timings. Confirm and Evidence retain measurements and report
+unverified placement as a reason they cannot authorize a verdict or baseline
+promotion. A calling-thread mask, `ZENBENCH_PIN`, `taskset`, and macOS Mach tags
+cannot verify a process boundary.
 
 Inspect the detected classes and the current admission result:
 
@@ -57,14 +60,15 @@ CLI/environment policy before registration callbacks execute; later suite
 settings cannot change those completed measurements. Launch-time placement is needed to cover
 initialization and already-created external descendants.
 
-The explicit opt-out is `--cpu-policy=unrestricted`, or
-`ZENBENCH_CPU_POLICY=unrestricted`. It cannot be combined with a requested
-process CPU set. Every LLM/CSV benchmark row then states
-`UNVERIFIED_UNRESTRICTED` and `cpu_class_uniform=false`; this is permission to
-measure without placement certification. Historical results remain
-`LEGACY_UNKNOWN`. CPU evidence is also saved in JSON and displayed in terminal,
-Markdown, and HTML reports. Reserved CPU evidence keys in user tags are
-namespaced, and strings are escaped so embedded newlines cannot forge rows.
+Unverified automatic placement is labeled `UNVERIFIED_AUTO` and
+`cpu_class_uniform=false` in LLM and CSV rows. JSON uses
+`"policy": "auto"` and `"status": "unrestricted"` and retains the detected topology
+and observed process set when available. An explicit `unrestricted` policy
+keeps its `UNVERIFIED_UNRESTRICTED` label and cannot be combined with a requested
+CPU set. Historical results remain `LEGACY_UNKNOWN`. CPU evidence is also
+displayed in terminal, Markdown, and HTML reports. Reserved CPU evidence keys
+in user tags are namespaced, and strings are escaped so embedded newlines cannot
+forge rows.
 
 ## Linux
 
@@ -109,11 +113,12 @@ using the published safe `win32job` API. The job remains alive for the process;
 its CPU boundary applies to existing threads and future child processes. A
 library's attempt to change the process mask cannot widen this job boundary.
 Windows may return success while retaining the restricted mask, so readback
-of the actual mask is the confinement oracle. Job creation/assignment failure
-aborts admission before calibration or callbacks.
+of the actual mask is the confinement oracle. Job creation or assignment failure
+qualifies automatic placement if no job was installed. Explicit placement
+requests require successful confinement before calibration or callbacks.
 Native Windows ARM64 discovers OS core efficiency/cache classes and uses the
-same inherited Job boundary. Multiple processor groups remain unsupported and
-fail closed by default. Start a fresh process to change classes; unavailable
+same inherited Job boundary. Multiple processor groups are unsupported for
+verified placement. Start a fresh process to change classes; unavailable
 classes cannot be selected from a previously narrowed mask.
 
 `examples/windows_topology_probe.ps1` is a separate read-only native API oracle:
@@ -147,9 +152,8 @@ execution or a benchmark workload.
 
 macOS detects `hw.nperflevels` and performance-level counts. Its
 [Mach affinity policy](https://developer.apple.com/library/archive/releasenotes/Performance/RN-AffinityAPI/)
-is advisory and cannot bind P/E classes. Therefore an asymmetric macOS machine
-requires the explicit unverified opt-out; it cannot produce certified class
-results with this backend. Unsupported targets also require an opt-out.
+is advisory and cannot bind P/E classes. On asymmetric macOS hardware or targets
+without topology support, the default run proceeds with unverified placement.
 
 ## Placement, concurrency, and measurement validity
 
@@ -279,8 +283,8 @@ wrapper. No native CPU compiler flags are used.
 hash-named executable using SFTP. `just windows-repeatability-remote
 <trusted-alias> 'default;0,2;performance;efficiency;0,1;2,3' 5 [SSH options]`
 then verifies its SHA-256 before execution. Replace CPU IDs using your topology
-inventory. The default and mixed-set entries are refusal controls on the
-verified hybrid test machine; they are not portable CPU IDs. Each repetition
+inventory. The default entry tests automatic qualification and the explicit
+mixed-set entry tests refusal. The CPU IDs are specific to the hybrid test machine. Each repetition
 alternates configuration order. There is no shared-process aggregation across
 classes.
 

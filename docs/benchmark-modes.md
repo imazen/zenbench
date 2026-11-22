@@ -7,8 +7,9 @@ Choose a task in the [workflow guide](benchmark-workflows.md), or run
 The default is **Iterate**: one process, 30 maximum rounds per group and 100 ms
 warmup per arm. Explicit group settings still apply. Results are exploratory;
 within-process intervals do not authorize CI acceptance or baseline promotion.
-CPU admission remains strict about asymmetric or unknown topology in every mode.
-An explicit `unrestricted` CPU policy permits exploratory measurements only.
+The default CPU policy warns and records unverified placement on asymmetric
+or unknown topology when it cannot verify a single class. Measurements still
+run. Confirm and Evidence require verified placement for a verdict.
 
 ```sh
 cargo bench --bench kernels -- --group=filter

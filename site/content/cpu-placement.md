@@ -4,7 +4,7 @@ description = "Choose one detected class, configure external pools, and keep bac
 weight = 6
 +++
 
-Start here when a launch refuses placement, when your CPU has unequal core/cache
+Start here when a run warns about placement, when your CPU has unequal core/cache
 classes, or when Rayon is part of the operation. A CPU boundary and a quiet
 machine address different problems: confinement does not reserve a CPU against
 unrelated work.
@@ -18,8 +18,8 @@ zenbench exec --help
 
 Choose IDs from the detected inventory. More cache does not imply faster execution
 for your workload. Keep performance/efficiency or unequal cache classes in
-separate launches and results. Unknown topology is a reason to configure or
-investigate the host, not to accept a confirming run.
+separate launches and results. Default runs measure even when topology is
+unknown or placement is unverified.
 
 An optional diagnostic creates new workers:
 
@@ -107,13 +107,7 @@ and retain the failed attempt. Whole-host monitoring cannot prove continuous
 quietness on selected CPUs or absence of SMT/cache interference. Reserve a suitable
 measurement slot after selecting the candidate.
 
-If verified placement is unavailable, an explicit exploratory opt-out is:
-
-```sh
-cargo bench --bench my_bench -- --group=sort --cpu-policy=unrestricted
-```
-
-That records unverified exploration and cannot authorize baseline promotion.
-Do not weaken confirmation's checks to make a candidate pass. You are ready to
+When verified placement is unavailable, run Iterate normally and check for
+`UNVERIFIED_AUTO` in the results. You are ready to
 [confirm](@/ci-regression.md) when the intended class is verified, the workload
 and pool are fixed, and the required resource observations remain valid.

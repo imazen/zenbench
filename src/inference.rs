@@ -609,6 +609,28 @@ mod tests {
     }
 
     #[test]
+    fn qualified_auto_measurements_do_not_certify_placement() {
+        fn qualify(run: &mut SuiteResult) {
+            for placement in run.cpu_placement.iter_mut().chain(
+                run.comparisons
+                    .iter_mut()
+                    .filter_map(|group| group.cpu_placement.as_mut()),
+            ) {
+                placement.topology.kind = crate::platform::TopologyKind::Asymmetric;
+                placement.status = crate::platform::PlacementStatus::Unrestricted;
+                placement.core_class = None;
+            }
+        }
+        let mut result = synthetic_population(&[100_000; 5]);
+        assert!(issues(&result).is_empty());
+        qualify(&mut result);
+        for run in &mut result.replicates {
+            qualify(run);
+        }
+        assert_eq!(issues(&result), ["unverified CPU placement"]);
+    }
+
+    #[test]
     fn unrepresentable_intervals_cannot_be_mistaken_for_complete_confirmation() {
         assert!(paired(&[1.0; 5], &[1.0; 5], 1.0 - f64::EPSILON, 1000, 0.0).is_none());
         let mut source = synthetic_population(&[100_000; 5]);

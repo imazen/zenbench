@@ -2,8 +2,9 @@
 
 `zenbench fleet capabilities` emits schema-1 JSON with the installed executable's
 SHA-256, version, process architecture, reported machine architecture, CPU
-classes, and placement result. A failed placement check is retained as an error;
-a successful capability probe is not permission to measure. The reported machine
+classes, and placement result. Unverified automatic placement is recorded in
+the attempt receipt and warns during execution. Invalid explicit placement
+requests fail. The reported machine
 architecture can fall back to process architecture: `native_arch_verified:false`
 means a worker must independently check native versus emulated execution.
 

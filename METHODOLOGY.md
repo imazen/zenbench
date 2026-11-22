@@ -130,8 +130,8 @@ different statistical procedure; the current intervals do not support it.
 
 ### CPU classes and process boundaries
 
-By default, unknown or asymmetric CPU topology requires an explicit verified
-uniform placement. Hybrid performance/efficiency cores and unequal last-level
+Default runs measure with a qualification when CPU placement is unverified.
+Hybrid performance/efficiency cores and unequal last-level
 cache capacities can change results. More cache does not imply that a class is
 faster for every workload. Run selected classes separately and retain their
 identities. `zenbench cpu-info` reports the observed topology.
@@ -153,9 +153,8 @@ outside the enforcement model.
 
 A boundary is not a reservation: unrelated tasks can still use those CPUs, SMT
 siblings, caches, memory controllers and package power. Equal cache capacity
-also does not prove that threads share one LLC or NUMA domain. Explicit
-`unrestricted` permits exploration and records unverified placement; it cannot
-confirm a baseline. [Placement details and native controls](docs/process-affinity.md)
+also does not prove that threads share one LLC or NUMA domain. Baseline
+confirmation requires verified placement. [Placement details and native controls](docs/process-affinity.md)
 describe the OS-specific evidence.
 
 ### Warmup is a declared workload phase
@@ -783,7 +782,7 @@ would not establish one.
 | Threat | Current mitigation | Remaining responsibility/limitation |
 |---|---|---|
 | Incorrect or unequal work | Named workloads, retained inventory, correctness guidance | Arbitrary closures have no automatic output oracle |
-| CPU/cache asymmetry | Topology admission, process boundary, scoped thread masks | Unsupported targets refuse; capacity is not complete domain identity |
+| CPU/cache asymmetry | Recorded topology, process boundary, scoped thread masks | Unsupported targets qualify default measurements; capacity is not complete domain identity |
 | Frequency and thermal history | Warmup, interleaving, available temperature observations | No proof of maximum clock or steady state; power limits and AVX history persist |
 | Other agents, IRQs, SMT and shared memory | Background observations, cooperative serialization, retained flags | No exclusive reservation or complete per-core interference detector |
 | Code/stack/heap layout | Fresh processes and optional stack jitter | One build is not a randomized layout population |

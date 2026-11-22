@@ -45,9 +45,9 @@ shows geometric mean latency change and between-block log-ratio dispersion.
 Iterate reports exploratory estimates; Confirm adds fixed-block intervals.
 Positive latency change means slower. A/A is a diagnostic, not a bias correction.
 
-CPU policy remains fail-closed on asymmetric/unknown topology. First inspect
-zenbench cpu-info, then use zenbench exec for a verified inherited boundary.
-ZENBENCH_CPU_POLICY=unrestricted explicitly permits unverified exploration only.
+Default CPU placement warns and measures when uniform placement is unverified.
+For a confirmation verdict, inspect zenbench cpu-info and use zenbench exec
+for a verified inherited boundary where supported.
 Commands must stay in the foreground and join workers. Unix programs must not
 daemonize or leave their process group. No implicit shell is used.
 

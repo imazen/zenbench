@@ -6,6 +6,8 @@
 
 ### Fixed
 
+- Default CPU placement allows measurements on asymmetric or unknown topology when uniform placement cannot be verified. It warns and records `UNVERIFIED_AUTO` in result rows. Explicit class and CPU-set requests and confirmation verdicts still require verification.
+
 - Derive macOS process CPU rates from monotonic cumulative counters tied to PID/start time, preserving foreign-load checks and conservative missing-owner behavior without gate or public API changes (`3b1d0f71`).
 
 - `pair --mode confirm` no longer counts a reaped worker leader's final counter window as foreign CPU. Only windows completing at or after the supervisor's owned exit observation are exit transitions; transitions waive only the whole-host CPU magnitude, and missing lifecycle evidence invalidates (632ce674, 010f14fd).

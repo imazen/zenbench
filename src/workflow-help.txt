@@ -13,6 +13,8 @@ the candidate, inputs, margin and plan before a separate confirmation run.
 CPU PLACEMENT / RAYON
   zenbench cpu-info
   zenbench exec --cpu-policy performance cargo -- bench --bench kernels -- --group=filter
+Default runs warn and measure when uniform placement is unverified.
+Use a verified boundary for CPU-class results and confirmation.
 Select detected CPU IDs explicitly for unequal cache classes; do not assume
 which is faster. Use separate launches/results for P/E or cache classes.
 Linux needs a matching hard cpuset (or a delegated systemd cpuset controller).
@@ -22,7 +24,6 @@ uses OS core/cache classes within one processor group. A thread hint or
 taskset cannot constrain arbitrary pools that widen their masks. Register Rayon
 work with bench(); do not wrap it in bench_parallel/bench_contended. Configure the
 pool size yourself. Probes observe new workers; they do not certify hidden pools.
-Unrestricted is an explicit exploratory opt-out, never a confirmation remedy.
 
 BACKGROUND EXPLORATION
   zenbench jobs run kernels --cargo-args="-- --group=filter"

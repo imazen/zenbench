@@ -1,5 +1,5 @@
 //! Native repeatability controls. Each invocation is a fresh process.
-//! Pass a comma-separated CPU set, or `default` for the refusal control.
+//! Pass a comma-separated CPU set, or `default` to exercise automatic placement.
 #[cfg(target_os = "windows")]
 use std::hint::black_box;
 #[cfg(target_os = "windows")]

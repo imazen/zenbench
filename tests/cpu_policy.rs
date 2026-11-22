@@ -1,4 +1,4 @@
-//! Default-policy negative controls run in fresh processes with CI opt-outs removed.
+//! CPU policy controls run in fresh processes with CI opt-outs removed.
 use std::process::Command;
 use std::sync::{
     Arc,
@@ -147,9 +147,10 @@ fn process_policy() {
             let cpu = zenbench::platform::current_thread_affinity().unwrap()[0];
             zenbench::platform::pin_current_thread(&[cpu]).unwrap()
         });
+        let suite_override = mode == "suite_override";
         let outcome = std::panic::catch_unwind(move || {
             run_gated(GateConfig::disabled(), |suite| {
-                if mode == "suite_override" {
+                if suite_override {
                     suite.cpu_policy(CpuPolicy::Unrestricted);
                 }
                 suite.group("cpu-proof", |group| {
@@ -167,12 +168,18 @@ fn process_policy() {
                 });
             })
         });
-        let permitted = expected.is_ok()
-            || std::env::var("ZENBENCH_CPU_TEST_MODE").unwrap() == "suite_override";
-        if permitted {
+        if mode != "invalid" {
+            let expected = expected.unwrap();
             let result = outcome.unwrap();
             assert!(visited.load(Ordering::Relaxed) > 0);
             let placement = result.cpu_placement.as_ref().unwrap();
+            if suite_override {
+                assert_eq!(placement.policy, CpuPolicy::Unrestricted);
+                assert_eq!(placement.status, PlacementStatus::Unrestricted);
+            } else {
+                assert_eq!(placement.policy, expected.policy);
+                assert_eq!(placement.status, expected.status);
+            }
             assert!(result.comparisons.iter().all(|c| {
                 c.cpu_placement.as_ref().is_some_and(|p| {
                     p.status == placement.status && p.effective_cpus == placement.effective_cpus
@@ -182,15 +189,19 @@ fn process_policy() {
             assert!(rows.contains("cpu_enforcement="));
             assert!(rows.contains("pool_thread_count=unknown"));
             if placement.status == PlacementStatus::Unrestricted {
-                assert!(rows.contains("UNVERIFIED_UNRESTRICTED"));
+                let label = if placement.policy == CpuPolicy::Auto {
+                    "UNVERIFIED_AUTO"
+                } else {
+                    "UNVERIFIED_UNRESTRICTED"
+                };
+                assert!(rows.contains(&format!("cpu_placement={label}")));
+                assert!(result.to_csv().contains(label));
                 assert!(rows.contains("cpu_class_uniform=false"));
             }
             assert!(result.to_csv().contains("cpu_placement_evidence"));
         } else {
-            assert!(
-                outcome.is_err(),
-                "default accepted unverified CPU placement"
-            );
+            assert!(expected.is_err());
+            assert!(outcome.is_err(), "invalid policy was accepted");
             assert_eq!(
                 visited.load(Ordering::Relaxed),
                 0,
@@ -224,6 +235,12 @@ fn process_policy() {
                 "{mode}:\n{}\n{}",
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
+            );
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert_eq!(
+                stderr.contains("warning: CPU placement is unverified"),
+                stderr.contains("cpu_placement=UNVERIFIED_AUTO"),
+                "{mode}: {stderr}"
             );
         }
     }

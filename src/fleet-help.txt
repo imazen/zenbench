@@ -1,7 +1,7 @@
 Heap and fleet measurement
 =========================
-Start with `zenbench fleet capabilities` and `zenbench cpu-info`. Refused or unknown
-CPU placement is a reason to configure the host, not to silently accept a run.
+Start with `zenbench fleet capabilities` and `zenbench cpu-info`. Default runs
+warn and record unverified placement in the attempt receipt.
 A reported architecture is not verified native execution; check the binary and
 host architecture when emulation is possible.
 

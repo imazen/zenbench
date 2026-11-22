@@ -1,5 +1,12 @@
 # Zenbench Project Instructions
 
+### Known Bugs: default placement on asymmetric CPUs
+
+Default startup previously refused mixed core/cache classes and unknown CPU
+topology. Automatic placement now warns and records `UNVERIFIED_AUTO` when a
+uniform class cannot be verified. Explicit placement and confirmation verdicts
+still require verification.
+
 ### Known bugs: defaults audit (2026-10-11)
 
 Review-stack CI also observed timing-dependent failures in

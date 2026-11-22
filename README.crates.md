@@ -44,7 +44,8 @@ This measures creating, sorting, and dropping a 1,000-element vector. The return
 value passes through `black_box` to keep the work observable. The default run is
 exploratory: it helps you investigate performance while editing.
 
-If the run reports a CPU placement refusal, follow the separate
+If placement is unverified, the default run still measures and warns that CPU
+classes can affect timings. See the
 [CPU placement guide](https://docs.rs/zenbench/latest/zenbench/platform/index.html#verified-cpu-placement).
 Rust 1.85 or newer is required.
 

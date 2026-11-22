@@ -52,9 +52,9 @@ Confirmation exit 0: valid/non-inferior; 1: regression; 2: invalid/inconclusive.
 A one-arm initial baseline makes no relative performance claim. Fix invalid
 configuration/noise first; do not rerun until a favorable answer appears.
 
-On asymmetric or unknown topology, inspect zenbench cpu-info and launch through
-zenbench exec --help. macOS hints cannot guarantee P/E selection. Explicit
-unrestricted is for exploration only and cannot authorize baseline promotion.
+Default CPU placement warns and measures when uniform placement is unverified.
+For confirmation or baseline promotion, inspect zenbench cpu-info and use
+zenbench exec to launch inside a verified CPU boundary where supported.
 
 Raw evidence stays in ignored .zenbench/data (ZENBENCH_DATA_DIR overrides).
 Read saved packets: zenbench data read FILE. Diff: zenbench data compare BEFORE AFTER.
