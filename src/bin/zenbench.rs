@@ -76,6 +76,9 @@ enum Commands {
         resume: Option<PathBuf>,
         #[arg(long)]
         dry_run: bool,
+        /// Delegated Linux cgroup v2 parent for Confirm CPU accounting.
+        #[arg(long)]
+        accounting_cgroup: Option<PathBuf>,
         /// Admission wait seconds; default zero reports not-run immediately.
         #[arg(long, default_value_t = 0)]
         wait: u64,
@@ -167,6 +170,13 @@ Example: zenbench exec --cpu-policy performance cargo -- bench --bench kernels -
     },
     #[command(hide = true)]
     CpuChild {
+        program: PathBuf,
+        #[arg(last = true)]
+        args: Vec<std::ffi::OsString>,
+    },
+    #[command(hide = true)]
+    PairCpuScope {
+        path: PathBuf,
         program: PathBuf,
         #[arg(last = true)]
         args: Vec<std::ffi::OsString>,
@@ -411,6 +421,7 @@ const COMMAND_FAMILIES: &[CommandFamily] = &[
             ("read", "read"),
             ("compare", "compare"),
             ("pair-diff", "pair-diff"),
+            ("pair-fit", "pair-fit"),
             ("archive", "archive"),
             ("snapshot", "snapshot"),
             ("reanalyze", "reanalyze"),
@@ -546,6 +557,7 @@ fn main() {
             case,
             resume,
             dry_run,
+            accounting_cgroup,
             wait,
         } => {
             let result = support::pair::run(support::pair::Options {
@@ -555,6 +567,7 @@ fn main() {
                 case: case.as_deref(),
                 resume: resume.as_deref(),
                 dry_run,
+                accounting_cgroup: accounting_cgroup.as_deref(),
                 wait,
             });
             let code = result.unwrap_or_else(|e| {
@@ -640,6 +653,16 @@ fn main() {
                     std::process::exit(2);
                 });
             std::process::exit(status.code().unwrap_or(1));
+        }
+        Commands::PairCpuScope {
+            path,
+            program,
+            args,
+        } => {
+            let error = support::pair::enter_cpu_scope(&path, &program, &args)
+                .expect_err("exec returned without an error");
+            eprintln!("[zenbench pair] {error}");
+            std::process::exit(2);
         }
         Commands::CpuInfo { probe, workers } => {
             let mut output = serde_json::json!({

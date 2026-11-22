@@ -4,8 +4,16 @@
 
 ### QUEUED BREAKING CHANGES
 
+### Added
+
+- Use `--smoke` to exercise a bench target with one iteration and skip measurement setup.
+- Use `zenbench data pair-fit` for descriptive intercept/slope analysis of a retained numeric case grid.
+- Set `ZENBENCH_GATE_DIAGNOSTICS=1` to retain bounded process evidence for rejected native benchmark rounds.
+- Linux external Confirm can account for reaped descendants with a delegated cgroup v2 parent and `--accounting-cgroup`. The saved packet identifies the accounting method.
+
 ### Fixed
 
+- Upgrade Wasmtime and WASI together to 50.0.x. The optional `wasm` feature requires Rust 1.97.
 - Default CPU placement allows measurements on asymmetric or unknown topology when uniform placement cannot be verified. It warns and records `UNVERIFIED_AUTO` in result rows. Explicit class and CPU-set requests and confirmation verdicts still require verification.
 
 - Derive macOS process CPU rates from monotonic cumulative counters tied to PID/start time, preserving foreign-load checks and conservative missing-owner behavior without gate or public API changes (`3b1d0f71`).

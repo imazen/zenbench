@@ -1,5 +1,7 @@
 //! CLI-only fresh-process comparisons. A child invocation is one observation.
+mod accounting;
 mod analysis;
+pub(crate) use accounting::enter as enter_cpu_scope;
 mod fit;
 mod interval;
 use analysis::{exit_code, summarize};
@@ -70,6 +72,7 @@ pub(crate) struct Options<'a> {
     pub dry_run: bool,
     pub wait: u64,
     pub mode: &'a str,
+    pub accounting_cgroup: Option<&'a Path>,
 }
 
 fn iterate() -> String {
@@ -85,6 +88,14 @@ pub(crate) fn run(options: Options<'_>) -> Result<i32, String> {
             "confirmation cannot resume or pool attempts; run a fresh fixed experiment".into(),
         );
     }
+    if options.accounting_cgroup.is_some() && options.mode != "confirm" {
+        return Err("--accounting-cgroup requires --mode=confirm".into());
+    }
+    let accounting_parent = options
+        .accounting_cgroup
+        .map(accounting::validate_parent)
+        .transpose()?;
+    let accounting_method = accounting_parent.as_ref().map(|_| accounting::METHOD);
     let plan_file = options.plan.canonicalize().map_err(|e| e.to_string())?;
     let base = plan_file.parent().ok_or("plan has no parent directory")?;
     let mut plan: Plan =
@@ -149,12 +160,7 @@ pub(crate) fn run(options: Options<'_>) -> Result<i32, String> {
         })
         .collect();
     let identity = json!({"files":identities,"inherited_env":recorded_env,"inherited_env_complete":plan.clean_env,"provenance_limit":"Only explicitly selected inherited environment values are retained. Shared libraries and undeclared runtime assets are not identified."});
-    let fingerprint_record = if options.mode == "iterate" {
-        json!({"plan":plan,"identity":identity})
-    } else {
-        json!({"plan":plan,"identity":identity,"mode":options.mode})
-    };
-    let fingerprint = digest(&serde_json::to_vec(&fingerprint_record).map_err(|e| e.to_string())?);
+    let fingerprint = fingerprint(&plan, &identity, options.mode, accounting_method)?;
     let placement = zenbench::platform::check_cpu_placement()?;
     crate::warn_unverified_auto(&placement);
     let placement = serde_json::to_value(placement).map_err(|e| e.to_string())?;
@@ -220,7 +226,7 @@ pub(crate) fn run(options: Options<'_>) -> Result<i32, String> {
         }
     }
     if options.dry_run {
-        println!("{}", serde_json::to_string_pretty(&json!({"fingerprint":fingerprint,"mode":options.mode,"plan":plan,"identities":identity,"placement":placement,"seed":seed,"schedule":schedule,"launches":launches,"invocation_count":launches.len(),"output":output,"runtime_estimate":null,"inference":"exploratory; no acceptance decision"})).unwrap());
+        println!("{}", serde_json::to_string_pretty(&json!({"fingerprint":fingerprint,"mode":options.mode,"plan":plan,"identities":identity,"placement":placement,"seed":seed,"schedule":schedule,"launches":launches,"invocation_count":launches.len(),"output":output,"runtime_estimate":null,"resource_accounting":accounting_method,"inference":"exploratory; no acceptance decision"})).unwrap());
         return Ok(0);
     }
     let start = Instant::now();
@@ -251,6 +257,7 @@ pub(crate) fn run(options: Options<'_>) -> Result<i32, String> {
         context: json!({"testbed":zenbench::platform::detect_testbed(),"started_unix_ns":now().to_string(),
             "runner_sha256":digest_file(&std::env::current_exe().map_err(|e|e.to_string())?)?,
             "runner_version":env!("CARGO_PKG_VERSION"),
+            "resource_accounting":accounting_method,
             "supervisor_priority":priority(std::process::id()),"priority_policy":"inherited; programs must not change priority during timing"}),
         seed,
         schedule,
@@ -320,6 +327,7 @@ pub(crate) fn run(options: Options<'_>) -> Result<i32, String> {
                     deadline,
                     &packet.placement,
                     packet.mode == "confirm",
+                    accounting_parent.as_deref(),
                     &mut event,
                 );
                 match attempt {
@@ -475,10 +483,18 @@ fn invoke(
     deadline: Duration,
     placement: &Value,
     confirm: bool,
+    accounting_parent: Option<&Path>,
     event: &mut Invocation,
 ) -> Result<(), String> {
     let fields = fields(case, dir);
-    let mut command = Command::new(&arm.program);
+    let cpu_scope = accounting_parent
+        .map(accounting::Scope::create)
+        .transpose()?;
+    let mut command = if let Some(scope) = &cpu_scope {
+        scope.command(&arm.program)?
+    } else {
+        Command::new(&arm.program)
+    };
     command
         .current_dir(arm.cwd.as_ref().unwrap())
         .args(
@@ -504,6 +520,10 @@ fn invoke(
     }
     std::thread::sleep(settle);
     event.observations.push(observation(monitor));
+    let first_cpu_sample = cpu_scope
+        .as_ref()
+        .map(accounting::Scope::sample)
+        .transpose()?;
     if start.elapsed() >= deadline {
         return Err("total deadline exhausted during admission observation".into());
     }
@@ -512,6 +532,8 @@ fn invoke(
     let mut child_priority = Value::Null;
     let done = std::sync::atomic::AtomicBool::new(false);
     let child_pid = std::sync::atomic::AtomicU32::new(0);
+    let cpu_scope = cpu_scope.as_ref();
+    let mut previous_cpu_sample = first_cpu_sample;
     let result = std::thread::scope(|scope| {
         let observer = scope.spawn(|| {
             use std::sync::atomic::Ordering;
@@ -522,12 +544,14 @@ fn invoke(
                     std::thread::sleep(Duration::from_millis(10));
                     continue;
                 }
-                let mut sample = observe(monitor, &[pid], "during");
+                let mut sample = observe_invocation(
+                    monitor, &[pid], "during", cpu_scope, &mut previous_cpu_sample,
+                );
                 let sampled_at = Instant::now();
                 // The worker may have exited during this OS counter window.
                 // Retain it, but do not mislabel unassignable CPU as foreign.
                 // A fixed fresh boundary window follows after the thread joins.
-                if observations.is_empty() {
+                if observations.is_empty() && cpu_scope.is_none() {
                     // sysinfo needs a prior process sample to attribute CPU.
                     // Never interpret a newly discovered worker's zero delta
                     // as proof that the first interval had no worker activity.
@@ -571,8 +595,17 @@ fn invoke(
         result.map(|outcome| outcome.status)
     });
     event.priority = child_priority;
-    event.observations.push(observation(monitor));
+    event.observations.push(observe_invocation(
+        monitor,
+        &[std::process::id()],
+        "boundary",
+        cpu_scope,
+        &mut previous_cpu_sample,
+    ));
     let status = result.map_err(|e| e.to_string())?;
+    if let Some(scope) = cpu_scope {
+        scope.verify_empty()?;
+    }
     event.continuation_safe = true;
     event.exit_code = status.code();
     if !status.success() {
@@ -690,8 +723,13 @@ fn finish_resource_observations(
                     .exit_observed
                     .is_some_and(|exit| sampled_at >= exit)
             {
-                sample["phase"] = json!("exit_transition");
-                sample["used_for_admission"] = json!(false);
+                if sample["cpu_accounting"] == accounting::METHOD {
+                    // The scope still owns its cumulative CPU after reaping.
+                    sample["phase"] = json!("scoped_exit");
+                } else {
+                    sample["phase"] = json!("exit_transition");
+                    sample["used_for_admission"] = json!(false);
+                }
             }
             // Transitions waive only the whole-host CPU magnitude. Heavy foreign
             // processes, RAM, temperature, freshness and finite CPU must still
@@ -747,6 +785,33 @@ fn observe(monitor: &zenbench::platform::SystemMonitor, workers: &[u32], phase: 
     let began = Instant::now();
     let state = monitor.snapshot_excluding_processes(workers);
     observation_value(&state, began.elapsed(), phase)
+}
+fn observe_invocation(
+    monitor: &zenbench::platform::SystemMonitor,
+    workers: &[u32],
+    phase: &str,
+    scope: Option<&accounting::Scope>,
+    previous: &mut Option<accounting::Sample>,
+) -> Value {
+    let Some(scope) = scope else {
+        return observe(monitor, workers, phase);
+    };
+    let began = Instant::now();
+    let mut state = monitor.snapshot_excluding_processes(workers);
+    let current = scope.sample();
+    let result = current
+        .as_ref()
+        .ok()
+        .and_then(|sample| sample.load_since(previous.as_ref()?));
+    *previous = current.ok();
+    state.cpu_load = result.map_or(f64::NAN, |(load, _)| load);
+    let mut value = observation_value(&state, began.elapsed(), phase);
+    value["cpu_accounting"] = json!(accounting::METHOD);
+    value["owned_cpu_lower_bound_usec"] = json!(result.map(|(_, owned)| owned));
+    if result.is_none() {
+        value["cpu_accounting_error"] = json!("missing, reset or inconsistent counters");
+    }
+    value
 }
 fn observation_value(
     state: &zenbench::platform::SystemState,
@@ -1100,8 +1165,39 @@ pub(crate) fn fit(
     unit: &str,
     vary_inputs: &[String],
 ) -> Result<String, String> {
-    serde_json::to_string_pretty(&fit::analyze(&load(path)?, axis, unit, vary_inputs)?)
+    let packet = load(path)?;
+    if packet.fingerprint
+        != fingerprint(
+            &packet.plan,
+            &packet.identities,
+            &packet.mode,
+            packet.context["resource_accounting"].as_str(),
+        )?
+    {
+        return Err(
+            "pair packet fingerprint differs from its retained settings or identities".into(),
+        );
+    }
+    serde_json::to_string_pretty(&fit::analyze(&packet, axis, unit, vary_inputs)?)
         .map_err(|e| e.to_string())
+}
+
+fn fingerprint(
+    plan: &Plan,
+    identity: &Value,
+    mode: &str,
+    accounting: Option<&str>,
+) -> Result<String, String> {
+    let mut record = json!({"plan":plan,"identity":identity});
+    if mode != "iterate" {
+        record["mode"] = json!(mode);
+    }
+    if let Some(method) = accounting {
+        record["resource_accounting"] = json!(method);
+    }
+    Ok(digest(
+        &serde_json::to_vec(&record).map_err(|e| e.to_string())?,
+    ))
 }
 
 fn validate_packet(packet: &Packet) -> Result<(), String> {
@@ -1114,6 +1210,18 @@ fn validate_packet(packet: &Packet) -> Result<(), String> {
             && (packet.plan.confirmation.is_none() || packet.resume_from.is_some()))
     {
         return Err("invalid retained confirmation contract".into());
+    }
+    let scoped = packet.context["resource_accounting"] == accounting::METHOD;
+    if (scoped && packet.mode != "confirm")
+        || (!scoped && !packet.context["resource_accounting"].is_null())
+        || (!scoped
+            && packet
+                .invocations
+                .iter()
+                .flat_map(|i| &i.observations)
+                .any(|o| o["phase"] == "scoped_exit" || !o["cpu_accounting"].is_null()))
+    {
+        return Err("invalid retained CPU accounting contract".into());
     }
     if packet.complete && !(0..packet.plan.cases.len()).all(|ci| case_complete(packet, ci)) {
         return Err("packet claims completion with missing or invalid invocations".into());
@@ -1653,6 +1761,28 @@ mod confirmation_tests {
             expected.cpu_load_within_limit && expected.ownership_independent
         );
         assert_eq!(value["phase"], "boundary");
+    }
+
+    #[test]
+    fn scoped_counters_do_not_waive_cpu_load_at_leader_exit() {
+        let start = Instant::now();
+        let alive = start + Duration::from_secs(1);
+        let exit = alive + Duration::from_millis(5);
+        let sample = json!({"phase":"during","cpu_accounting":accounting::METHOD,
+            "owned_cpu_lower_bound_usec":10, "used_for_admission":true,
+            "ownership_independent_clean":true,"clean":false});
+        let rows = finish_resource_observations(
+            vec![(exit, sample)],
+            crate::support::supervisor::Lifecycle {
+                last_alive: Some(alive),
+                exit_observed: Some(exit),
+            },
+            start,
+        );
+        assert_eq!(rows[0]["phase"], "scoped_exit");
+        assert_eq!(rows[0]["used_for_admission"], true);
+        assert_eq!(rows[0]["clean"], false);
+        assert!(rows[0]["admission_waiver"].is_null());
     }
     fn packet() -> Packet {
         let arm = |id| json!({"id":id,"program":"fixture","revision":"oracle"});

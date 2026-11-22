@@ -139,7 +139,7 @@ for correlated observations.
 ## Fit a size grid
 
 ```sh
-zenbench pair-fit attempt/packet.json.gz --axis pixels --unit pixels --vary-input image
+zenbench data pair-fit attempt/packet.json.gz --axis pixels --unit pixels --vary-input image
 ```
 
 The axis must be a finite numeric field on every case. Every other case field
@@ -246,3 +246,32 @@ Unix nice values are queried for each child; unavailable values and unsupported
 platform queries have explicit reasons. Children inherit priority and must not
 change it during timing. QoS is not certified. Zenbench does not elevate itself,
 renice unrelated work or assume that nice values identify a CPU class.
+
+### Linux accounting for short-lived descendants
+
+For workloads that start and reap CPU-intensive subprocesses, such as a
+build, run `pair --mode=confirm --accounting-cgroup PATH` from a writable,
+delegated cgroup v2 parent at `PATH`. The parent must contain the zenbench
+supervisor. Each invocation gets a fresh child cgroup. Zenbench moves the
+launcher into it before executing the program. The workload must keep all of
+its processes inside that scope and join them before exiting.
+
+With a systemd user manager that supports delegation, start the supervisor
+inside a delegated scope:
+
+```sh
+systemd-run --user --scope -p Delegate=yes sh -ec '
+  group=$(sed -n "s/^0:://p" /proc/self/cgroup)
+  exec zenbench pair "$1" --mode=confirm --accounting-cgroup "/sys/fs/cgroup$group"
+' sh plan.json
+```
+
+This mode compares the aggregate host CPU counters with the invocation
+cgroup's cumulative `cpu.stat usage_usec`. CPU from short-lived descendants
+remains charged to the cgroup after exit. Reads before and after the host
+counter limit subtraction to recorded work within the sample window. Missing,
+reset or inconsistent counters invalidate the observation. Heavy foreign
+process, RAM and temperature checks still apply. Each window retains the CPU
+accounting method and the lower bound on owned CPU it used. The scoped path
+checks CPU load through the leader's exit because its counters stay available.
+See the [Linux kernel's cgroup v2 CPU accounting documentation](https://docs.kernel.org/admin-guide/cgroup-v2.html#cpu-interface-files).

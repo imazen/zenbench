@@ -54,6 +54,14 @@ pub(super) fn summarize(packet: &Packet) -> Vec<Value> {
                     i.observations.len() < 3
                         || !i.observations.iter().any(|o| o["phase"] == "during")
                         || i.observations.iter().any(|o| {
+                            if matches!(o["phase"].as_str(), Some("during" | "scoped_exit"))
+                                && packet.context["resource_accounting"]
+                                    == super::accounting::METHOD
+                                && (o["cpu_accounting"] != super::accounting::METHOD
+                                    || !o["owned_cpu_lower_bound_usec"].is_u64())
+                            {
+                                return true;
+                            }
                             if o["phase"] == "exit_transition" || o["phase"] == "start_transition" {
                                 return o["used_for_admission"] != false;
                             }
