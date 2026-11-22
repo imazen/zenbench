@@ -4,6 +4,10 @@
 
 ### QUEUED BREAKING CHANGES
 
+### Changed
+
+- Bump `tokio` requirement to `1.54.1` and `zenutils-apidoc` to `0.1.1`; pass `CROSS_CONTAINER_OPTS: --security-opt seccomp=unconfined` in the Linux cross CI job.
+
 ### Added
 
 - Use `--smoke` to exercise a bench target with one iteration and skip measurement setup.
