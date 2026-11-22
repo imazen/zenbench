@@ -248,11 +248,30 @@ pub(crate) fn harness_args() -> Vec<String> {
     })
 }
 
+pub(crate) fn smoke_requested() -> bool {
+    std::env::args_os().any(|arg| arg == "--smoke")
+}
+
 pub(crate) fn validate_harness_args(args: &[String]) -> Result<(), String> {
     let args = normalize_harness_args(args)?;
+    if args.iter().any(|arg| arg == "--smoke")
+        && args.iter().any(|arg| {
+            !matches!(arg.as_str(), "--smoke" | "--bench") && !arg.starts_with("--group=")
+        })
+    {
+        return Err("--smoke only accepts --group filtering".into());
+    }
     let mut seen = std::collections::HashSet::new();
     for arg in &args {
-        if ["--bench", "--no-busy-gate", "--update-on-pass", "--dry-run"].contains(&arg.as_str()) {
+        if [
+            "--bench",
+            "--no-busy-gate",
+            "--update-on-pass",
+            "--dry-run",
+            "--smoke",
+        ]
+        .contains(&arg.as_str())
+        {
             continue;
         }
         let Some((name, value)) = arg.strip_prefix("--").and_then(|s| s.split_once('=')) else {

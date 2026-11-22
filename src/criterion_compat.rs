@@ -283,6 +283,17 @@ impl<'a> BenchmarkGroup<'a> {
         F: FnMut(&mut Bencher),
     {
         let name = id.into();
+        if crate::plan::smoke_requested() {
+            let matches = crate::plan::harness_args()
+                .iter()
+                .find_map(|arg| arg.strip_prefix("--group="))
+                .is_none_or(|filter| self.name.contains(filter));
+            if matches {
+                f(&mut Bencher(&mut crate::bench::Bencher::new(1)));
+                println!("Testing {:?}/{name:?} ... ok", self.name);
+            }
+            return self;
+        }
         let config = self.get_config();
 
         // Quick calibration

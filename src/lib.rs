@@ -70,6 +70,9 @@ pub use plan::{BenchmarkMode, BenchmarkPlan, ExecutionRecord};
 /// direct use — call via the macros instead.
 #[doc(hidden)]
 pub fn postprocess_result(result: &SuiteResult) {
+    if plan::smoke_requested() {
+        return;
+    }
     let args = plan::harness_args();
     let format = args
         .iter()

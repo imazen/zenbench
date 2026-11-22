@@ -7,8 +7,15 @@ mod fixture {
     }
     zenbench::main!(|suite| {
         for name in ["selected group", "other"] {
-            suite.group(name, |group| {
-                group.bench("must-not-run", |_| panic!("dry-run invoked a callback"));
+            suite.group(name, move |group| {
+                group.bench("callback", move |b| {
+                    assert!(
+                        std::env::args().any(|arg| arg == "--smoke"),
+                        "dry-run invoked a callback"
+                    );
+                    assert_eq!(name, "selected group", "unselected callback ran");
+                    b.iter(|| println!("SMOKE_CALLBACK"));
+                });
             });
         }
     });
@@ -26,7 +33,14 @@ fn child(args: &[&str]) -> std::process::Output {
     command
         .args(args)
         .env("ZENBENCH_ARGUMENT_CHILD", "1")
-        .env("ZENBENCH_CPU_POLICY", "unrestricted")
+        .env(
+            "ZENBENCH_CPU_POLICY",
+            if args.contains(&"--smoke") {
+                "invalid"
+            } else {
+                "unrestricted"
+            },
+        )
         .env("ZENBENCH_MODE", "iterate")
         .env_remove("ZENBENCH_NO_SAVE")
         .env_remove("ZENBENCH_NO_BUSY_GATE")
@@ -84,11 +98,22 @@ fn main() {
     assert_eq!(joined["plan"]["workload_id"], "inputs with spaces");
     assert_eq!(joined["groups"].as_array().unwrap().len(), 1);
     assert_eq!(joined["groups"][0]["name"], "selected group");
+    let smoke = child(&["--group", "selected group", "--smoke"]);
+    assert!(smoke.status.success(), "{smoke:?}");
+    let output = String::from_utf8(smoke.stdout).unwrap();
+    assert_eq!(output.lines().filter(|l| *l == "SMOKE_CALLBACK").count(), 1);
+    assert!(output.contains("Testing \"selected group\"/\"callback\" ... ok"));
+    let panic = child(&["--group=other", "--smoke"]);
+    assert!(!panic.status.success());
+    assert!(String::from_utf8_lossy(&panic.stderr).contains("unselected callback ran"));
     for args in [
         vec!["--rounds"],
         vec!["--rounds", "5", "--rounds=7"],
         vec!["--scope", "--dry-run"],
         vec!["--unknown", "1"],
+        vec!["--smoke", "--mode=confirm"],
+        vec!["--smoke", "--save-baseline=wrong"],
+        vec!["--smoke", "--mean-of-processes=3"],
     ] {
         let output = child(&args);
         assert_eq!(output.status.code(), Some(2), "{args:?}: {output:?}");

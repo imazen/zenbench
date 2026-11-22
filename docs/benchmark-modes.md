@@ -56,6 +56,12 @@ constraints must fit inside the selected process boundary. See
 by the benchmark owner: include input/configuration changes in the ID. The
 harness cannot discover changes hidden inside arbitrary closures.
 
+Use `cargo test --bench NAME -- --smoke` for a functional check of one bench
+target. Zenbench calls each selected benchmark with a one-iteration Bencher
+and propagates callback failures. It skips placement, calibration, resource
+admission and result publication. You can add `--group=NAME`. A direct
+invocation without `--smoke` retains its measurement behavior.
+
 Unknown flags, malformed settings and conflicting legacy repetition flags fail.
 `--dry-run` prints the resolved plan, group inventory/settings, CPU placement,
 executable SHA-256 and data directory. Registration code has already run, but no

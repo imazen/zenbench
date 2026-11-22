@@ -97,6 +97,20 @@ impl Engine {
         {
             self.suite.set_group_filter(filter);
         }
+        if crate::plan::smoke_requested() {
+            for group in self.suite.groups.iter_mut().filter(|group| {
+                self.suite
+                    .group_filter
+                    .as_ref()
+                    .is_none_or(|filter| group.name.contains(filter))
+            }) {
+                for bench in &mut group.benchmarks {
+                    bench.func.call(&mut Bencher::new(1));
+                    println!("Testing {:?}/{:?} ... ok", group.name, bench.name);
+                }
+            }
+            return SuiteResult::default();
+        }
         let plan = self.suite.plan.clone().resolve().unwrap_or_else(|e| {
             eprintln!("[zenbench] invalid benchmark plan: {e}; use --help or zenbench guide");
             std::process::exit(2);
