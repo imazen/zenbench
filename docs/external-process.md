@@ -136,6 +136,20 @@ candidate-specific confounder. Independent studies across machines/build layouts
 are needed for claims beyond the selected experiment. More blocks are not a cure
 for correlated observations.
 
+## Fit a size grid
+
+```sh
+zenbench pair-fit attempt/packet.json.gz --axis pixels --unit pixels --vary-input image
+```
+
+The axis must be a finite numeric field on every case. Every other case field
+and input path defines a stratum. List each input whose path varies along the
+axis with `--vary-input`. Within each stratum, zenbench fits an intercept and
+slope for each arm using equally weighted complete case means. It reports case
+IDs, residuals and which cases were excluded because a block or correctness
+check failed. Duplicate coordinates and unchecked plans are errors. Fit output
+is descriptive and does not change the packet or its confirmation decision.
+
 ## Busy machines, deadlines and resume
 
 CPU-class validation is the same process-boundary check used by the benchmark

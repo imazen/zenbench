@@ -1,5 +1,6 @@
 //! CLI-only fresh-process comparisons. A child invocation is one observation.
 mod analysis;
+mod fit;
 mod interval;
 use analysis::{exit_code, summarize};
 mod metric;
@@ -1093,6 +1094,16 @@ pub(crate) fn diff(before: &Path, after: &Path) -> Result<String, String> {
     Ok(serde_json::to_string_pretty(&json!({"inference":"exploratory comparison of retained summaries; populations are not pooled","same_plan_and_identity":before.fingerprint==after.fingerprint,"before":before.summaries,"after":after.summaries,"before_complete":before.complete,"after_complete":after.complete})).unwrap())
 }
 
+pub(crate) fn fit(
+    path: &Path,
+    axis: &str,
+    unit: &str,
+    vary_inputs: &[String],
+) -> Result<String, String> {
+    serde_json::to_string_pretty(&fit::analyze(&load(path)?, axis, unit, vary_inputs)?)
+        .map_err(|e| e.to_string())
+}
+
 fn validate_packet(packet: &Packet) -> Result<(), String> {
     if packet.kind != "zenbench_pair" || packet.schema != 1 {
         return Err("unsupported external-process packet schema".into());
@@ -1704,6 +1715,54 @@ mod confirmation_tests {
     fn analyze(p: &mut Packet) -> i32 {
         p.summaries = summarize(p);
         exit_code(p)
+    }
+    #[test]
+    fn case_fit_keeps_strata_and_excludes_failed_coordinates() {
+        let mut p = packet();
+        let original = p.invocations.clone();
+        for (index, (bytes, codec)) in [(2, "a"), (4, "a"), (8, "a"), (2, "b"), (4, "b")]
+            .into_iter()
+            .enumerate()
+        {
+            let case = serde_json::from_value(json!({
+                "id":index.to_string(),"fields":{"size":bytes.to_string(),"codec":codec}
+            }))
+            .unwrap();
+            if index == 0 {
+                p.plan.cases[index] = case;
+                p.invocations.clear();
+            } else {
+                p.plan.cases.push(case);
+            }
+            for mut row in original.clone() {
+                row.case = index;
+                let offset = if codec == "a" { 10.0 } else { 20.0 };
+                row.values_ns = vec![offset + f64::from(bytes) * 3.0; 2];
+                if index == 2 && row.arm == 1 {
+                    row.status = "failed".into();
+                }
+                p.invocations.push(row);
+            }
+        }
+        let value = fit::analyze(&p, "size", "bytes", &[]).unwrap();
+        let fits = value["fits"].as_array().unwrap();
+        assert_eq!(fits.len(), 4);
+        assert_eq!(value["excluded_cases"][0]["case"], "2");
+        assert!(
+            fits.iter()
+                .all(|fit| (fit["slope_ns_per_axis_unit"].as_f64().unwrap() - 3.0).abs() < 1e-12)
+        );
+        assert!((fits[0]["intercept_ns"].as_f64().unwrap() - 10.0).abs() < 1e-12);
+        assert!((fits[2]["intercept_ns"].as_f64().unwrap() - 20.0).abs() < 1e-12);
+        assert!(fit::analyze(&p, "missing", "bytes", &[]).is_err());
+        p.plan.cases[1].fields.insert("size".into(), "NaN".into());
+        assert!(fit::analyze(&p, "size", "bytes", &[]).is_err());
+        p.plan.cases[1].fields.insert("size".into(), "2.0".into());
+        assert!(
+            fit::analyze(&p, "size", "bytes", &[])
+                .unwrap_err()
+                .contains("duplicate")
+        );
     }
     #[test]
     fn fixed_block_decisions_and_indivisible_repetitions() {

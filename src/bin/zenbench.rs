@@ -82,6 +82,17 @@ enum Commands {
     },
     /// Compare two external-process packets without rerunning or pooling samples.
     PairDiff { before: PathBuf, after: PathBuf },
+    /// Fit latency against a declared numeric case field in one retained packet.
+    PairFit {
+        packet: PathBuf,
+        #[arg(long)]
+        axis: String,
+        #[arg(long)]
+        unit: String,
+        /// Case input name whose file varies with the axis. Repeat if needed.
+        #[arg(long)]
+        vary_input: Vec<String>,
+    },
     /// Queue a background command fairly with benchmarks, then run at low priority.
     #[command(
         after_help = "All participants must use the same ZENBENCH_COORDINATION_DIR for system-wide coordination.
@@ -556,6 +567,18 @@ fn main() {
             Ok(text) => println!("{text}"),
             Err(e) => {
                 eprintln!("cannot compare pair evidence: {e}");
+                std::process::exit(2);
+            }
+        },
+        Commands::PairFit {
+            packet,
+            axis,
+            unit,
+            vary_input,
+        } => match support::pair::fit(&packet, &axis, &unit, &vary_input) {
+            Ok(report) => println!("{report}"),
+            Err(error) => {
+                eprintln!("cannot fit pair evidence: {error}");
                 std::process::exit(2);
             }
         },
