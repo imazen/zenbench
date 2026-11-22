@@ -231,3 +231,22 @@ impl WasmInstance {
         &self.instance
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::WasmBench;
+
+    #[test]
+    fn links_and_runs_wasi_preview1_imports() {
+        let module = WasmBench::from_wat(
+            r#"(module
+                (import "wasi_snapshot_preview1" "sched_yield" (func $yield (result i32)))
+                (memory (export "memory") 1)
+                (func (export "yield") (result i32) call $yield))"#,
+        )
+        .unwrap();
+        assert!(module.instance().is_err());
+        let mut instance = module.wasi_instance().unwrap();
+        assert_eq!(instance.call::<_, i32>("yield", ()).unwrap(), 0);
+    }
+}

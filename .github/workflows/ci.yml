@@ -145,7 +145,7 @@ jobs:
         run: cargo check
       - name: Check MSRV compiles (no default features)
         run: cargo check --no-default-features
-      # Every feature except charts (1.88) and wasm (1.96) claims 1.85
+      # Every feature except charts (1.88) and wasm (1.97) claims 1.85
       # in the README features table; all targets covers tests and benches.
       - name: Check MSRV compiles (all 1.85 features, all targets)
         run: cargo check --all-targets --features async,cpu-time,criterion-compat

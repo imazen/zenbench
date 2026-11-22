@@ -257,7 +257,7 @@ group.config()
 | `async` | no | `Bencher::iter_async` on a tokio runtime | 1.85 |
 | `cpu-time` | no | per-thread CPU time next to wall time | 1.85 |
 | `charts` | no | SVG charts via `charts-rs` | 1.88 |
-| `wasm` | no | `zenbench::wasm`: wasmtime runner with simd128 and WASI p1 | 1.96 |
+| `wasm` | no | `zenbench::wasm`: wasmtime runner with simd128 and WASI p1 | 1.97 |
 
 The crate's declared `rust-version` is 1.85. `charts` and `wasm` pull in
 dependencies that need newer compilers; `zenbench::wasm` re-exports
