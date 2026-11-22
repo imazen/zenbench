@@ -248,18 +248,34 @@ pub(crate) fn harness_args() -> Vec<String> {
     })
 }
 
-pub(crate) fn smoke_requested() -> bool {
-    std::env::args_os().any(|arg| arg == "--smoke")
+/// A short run, where true requests the Bencher's elapsed time.
+pub(crate) fn short_run() -> Option<bool> {
+    std::env::args_os().find_map(|arg| {
+        if arg == "--smoke" {
+            Some(false)
+        } else if arg == "--once" {
+            Some(true)
+        } else {
+            None
+        }
+    })
 }
 
 pub(crate) fn validate_harness_args(args: &[String]) -> Result<(), String> {
     let args = normalize_harness_args(args)?;
-    if args.iter().any(|arg| arg == "--smoke")
-        && args.iter().any(|arg| {
-            !matches!(arg.as_str(), "--smoke" | "--bench") && !arg.starts_with("--group=")
-        })
-    {
-        return Err("--smoke only accepts --group filtering".into());
+    let mut short = args
+        .iter()
+        .filter(|a| matches!(a.as_str(), "--smoke" | "--once"));
+    if let Some(option) = short.next() {
+        if short.next().is_some() {
+            return Err("choose one of --smoke and --once".into());
+        }
+        if args
+            .iter()
+            .any(|arg| arg != option && arg != "--bench" && !arg.starts_with("--group="))
+        {
+            return Err(format!("{option} only accepts --group filtering"));
+        }
     }
     let mut seen = std::collections::HashSet::new();
     for arg in &args {
@@ -269,6 +285,7 @@ pub(crate) fn validate_harness_args(args: &[String]) -> Result<(), String> {
             "--update-on-pass",
             "--dry-run",
             "--smoke",
+            "--once",
         ]
         .contains(&arg.as_str())
         {

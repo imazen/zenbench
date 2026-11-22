@@ -12,6 +12,62 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use zenbench::*;
 
+#[test]
+fn witnessed_group_checks_once_after_timed_work() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    };
+
+    let witness_calls = Arc::new(AtomicUsize::new(0));
+    let calls = witness_calls.clone();
+    let result = run_gated(GateConfig::disabled(), |suite| {
+        suite.compare("witnessed", |group| {
+            group
+                .config()
+                .max_rounds(3)
+                .auto_rounds(false)
+                .warmup_time(std::time::Duration::ZERO);
+            for (name, digest) in [("base", [0; 32]), ("changed", [1; 32])] {
+                let worked = Arc::new(AtomicBool::new(false));
+                let timed_work = worked.clone();
+                let during = calls.clone();
+                let after = calls.clone();
+                group.bench_with_witness(
+                    name,
+                    move |b| {
+                        assert_eq!(during.load(Ordering::Relaxed), 0);
+                        b.iter(|| timed_work.store(true, Ordering::Relaxed));
+                    },
+                    move || {
+                        assert!(worked.load(Ordering::Relaxed));
+                        after.fetch_add(1, Ordering::Relaxed);
+                        digest
+                    },
+                );
+            }
+        });
+    });
+    assert_eq!(witness_calls.load(Ordering::Relaxed), 2);
+    let group = &result.comparisons[0];
+    assert_eq!(
+        group.benchmarks[0].output_witness.as_deref(),
+        Some("00".repeat(32).as_str())
+    );
+    assert_eq!(
+        group.benchmarks[1].output_witness.as_deref(),
+        Some("01".repeat(32).as_str())
+    );
+    assert_eq!(group.analyses.len(), 1);
+    assert!(!group.analyses[0].2.significant);
+    let restored: SuiteResult =
+        serde_json::from_value(serde_json::to_value(&result).unwrap()).unwrap();
+    assert_eq!(
+        restored.comparisons[0].benchmarks[1].output_witness,
+        group.benchmarks[1].output_witness
+    );
+}
+
 /// Run a minimal benchmark suite and return results for inspection.
 fn run_simple_suite() -> SuiteResult {
     run_gated(GateConfig::disabled(), |suite| {

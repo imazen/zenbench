@@ -99,6 +99,7 @@ pub(crate) fn issues(result: &SuiteResult) -> Vec<String> {
         if workload_signature(run) != signature {
             issues.push("replicate workload or sampling contract differs".into());
         }
+        issues.extend(witness_differences(result, run));
         if !ids.insert(&run.run_id.0) {
             issues.push("duplicate replicate identity".into());
         }
@@ -144,6 +145,27 @@ pub(crate) fn issues(result: &SuiteResult) -> Vec<String> {
                 .iter()
                 .map(|(a, b, _)| if a < b { (a, b) } else { (b, a) })
                 .collect();
+            if group
+                .benchmarks
+                .iter()
+                .any(|bench| bench.output_witness.is_some())
+            {
+                for (a, b, _) in &group.analyses {
+                    let witness = |name: &str| {
+                        group
+                            .benchmarks
+                            .iter()
+                            .find(|benchmark| benchmark.name == name)
+                            .and_then(|benchmark| benchmark.output_witness.as_deref())
+                    };
+                    if witness(a) != witness(b) {
+                        issues.push(format!(
+                            "output witnesses differ or are missing for {:?}/{a:?} and {b:?}",
+                            group.group_name
+                        ));
+                    }
+                }
+            }
             if pairs.len() != expected
                 || group.analyses.len() != expected
                 || group
@@ -234,6 +256,7 @@ pub(crate) fn compatibility_issues(base: &SuiteResult, candidate: &SuiteResult) 
     if workload_signature(base) != workload_signature(candidate) {
         problems.push("workload inventory/settings differ".into());
     }
+    problems.extend(witness_differences(base, candidate));
     match (&base.execution, &candidate.execution) {
         (Some(b), Some(c))
             if b.protocol == c.protocol
@@ -245,6 +268,33 @@ pub(crate) fn compatibility_issues(base: &SuiteResult, candidate: &SuiteResult) 
     problems.sort();
     problems.dedup();
     problems
+}
+
+pub(crate) fn witness_differences(base: &SuiteResult, candidate: &SuiteResult) -> Vec<String> {
+    if [base, candidate].into_iter().all(|result| {
+        result
+            .comparisons
+            .iter()
+            .flat_map(|group| &group.benchmarks)
+            .all(|benchmark| benchmark.output_witness.is_none())
+    }) {
+        return Vec::new();
+    }
+    let mut issues = Vec::new();
+    for group in &candidate.comparisons {
+        for benchmark in &group.benchmarks {
+            let Some(control) = crate::find_bench(base, &group.group_name, &benchmark.name) else {
+                continue;
+            };
+            if control.output_witness != benchmark.output_witness {
+                issues.push(format!(
+                    "output witnesses differ or are missing for {:?}/{:?}",
+                    group.group_name, benchmark.name
+                ));
+            }
+        }
+    }
+    issues
 }
 
 fn classify(lo: f64, hi: f64, margin: f64) -> Verdict {
@@ -628,6 +678,38 @@ mod tests {
             qualify(run);
         }
         assert_eq!(issues(&result), ["unverified CPU placement"]);
+    }
+
+    #[test]
+    fn changed_missing_and_mixed_output_witnesses_cannot_promote() {
+        fn record(result: &mut SuiteResult, byte: &str) {
+            result.comparisons[0].benchmarks[0].output_witness = Some(byte.repeat(32));
+            for run in &mut result.replicates {
+                run.comparisons[0].benchmarks[0].output_witness = Some(byte.repeat(32));
+            }
+        }
+        let mut control = synthetic_population(&[100_000; 5]);
+        let mut candidate = synthetic_population(&[100_000; 5]);
+        record(&mut control, "00");
+        let assessed = crate::baseline::assess_baseline(&control, &candidate, 1.0);
+        assert!(!assessed.promotable);
+        assert!(
+            assessed
+                .comparison
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("output witnesses differ"))
+        );
+        record(&mut candidate, "01");
+        assert!(!crate::baseline::assess_baseline(&control, &candidate, 1.0).promotable);
+        record(&mut candidate, "00");
+        assert!(crate::baseline::assess_baseline(&control, &candidate, 1.0).promotable);
+        candidate.replicates[0].comparisons[0].benchmarks[0].output_witness = None;
+        assert!(
+            issues(&candidate)
+                .iter()
+                .any(|issue| issue.contains("output witnesses differ"))
+        );
     }
 
     #[test]

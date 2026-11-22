@@ -70,7 +70,7 @@ pub use plan::{BenchmarkMode, BenchmarkPlan, ExecutionRecord};
 /// direct use — call via the macros instead.
 #[doc(hidden)]
 pub fn postprocess_result(result: &SuiteResult) {
-    if plan::smoke_requested() {
+    if plan::short_run().is_some() {
         return;
     }
     let args = plan::harness_args();
@@ -563,7 +563,13 @@ pub fn aggregate_results(runs: Vec<SuiteResult>, policy: Aggregation) -> SuiteRe
             .map(|r| r.comparisons[index].completed_rounds)
             .sum();
         cmp.iterations_per_sample = 0;
-        for bench in cmp.benchmarks.iter_mut() {
+        for (bench_index, bench) in cmp.benchmarks.iter_mut().enumerate() {
+            if runs.iter().any(|run| {
+                run.comparisons[index].benchmarks[bench_index].output_witness
+                    != bench.output_witness
+            }) {
+                bench.output_witness = None;
+            }
             let key = (cmp.group_name.clone(), bench.name.clone());
             let samples = match means.get(&key) {
                 Some(s) => s,

@@ -41,6 +41,9 @@ pub struct BenchmarkResult {
     /// Key-value tags for multi-dimensional reporting.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<(String, String)>,
+    /// SHA-256 output witness from the registered correctness callback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_witness: Option<String>,
     /// Visual subgroup label (display-only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subgroup: Option<String>,
@@ -79,6 +82,7 @@ impl Default for BenchmarkResult {
             summary: Summary::new(),
             cpu_summary: None,
             tags: Vec::new(),
+            output_witness: None,
             subgroup: None,
             cold_start_ns: 0.0,
             mean_ci: None,
@@ -573,6 +577,9 @@ impl SuiteResult {
                     identity.push(format!("subgroup={}", llm_quote(sg)));
                 }
                 identity.push(format!("benchmark={}", llm_quote(&bench.name)));
+                if let Some(witness) = &bench.output_witness {
+                    identity.push(format!("output_witness={}", llm_quote(witness)));
+                }
                 identity.push(self.cpu_evidence(Some(comp)));
 
                 // Section 2: Comparison (the number you care about most)
@@ -645,7 +652,10 @@ impl SuiteResult {
                     ));
                 }
                 for (k, v) in &bench.tags {
-                    let key = if k.starts_with("cpu_") || k == "pool_thread_count" {
+                    let key = if k.starts_with("cpu_")
+                        || k == "pool_thread_count"
+                        || k == "output_witness"
+                    {
                         format!("tag_{k}")
                     } else {
                         k.clone()
