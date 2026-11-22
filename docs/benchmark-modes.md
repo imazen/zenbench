@@ -152,3 +152,17 @@ not speed predictions for arbitrary SIMD crates or publication-level coverage.
 [raw attempts and executable](../benchmarks/modes_2026-10-11.pointer.md).
 `run-heavy: done rc=0 11s | peak-RSS 0.10GiB | min-avail 26797MiB | peak-load 1.22`.
 RSS covers the Docker client and Python replay; payloads had a separate 2 GiB cap.
+
+### Retain rejected resource observations
+
+Set `ZENBENCH_GATE_DIAGNOSTICS=1` before a native run to attach process
+diagnostics to rejected round observations in the saved result. Each process
+retains at most 16 distinct rejected sampler windows. Each window lists up to
+eight foreign process leaders in descending measured CPU use. Subsequent
+rounds using the same window carry a reference, and overflow is marked.
+Records contain the sample time, interval, CPU thresholds, PID, OS-reported
+start time in seconds, and a sanitized process basename. They omit command
+arguments, environment and paths. Reused PIDs are never looked up after a
+window is sampled. Second-resolution start times can be ambiguous when a PID
+is recycled within the same second. Resource admission uses the same checks
+with diagnostics disabled or enabled.

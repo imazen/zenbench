@@ -143,6 +143,8 @@ pub struct ResourceGate {
     observation_age_ns: Option<u64>,
     last_observation: Option<String>,
     missing_observations: bool,
+    diagnostic_windows: usize,
+    last_diagnostic_window: Option<u128>,
 }
 
 impl ResourceGate {
@@ -156,6 +158,8 @@ impl ResourceGate {
             observation_age_ns: None,
             last_observation: None,
             missing_observations: false,
+            diagnostic_windows: 0,
+            last_diagnostic_window: None,
         }
     }
 
@@ -391,23 +395,28 @@ impl ResourceGate {
         if !self.config.enabled {
             return None;
         }
-        let state = if let Some(background) = &self.background {
-            let Some((age, state)) = background.latest() else {
+        let (state, evidence) = if let Some(background) = &self.background {
+            let Some((age, state, evidence)) = background.latest() else {
                 self.observation_age_ns = None;
                 self.missing_observations = true;
                 return None;
             };
             self.observation_age_ns = Some(age.as_nanos().min(u64::MAX as u128) as u64);
-            state
+            (state, evidence)
         } else {
             let start = Instant::now();
-            let state = self.monitor.snapshot();
+            let (state, evidence) = self.monitor.snapshot_with_process_evidence();
             self.total_wait_time += start.elapsed();
-            state
+            (state, evidence.map(std::sync::Arc::new))
         };
         let reason = self.check_state(&state);
         let clean = reason.is_none();
         self.last_observation = Some(format!("reason={reason:?} state={state:?}"));
+        if !clean {
+            if let Some(evidence) = evidence {
+                self.retain_process_evidence(&evidence);
+            }
+        }
         if std::env::var_os("ZENBENCH_GATE_TRACE").is_some() {
             eprintln!("[zenbench gate] clean={clean} reason={reason:?} state={state:?}");
         }
@@ -415,6 +424,27 @@ impl ResourceGate {
             self.total_waits += 1;
         }
         Some(clean)
+    }
+
+    fn retain_process_evidence(&mut self, evidence: &crate::platform::ProcessEvidence) {
+        use std::fmt::Write;
+        let record = self.last_observation.as_mut().expect("sample observation");
+        let window = evidence.observed_unix_ns;
+        if self.last_diagnostic_window == Some(window) {
+            let _ = write!(record, " process_window_ref={window}");
+        } else if self.diagnostic_windows >= 16 {
+            record.push_str(" process_windows_truncated=true");
+        } else {
+            self.last_diagnostic_window = Some(window);
+            self.diagnostic_windows += 1;
+            let evidence = serde_json::json!({
+                "window": evidence,
+                "max_host_cpu_fraction":self.config.max_cpu_load,
+                "max_heavy_processes":self.config.max_heavy_processes,
+                "heavy_process_cpu_percent":crate::platform::HEAVY_PROCESS_CPU_PERCENT,
+            });
+            let _ = write!(record, " process_evidence={evidence}");
+        }
     }
 
     /// Brief non-blocking gate check. Waits up to `max_wait` for conditions to
@@ -749,5 +779,39 @@ mod tests {
         // longer scanned, so it is correctly NOT flagged.
         let rsync_argv0 = basename_lower("/usr/bin/rsync");
         assert!(!BENCH_NAME_PATTERNS.iter().any(|&p| rsync_argv0.contains(p)));
+    }
+    #[test]
+    fn process_evidence_is_capped_and_duplicate_windows_use_references() {
+        let mut gate = ResourceGate::new(GateConfig::strict());
+        let mut sample = crate::platform::ProcessEvidence::capture(
+            Duration::from_millis(200),
+            [(123, 42, std::ffi::OsStr::new("foreign"), 45.0)].into_iter(),
+        );
+        sample.observed_unix_ns = 1;
+        gate.last_observation = Some(String::new());
+        gate.retain_process_evidence(&sample);
+        let observed = gate.last_observation.take().unwrap();
+        let payload: serde_json::Value =
+            serde_json::from_str(observed.trim().strip_prefix("process_evidence=").unwrap())
+                .unwrap();
+        assert_eq!(payload["window"]["processes"][0]["pid"], 123);
+        assert_eq!(payload["window"]["processes"][0]["cpu_percent"], 45.0);
+        assert_eq!(payload["heavy_process_cpu_percent"], 10.0);
+        gate.last_observation = Some(String::new());
+        gate.retain_process_evidence(&sample);
+        assert_eq!(
+            gate.last_observation.as_deref(),
+            Some(" process_window_ref=1")
+        );
+        for index in 2..=17 {
+            sample.observed_unix_ns = index;
+            gate.last_observation = Some(String::new());
+            gate.retain_process_evidence(&sample);
+        }
+        assert_eq!(gate.diagnostic_windows, 16);
+        assert_eq!(
+            gate.last_observation.as_deref(),
+            Some(" process_windows_truncated=true")
+        );
     }
 }

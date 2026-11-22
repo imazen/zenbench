@@ -143,8 +143,22 @@ impl SystemMonitor {
     /// workers cannot be subtracted, so their remaining interval CPU is treated
     /// conservatively as foreign load. An empty list preserves [`Self::snapshot`].
     pub fn snapshot_excluding_processes(&self, workers: &[u32]) -> SystemState {
+        self.snapshot_inner(workers, false).0
+    }
+
+    pub(crate) fn snapshot_with_process_evidence(&self) -> (SystemState, Option<ProcessEvidence>) {
+        self.snapshot_inner(&[], std::env::var_os("ZENBENCH_GATE_DIAGNOSTICS").is_some())
+    }
+
+    fn snapshot_inner(
+        &self,
+        workers: &[u32],
+        retain_processes: bool,
+    ) -> (SystemState, Option<ProcessEvidence>) {
+        let previous_refresh;
         let since_last_refresh = {
             let last = *self.last_cpu_refresh.lock().unwrap();
+            previous_refresh = last;
             let since = last.elapsed();
             if since < sysinfo::MINIMUM_CPU_UPDATE_INTERVAL {
                 std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL - since);
@@ -164,7 +178,8 @@ impl SystemMonitor {
         #[cfg(target_os = "macos")]
         let process_sample_at = Instant::now();
         let procs_refresh_elapsed = procs_started.elapsed();
-        *self.last_cpu_refresh.lock().unwrap() = Instant::now();
+        let refresh_finished = Instant::now();
+        *self.last_cpu_refresh.lock().unwrap() = refresh_finished;
         let system_refresh_elapsed = refresh_started.elapsed();
         let global_agg_after_procs = f64::from(sys.global_cpu_usage());
 
@@ -246,20 +261,23 @@ impl SystemMonitor {
                 .map(|p| (p.pid(), p.start_time(), p.accumulated_cpu_time())),
         );
         let global_cpu_fraction = cpu_load;
+        let process_percent = |p: &sysinfo::Process| {
+            #[cfg(target_os = "macos")]
+            let percent = cpu_counters::conservative_percent(
+                f64::from(p.cpu_usage()),
+                process_rates.get(&p.pid()).copied(),
+                owned.contains(&p.pid()),
+            );
+            #[cfg(not(target_os = "macos"))]
+            let percent = f64::from(p.cpu_usage());
+            percent
+        };
         let (cpu_load, heavy_process_count) = foreign_activity(
             cpu_load,
             cpus.len(),
-            sys.processes().values().map(|p| {
-                #[cfg(target_os = "macos")]
-                let percent = cpu_counters::conservative_percent(
-                    f64::from(p.cpu_usage()),
-                    process_rates.get(&p.pid()).copied(),
-                    owned.contains(&p.pid()),
-                );
-                #[cfg(not(target_os = "macos"))]
-                let percent = f64::from(p.cpu_usage());
-                (p.pid(), percent)
-            }),
+            sys.processes()
+                .values()
+                .map(|p| (p.pid(), process_percent(p))),
             &owned,
             &user_tasks,
         );
@@ -329,12 +347,86 @@ impl SystemMonitor {
             }
         }
 
-        SystemState {
-            cpu_load,
-            available_ram_bytes,
-            total_ram_bytes,
-            cpu_temp_c,
-            heavy_process_count,
+        let evidence = retain_processes.then(|| {
+            ProcessEvidence::capture(
+                refresh_finished.duration_since(previous_refresh),
+                sys.processes().values().filter_map(|p| {
+                    let pct = process_percent(p);
+                    (!owned.contains(&p.pid())
+                        && !user_tasks.contains(&p.pid())
+                        && pct.is_finite()
+                        && pct > 0.0)
+                        .then(|| (p.pid().as_u32(), p.start_time(), p.name(), pct))
+                }),
+            )
+        });
+        (
+            SystemState {
+                cpu_load,
+                available_ram_bytes,
+                total_ram_bytes,
+                cpu_temp_c,
+                heavy_process_count,
+            },
+            evidence,
+        )
+    }
+}
+
+#[derive(Clone, serde::Serialize)]
+pub(crate) struct ProcessEvidence {
+    pub(crate) observed_unix_ns: u128,
+    interval_ns: u128,
+    processes: Vec<ObservedProcess>,
+    truncated: bool,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct ObservedProcess {
+    pid: u32,
+    start_unix_seconds: u64,
+    name: String,
+    cpu_percent: f64,
+}
+
+impl ProcessEvidence {
+    pub(crate) fn capture<'a>(
+        interval: std::time::Duration,
+        processes: impl Iterator<Item = (u32, u64, &'a std::ffi::OsStr, f64)>,
+    ) -> Self {
+        let mut processes: Vec<_> = processes.collect();
+        processes.sort_unstable_by(|a, b| b.3.total_cmp(&a.3).then_with(|| a.0.cmp(&b.0)));
+        Self {
+            observed_unix_ns: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos(),
+            interval_ns: interval.as_nanos(),
+            truncated: processes.len() > 8,
+            processes: processes
+                .into_iter()
+                .take(8)
+                .map(|(pid, start, name, cpu_percent)| {
+                    let name = name.to_string_lossy();
+                    let basename = name.rsplit(['/', '\\']).next().unwrap_or_default();
+                    ObservedProcess {
+                        pid,
+                        start_unix_seconds: start,
+                        name: basename
+                            .chars()
+                            .take(48)
+                            .map(|c| {
+                                if c.is_alphanumeric() || matches!(c, '.' | '-' | '_') {
+                                    c
+                                } else {
+                                    '_'
+                                }
+                            })
+                            .collect(),
+                        cpu_percent,
+                    }
+                })
+                .collect(),
         }
     }
 }
@@ -349,6 +441,8 @@ fn process_task_pids(sys: &System) -> Vec<sysinfo::Pid> {
         .collect()
 }
 
+pub(crate) const HEAVY_PROCESS_CPU_PERCENT: f64 = 10.0;
+
 fn foreign_activity(
     global: f64,
     cores: usize,
@@ -361,7 +455,7 @@ fn foreign_activity(
     for (pid, pct) in processes {
         if owned.contains(&pid) {
             own_pct += pct;
-        } else if !user_tasks.contains(&pid) && pct > 10.0 {
+        } else if !user_tasks.contains(&pid) && pct > HEAVY_PROCESS_CPU_PERCENT {
             heavy += 1;
         }
     }
@@ -379,6 +473,27 @@ mod owner_tests {
     #[cfg(target_os = "linux")]
     use super::process_task_pids;
     use sysinfo::Pid;
+
+    #[test]
+    fn process_diagnostics_bound_names_and_keep_original_identity() {
+        let name = std::ffi::OsStr::new("/fixture/first\nline");
+        let old = super::ProcessEvidence::capture(
+            std::time::Duration::from_millis(200),
+            (0..12).map(|i| (i, 100, name, f64::from(i))),
+        );
+        let new = super::ProcessEvidence::capture(
+            std::time::Duration::from_millis(200),
+            [(11, 200, std::ffi::OsStr::new("second"), 50.0)].into_iter(),
+        );
+        let old = serde_json::to_value(old).unwrap();
+        let new = serde_json::to_value(new).unwrap();
+        assert_eq!(old["truncated"], true);
+        assert_eq!(old["processes"].as_array().unwrap().len(), 8);
+        assert_eq!(old["processes"][0]["pid"], new["processes"][0]["pid"]);
+        assert_eq!(old["processes"][0]["name"], "first_line");
+        assert_eq!(old["processes"][0]["start_unix_seconds"], 100);
+        assert_eq!(new["processes"][0]["start_unix_seconds"], 200);
+    }
 
     #[test]
     fn registered_mt_owner_does_not_hide_foreign_work() {

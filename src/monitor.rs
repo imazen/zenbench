@@ -1,5 +1,5 @@
 //! Resource observations collected independently of benchmark-round scheduling.
-use crate::platform::{SystemMonitor, SystemState};
+use crate::platform::{ProcessEvidence, SystemMonitor, SystemState};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -8,7 +8,7 @@ use std::sync::{
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-type Observation = (Instant, SystemState);
+type Observation = (Instant, SystemState, Option<Arc<ProcessEvidence>>);
 
 pub(crate) struct Monitor {
     latest: Arc<Mutex<Option<Observation>>>,
@@ -78,8 +78,8 @@ impl Monitor {
                 }
                 let monitor = SystemMonitor::for_benchmark();
                 while !done.load(Ordering::Acquire) {
-                    let state = monitor.snapshot();
-                    *target.lock().unwrap() = Some((Instant::now(), state));
+                    let (state, processes) = monitor.snapshot_with_process_evidence();
+                    *target.lock().unwrap() = Some((Instant::now(), state, processes.map(Arc::new)));
                     let _ = ready.try_send(Ok(effective.clone()));
                 }
             })
@@ -104,11 +104,11 @@ impl Monitor {
         }
     }
 
-    pub(crate) fn latest(&self) -> Option<(Duration, SystemState)> {
+    pub(crate) fn latest(&self) -> Option<(Duration, SystemState, Option<Arc<ProcessEvidence>>)> {
         let latest = self.latest.lock().ok()?;
-        let (time, state) = latest.as_ref()?;
+        let (time, state, processes) = latest.as_ref()?;
         let age = time.elapsed();
-        (age <= Duration::from_secs(1)).then(|| (age, state.clone()))
+        (age <= Duration::from_secs(1)).then(|| (age, state.clone(), processes.clone()))
     }
 }
 
