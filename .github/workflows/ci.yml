@@ -100,6 +100,8 @@ jobs:
     name: Cross (${{ matrix.target }})
     needs: lint
     runs-on: ubuntu-latest
+    env:
+      CROSS_CONTAINER_OPTS: --security-opt seccomp=unconfined
     strategy:
       fail-fast: false
       matrix:
