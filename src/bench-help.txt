@@ -8,6 +8,7 @@ exit 0 means execution succeeded, not that performance is confirmed.
 
   --help, -h                 Show this help before registering benchmarks
   --smoke                    Run each selected benchmark once without publishing timings
+  --once                     Report one iteration and its output witness, if registered
   --group=NAME               Select matching groups
   --mode=iterate|confirm
                             Iterate: one process; group defaults 30 rounds,

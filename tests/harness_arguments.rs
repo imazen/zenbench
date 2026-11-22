@@ -8,17 +8,42 @@ mod fixture {
     zenbench::main!(|suite| {
         for name in ["selected group", "other"] {
             suite.group(name, move |group| {
-                group.bench("callback", move |b| {
-                    assert!(
-                        std::env::args().any(|arg| arg == "--smoke"),
-                        "dry-run invoked a callback"
-                    );
-                    assert_eq!(name, "selected group", "unselected callback ran");
-                    b.iter(|| println!("SMOKE_CALLBACK"));
-                });
+                group.bench_with_witness(
+                    "callback",
+                    move |b| {
+                        assert!(
+                            std::env::args().any(|arg| arg == "--smoke" || arg == "--once"),
+                            "dry-run invoked a callback"
+                        );
+                        assert_eq!(name, "selected group", "unselected callback ran");
+                        b.iter(|| println!("SMOKE_CALLBACK"));
+                    },
+                    || {
+                        assert!(std::env::args().any(|arg| arg == "--once"));
+                        [0x0f; 32]
+                    },
+                );
             });
         }
     });
+}
+
+#[cfg(feature = "criterion-compat")]
+mod compat_fixture {
+    use zenbench::criterion_compat::Criterion;
+
+    fn probe() -> Criterion {
+        let mut criterion = Criterion::default();
+        let local = 42;
+        criterion.bench_function("compat", |b| b.iter(|| println!("COMPAT_{local}")));
+        criterion
+    }
+
+    zenbench::criterion_main!(probe);
+
+    pub(super) fn run() {
+        main();
+    }
 }
 
 fn child(args: &[&str]) -> std::process::Output {
@@ -53,6 +78,11 @@ fn child(args: &[&str]) -> std::process::Output {
 
 fn main() {
     if std::env::var_os("ZENBENCH_ARGUMENT_CHILD").is_some() {
+        #[cfg(feature = "criterion-compat")]
+        if std::env::args().any(|arg| arg == "--group=compat") {
+            compat_fixture::run();
+            return;
+        }
         fixture::run();
         return;
     }
@@ -103,9 +133,33 @@ fn main() {
     let output = String::from_utf8(smoke.stdout).unwrap();
     assert_eq!(output.lines().filter(|l| *l == "SMOKE_CALLBACK").count(), 1);
     assert!(output.contains("Testing \"selected group\"/\"callback\" ... ok"));
+    let once = child(&["--group=selected group", "--once"]);
+    assert!(once.status.success(), "{once:?}");
+    let output = String::from_utf8(once.stdout).unwrap();
+    let mut lines = output.lines();
+    assert_eq!(lines.next(), Some("SMOKE_CALLBACK"));
+    let row: serde_json::Value = serde_json::from_str(lines.next().unwrap()).unwrap();
+    assert!(lines.next().is_none());
+    assert_eq!(row["iterations"], 1);
+    assert_eq!(row["output_witness"], "0f".repeat(32));
+    assert!(row["elapsed_ns"].is_u64());
+    #[cfg(feature = "criterion-compat")]
+    {
+        let compat = child(&["--group=compat", "--smoke"]);
+        assert!(compat.status.success(), "{compat:?}");
+        let output = String::from_utf8(compat.stdout).unwrap();
+        assert_eq!(
+            output.lines().filter(|line| *line == "COMPAT_42").count(),
+            1
+        );
+        assert!(output.contains("Testing \"compat\"/\"_\" ... ok"));
+    }
     let panic = child(&["--group=other", "--smoke"]);
     assert!(!panic.status.success());
     assert!(String::from_utf8_lossy(&panic.stderr).contains("unselected callback ran"));
+    let nothing = child(&["--group=never-matches", "--smoke"]);
+    assert_eq!(nothing.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&nothing.stderr).contains("no benchmark callbacks matched"));
     for args in [
         vec!["--rounds"],
         vec!["--rounds", "5", "--rounds=7"],
@@ -114,6 +168,8 @@ fn main() {
         vec!["--smoke", "--mode=confirm"],
         vec!["--smoke", "--save-baseline=wrong"],
         vec!["--smoke", "--mean-of-processes=3"],
+        vec!["--once", "--smoke"],
+        vec!["--once", "--save-baseline=wrong"],
     ] {
         let output = child(&args);
         assert_eq!(output.status.code(), Some(2), "{args:?}: {output:?}");

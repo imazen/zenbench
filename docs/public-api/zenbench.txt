@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenbench.txt 758 lines (supported surface) | zenbench.features.txt 128 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,heap-profiling,precise-timing,wasm) | zenbench.internal.txt 34 lines (34 hidden + 0 excluded-feature)
+# files: zenbench.txt 761 lines (supported surface) | zenbench.features.txt 128 added (features: alloc-profiling,async,charts,cli,cpu-time,criterion-compat,daemon,heap-profiling,precise-timing,wasm) | zenbench.internal.txt 34 lines (34 hidden + 0 excluded-feature)
 
 ## summary
 #
@@ -15,15 +15,15 @@
 #   pub consts/statics                          2
 #   pub macros                                  1
 #   free functions                             45
-#   inherent methods                          201
-#   struct fields                             338
+#   inherent methods                          203
+#   struct fields                             339
 #   enum variants                              47
 #   trait roster entries (type × trait)       223
 #   auto-trait-complete types                  47
 #   auto-trait exceptions                       8
 #
 # per-module pub lines:
-#   (root)                          388
+#   (root)                          391
 #   baseline                         30
 #   calibration                       5
 #   daemon                           30
@@ -33,7 +33,7 @@
 #   prelude                          86
 #   quickchart                       30
 
-## items (697 lines)
+## items (700 lines)
 
 pub mod zenbench
 pub mod baseline
@@ -61,12 +61,12 @@ pub baseline::BenchmarkDelta::pct_change: f64
 pub baseline::BenchmarkDelta::regressed: bool
 pub fn baseline::assess_baseline(&SuiteResult, &SuiteResult, f64) -> baseline::BaselineAssessment
 pub fn baseline::compare_against_baseline(&SuiteResult, &SuiteResult, f64) -> baseline::BaselineComparison
-pub fn baseline::delete_baseline(&str) -> core::io::error::Result<()>
+pub fn baseline::delete_baseline(&str) -> std::io::error::Result<()>
 pub fn baseline::list_baselines() -> alloc::vec::Vec<alloc::string::String>
 pub fn baseline::load_baseline(&str) -> core::result::Result<SuiteResult, alloc::string::String>
 pub fn baseline::print_comparison_report(&baseline::BaselineComparison)
-pub fn baseline::prune_baselines(u64) -> core::io::error::Result<usize>
-pub fn baseline::save_baseline(&SuiteResult, &str) -> core::io::error::Result<std::path::PathBuf>
+pub fn baseline::prune_baselines(u64) -> std::io::error::Result<usize>
+pub fn baseline::save_baseline(&SuiteResult, &str) -> std::io::error::Result<std::path::PathBuf>
 pub mod calibration
 #[non_exhaustive] pub struct calibration::Calibration
 pub calibration::Calibration::integer_ns: f64
@@ -90,20 +90,20 @@ pub daemon::RunState::result_path: core::option::Option<std::path::PathBuf>
 pub daemon::RunState::started_at: u64
 pub daemon::RunState::status: daemon::RunStatus
 pub fn daemon::RunState::new(alloc::string::String, alloc::string::String, core::option::Option<alloc::string::String>) -> Self
-pub fn daemon::cleanup_old_runs(&std::path::Path, u64) -> core::io::error::Result<usize>
-pub fn daemon::find_latest_with_results(&std::path::Path) -> core::io::error::Result<core::option::Option<daemon::RunState>>
+pub fn daemon::cleanup_old_runs(&std::path::Path, u64) -> std::io::error::Result<usize>
+pub fn daemon::find_latest_with_results(&std::path::Path) -> std::io::error::Result<core::option::Option<daemon::RunState>>
 pub fn daemon::is_process_alive(u32) -> bool
-pub fn daemon::kill_run(&std::path::Path, &str) -> core::io::error::Result<bool>
-pub fn daemon::kill_stale_runs(&std::path::Path, &str) -> core::io::error::Result<usize>
-pub fn daemon::list_runs(&std::path::Path) -> core::io::error::Result<alloc::vec::Vec<daemon::RunState>>
-pub fn daemon::load_run_state(&std::path::Path, &str) -> core::io::error::Result<daemon::RunState>
+pub fn daemon::kill_run(&std::path::Path, &str) -> std::io::error::Result<bool>
+pub fn daemon::kill_stale_runs(&std::path::Path, &str) -> std::io::error::Result<usize>
+pub fn daemon::list_runs(&std::path::Path) -> std::io::error::Result<alloc::vec::Vec<daemon::RunState>>
+pub fn daemon::load_run_state(&std::path::Path, &str) -> std::io::error::Result<daemon::RunState>
 pub fn daemon::lock_path(&std::path::Path) -> std::path::PathBuf
 pub fn daemon::result_path_from_env() -> core::option::Option<std::path::PathBuf>
 pub fn daemon::runs_dir(&std::path::Path) -> std::path::PathBuf
-pub fn daemon::save_run_state(&std::path::Path, &daemon::RunState) -> core::io::error::Result<()>
-pub fn daemon::spawn_detached(&std::path::Path, &str, &[&str]) -> core::io::error::Result<(alloc::string::String, std::process::Child)>
-pub fn daemon::spawn_fire_and_forget(&std::path::Path, &str, &[&str]) -> core::io::error::Result<alloc::string::String>
-pub fn daemon::wait_for_run(&std::path::Path, &str, core::time::Duration, core::time::Duration) -> core::io::error::Result<daemon::RunState>
+pub fn daemon::save_run_state(&std::path::Path, &daemon::RunState) -> std::io::error::Result<()>
+pub fn daemon::spawn_detached(&std::path::Path, &str, &[&str]) -> std::io::error::Result<(alloc::string::String, std::process::Child)>
+pub fn daemon::spawn_fire_and_forget(&std::path::Path, &str, &[&str]) -> std::io::error::Result<alloc::string::String>
+pub fn daemon::wait_for_run(&std::path::Path, &str, core::time::Duration, core::time::Duration) -> std::io::error::Result<daemon::RunState>
 pub mod exclusive
 pub struct exclusive::AcquireConfig
 pub exclusive::AcquireConfig::activity: alloc::string::String
@@ -129,12 +129,12 @@ pub exclusive::HolderInfo::start: std::time::SystemTime
 pub fn exclusive::HolderInfo::is_stale(&self, core::time::Duration, std::time::SystemTime) -> bool
 pub fn exclusive::HolderInfo::waiting_message(&self, std::time::SystemTime) -> alloc::string::String
 pub struct exclusive::Lock
-pub fn exclusive::Lock::acquire(exclusive::AcquireConfig) -> core::io::error::Result<Self>
+pub fn exclusive::Lock::acquire(exclusive::AcquireConfig) -> std::io::error::Result<Self>
 pub fn exclusive::Lock::default_path() -> std::path::PathBuf
 pub fn exclusive::Lock::info(&self) -> core::option::Option<exclusive::HolderInfo>
 pub fn exclusive::Lock::path(&self) -> &std::path::Path
-pub fn exclusive::Lock::peek(&std::path::Path) -> core::io::error::Result<core::option::Option<exclusive::HolderInfo>>
-pub fn exclusive::Lock::try_acquire(exclusive::AcquireConfig) -> core::io::error::Result<core::result::Result<Self, core::option::Option<exclusive::HolderInfo>>>
+pub fn exclusive::Lock::peek(&std::path::Path) -> std::io::error::Result<core::option::Option<exclusive::HolderInfo>>
+pub fn exclusive::Lock::try_acquire(exclusive::AcquireConfig) -> std::io::error::Result<core::result::Result<Self, core::option::Option<exclusive::HolderInfo>>>
 pub fn exclusive::Lock::update_benchmark(&self, &str)
 pub fn exclusive::Lock::update_eta(&self, std::time::SystemTime)
 pub mod mcp
@@ -259,6 +259,7 @@ pub fn BenchGroup::bench_contended<S, Setup, Work>(&mut self, impl core::convert
 pub fn BenchGroup::bench_parallel<F>(&mut self, impl core::convert::Into<alloc::string::String>, usize, F) where F: core::ops::function::Fn(&mut Bencher, usize) + core::marker::Send + core::marker::Sync + core::clone::Clone + 'static
 pub fn BenchGroup::bench_scaling<F>(&mut self, impl core::convert::Into<alloc::string::String>, F) where F: core::ops::function::Fn(&mut Bencher, usize) + core::marker::Send + core::marker::Sync + core::clone::Clone + 'static
 pub fn BenchGroup::bench_tagged<F>(&mut self, impl core::convert::Into<alloc::string::String>, &[(&str, &str)], F) where F: core::ops::function::FnMut(&mut Bencher) + core::marker::Send + 'static
+pub fn BenchGroup::bench_with_witness<F, W>(&mut self, impl core::convert::Into<alloc::string::String>, F, W) where F: core::ops::function::FnMut(&mut Bencher) + core::marker::Send + 'static, W: core::ops::function::FnOnce() -> [u8; 32] + core::marker::Send + 'static
 pub fn BenchGroup::config(&mut self) -> &mut GroupConfig
 pub fn BenchGroup::new_public(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn BenchGroup::subgroup(&mut self, impl core::convert::Into<alloc::string::String>) -> &mut Self
@@ -377,13 +378,13 @@ pub prelude::SuiteResult::unreliable: bool
 pub fn SuiteResult::check_cpu_compatibility(&self, &Self) -> core::result::Result<(), alloc::string::String>
 pub fn SuiteResult::confirmation_issues(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn SuiteResult::group_by_tag(&self, &str) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::vec::Vec<(&str, &BenchmarkResult)>>
-pub fn SuiteResult::load(impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<Self>
+pub fn SuiteResult::load(impl core::convert::AsRef<std::path::Path>) -> std::io::error::Result<Self>
 pub fn SuiteResult::print_report(&self)
 pub fn SuiteResult::process_report(&self) -> alloc::string::String
-pub fn SuiteResult::save(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
-pub fn SuiteResult::save_analysis(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
-pub fn SuiteResult::save_charts(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
-pub fn SuiteResult::save_snapshot(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
+pub fn SuiteResult::save(&self, impl core::convert::AsRef<std::path::Path>) -> std::io::error::Result<()>
+pub fn SuiteResult::save_analysis(&self, impl core::convert::AsRef<std::path::Path>) -> std::io::error::Result<()>
+pub fn SuiteResult::save_charts(&self, impl core::convert::AsRef<std::path::Path>) -> std::io::error::Result<()>
+pub fn SuiteResult::save_snapshot(&self, impl core::convert::AsRef<std::path::Path>) -> std::io::error::Result<()>
 pub fn SuiteResult::to_csv(&self) -> alloc::string::String
 pub fn SuiteResult::to_html(&self) -> alloc::string::String
 pub fn SuiteResult::to_llm(&self) -> alloc::string::String
@@ -485,6 +486,7 @@ pub fn BenchGroup::bench_contended<S, Setup, Work>(&mut self, impl core::convert
 pub fn BenchGroup::bench_parallel<F>(&mut self, impl core::convert::Into<alloc::string::String>, usize, F) where F: core::ops::function::Fn(&mut Bencher, usize) + core::marker::Send + core::marker::Sync + core::clone::Clone + 'static
 pub fn BenchGroup::bench_scaling<F>(&mut self, impl core::convert::Into<alloc::string::String>, F) where F: core::ops::function::Fn(&mut Bencher, usize) + core::marker::Send + core::marker::Sync + core::clone::Clone + 'static
 pub fn BenchGroup::bench_tagged<F>(&mut self, impl core::convert::Into<alloc::string::String>, &[(&str, &str)], F) where F: core::ops::function::FnMut(&mut Bencher) + core::marker::Send + 'static
+pub fn BenchGroup::bench_with_witness<F, W>(&mut self, impl core::convert::Into<alloc::string::String>, F, W) where F: core::ops::function::FnMut(&mut Bencher) + core::marker::Send + 'static, W: core::ops::function::FnOnce() -> [u8; 32] + core::marker::Send + 'static
 pub fn BenchGroup::config(&mut self) -> &mut GroupConfig
 pub fn BenchGroup::new_public(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn BenchGroup::subgroup(&mut self, impl core::convert::Into<alloc::string::String>) -> &mut Self
@@ -509,6 +511,7 @@ pub BenchmarkResult::cold_start_ns: f64
 pub BenchmarkResult::cpu_summary: core::option::Option<Summary>
 pub BenchmarkResult::mean_ci: core::option::Option<MeanCi>
 pub BenchmarkResult::name: alloc::string::String
+pub BenchmarkResult::output_witness: core::option::Option<alloc::string::String>
 pub BenchmarkResult::slope_ns: core::option::Option<f64>
 pub BenchmarkResult::subgroup: core::option::Option<alloc::string::String>
 pub BenchmarkResult::summary: Summary
@@ -690,13 +693,13 @@ pub SuiteResult::unreliable: bool
 pub fn SuiteResult::check_cpu_compatibility(&self, &Self) -> core::result::Result<(), alloc::string::String>
 pub fn SuiteResult::confirmation_issues(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn SuiteResult::group_by_tag(&self, &str) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::vec::Vec<(&str, &BenchmarkResult)>>
-pub fn SuiteResult::load(impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<Self>
+pub fn SuiteResult::load(impl core::convert::AsRef<std::path::Path>) -> std::io::error::Result<Self>
 pub fn SuiteResult::print_report(&self)
 pub fn SuiteResult::process_report(&self) -> alloc::string::String
-pub fn SuiteResult::save(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
-pub fn SuiteResult::save_analysis(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
-pub fn SuiteResult::save_charts(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
-pub fn SuiteResult::save_snapshot(&self, impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<()>
+pub fn SuiteResult::save(&self, impl core::convert::AsRef<std::path::Path>) -> std::io::error::Result<()>
+pub fn SuiteResult::save_analysis(&self, impl core::convert::AsRef<std::path::Path>) -> std::io::error::Result<()>
+pub fn SuiteResult::save_charts(&self, impl core::convert::AsRef<std::path::Path>) -> std::io::error::Result<()>
+pub fn SuiteResult::save_snapshot(&self, impl core::convert::AsRef<std::path::Path>) -> std::io::error::Result<()>
 pub fn SuiteResult::to_csv(&self) -> alloc::string::String
 pub fn SuiteResult::to_html(&self) -> alloc::string::String
 pub fn SuiteResult::to_llm(&self) -> alloc::string::String

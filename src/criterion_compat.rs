@@ -283,14 +283,26 @@ impl<'a> BenchmarkGroup<'a> {
         F: FnMut(&mut Bencher),
     {
         let name = id.into();
-        if crate::plan::smoke_requested() {
+        if let Some(once) = crate::plan::short_run() {
             let matches = crate::plan::harness_args()
                 .iter()
                 .find_map(|arg| arg.strip_prefix("--group="))
                 .is_none_or(|filter| self.name.contains(filter));
             if matches {
-                f(&mut Bencher(&mut crate::bench::Bencher::new(1)));
-                println!("Testing {:?}/{name:?} ... ok", self.name);
+                let mut bencher = crate::bench::Bencher::new(1);
+                f(&mut Bencher(&mut bencher));
+                self.suite.short_run_callbacks += 1;
+                if once {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "group":self.name,"benchmark":name,"iterations":1,"elapsed_ns":bencher.elapsed_ns,
+                            "output_witness":null,"inference":"single observation",
+                        })
+                    );
+                } else {
+                    println!("Testing {:?}/{name:?} ... ok", self.name);
+                }
             }
             return self;
         }

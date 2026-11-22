@@ -196,6 +196,7 @@ pub fn assess_baseline(
         .check_cpu_compatibility(current)
         .unwrap_or_else(|e| panic!("{e}"));
     let mut warnings = Vec::new();
+    warnings.extend(crate::inference::witness_differences(baseline, current));
     let validity_issues = crate::inference::compatibility_issues(baseline, current);
     if !max_regression_pct.is_finite() || !(0.0..100.0).contains(&max_regression_pct) {
         panic!("regression margin must be finite and between 0 and 100 percent");

@@ -81,6 +81,8 @@ pub struct Suite {
     pub(crate) cpu_policy: Option<crate::platform::CpuPolicy>,
     pub(crate) cpu_set: Option<Vec<usize>>,
     pub(crate) affinity_cores: Option<Vec<usize>>,
+    #[cfg(feature = "criterion-compat")]
+    pub(crate) short_run_callbacks: usize,
     /// Pre-computed results from criterion-compat immediate mode.
     #[cfg(feature = "criterion-compat")]
     pub(crate) precomputed_comparisons: Vec<crate::results::ComparisonResult>,
@@ -130,6 +132,8 @@ impl Suite {
             cpu_policy: None,
             cpu_set: None,
             affinity_cores: None,
+            #[cfg(feature = "criterion-compat")]
+            short_run_callbacks: 0,
             #[cfg(feature = "criterion-compat")]
             precomputed_comparisons: Vec::new(),
         }
@@ -212,6 +216,10 @@ impl Suite {
 
     /// Merge another suite's groups into this one.
     pub fn merge(&mut self, mut other: Suite) {
+        #[cfg(feature = "criterion-compat")]
+        {
+            self.short_run_callbacks += other.short_run_callbacks;
+        }
         for (name, same) in [
             (
                 "CPU policy",
@@ -326,6 +334,21 @@ impl BenchGroup {
             subgroup: self.current_subgroup.clone(),
             func: BenchFn::new(f),
         });
+    }
+
+    /// Add a benchmark and a separate correctness check that returns a SHA-256 digest.
+    ///
+    /// Zenbench calls the check once after the group's measurements, or after
+    /// the one-iteration measurement in `--once` mode. The check should exercise
+    /// the same implementation and inputs and hash a canonical representation
+    /// of its output. Use the same representation across comparable arms.
+    pub fn bench_with_witness<F, W>(&mut self, name: impl Into<String>, f: F, witness: W)
+    where
+        F: FnMut(&mut Bencher) + Send + 'static,
+        W: FnOnce() -> [u8; 32] + Send + 'static,
+    {
+        self.bench(name, f);
+        self.benchmarks.last_mut().unwrap().func.witness = Some(Box::new(witness));
     }
 
     /// Add a benchmark with key-value tags for multi-dimensional reporting.
@@ -926,15 +949,29 @@ pub struct Benchmark {
 /// Type-erased benchmark function.
 pub struct BenchFn {
     inner: Box<dyn FnMut(&mut Bencher) + Send>,
+    witness: Option<Box<dyn FnOnce() -> [u8; 32] + Send>>,
 }
 
 impl BenchFn {
     pub fn new<F: FnMut(&mut Bencher) + Send + 'static>(f: F) -> Self {
-        Self { inner: Box::new(f) }
+        Self {
+            inner: Box::new(f),
+            witness: None,
+        }
     }
 
     pub(crate) fn call(&mut self, bencher: &mut Bencher) {
         (self.inner)(bencher);
+    }
+
+    pub(crate) fn take_witness(&mut self) -> Option<String> {
+        let witness = self.witness.take()?();
+        use std::fmt::Write;
+        let mut hex = String::with_capacity(64);
+        for byte in witness {
+            write!(hex, "{byte:02x}").expect("writing to a String");
+        }
+        Some(hex)
     }
 }
 

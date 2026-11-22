@@ -7,6 +7,8 @@
 ### Added
 
 - Use `--smoke` to exercise a bench target with one iteration and skip measurement setup.
+- Register an output witness with `BenchGroup::bench_with_witness` and use
+  `--once` to report one-iteration timing and witness JSON.
 - Use `zenbench data pair-fit` for descriptive intercept/slope analysis of a retained numeric case grid.
 - Set `ZENBENCH_GATE_DIAGNOSTICS=1` to retain bounded process evidence for rejected native benchmark rounds.
 - Linux external Confirm can account for reaped descendants with a delegated cgroup v2 parent and `--accounting-cgroup`. The saved packet identifies the accounting method.

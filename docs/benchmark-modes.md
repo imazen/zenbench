@@ -60,7 +60,19 @@ Use `cargo test --bench NAME -- --smoke` for a functional check of one bench
 target. Zenbench calls each selected benchmark with a one-iteration Bencher
 and propagates callback failures. It skips placement, calibration, resource
 admission and result publication. You can add `--group=NAME`. A direct
-invocation without `--smoke` retains its measurement behavior.
+invocation without a short-run flag retains its measurement behavior.
+
+`--once` uses the same one-iteration setup and prints elapsed nanoseconds and
+the output witness, when registered, as JSON Lines. Use it for quick feedback
+and keep normal Iterate or Confirm runs for performance conclusions.
+
+Use [`BenchGroup::bench_with_witness`](https://docs.rs/zenbench/latest/zenbench/struct.BenchGroup.html#method.bench_with_witness)
+to register a separate SHA-256 callback over a benchmark's canonical output.
+The callback runs once after the group's measurements and its digest is
+saved in each process result. Give all comparable arms the same witness
+contract. A changed or missing witness invalidates confirmation and baseline
+promotion when a comparison expects a witness. Ordinary benchmarks and
+historical results may omit witnesses.
 
 Unknown flags, malformed settings and conflicting legacy repetition flags fail.
 `--dry-run` prints the resolved plan, group inventory/settings, CPU placement,

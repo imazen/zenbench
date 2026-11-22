@@ -97,7 +97,12 @@ impl Engine {
         {
             self.suite.set_group_filter(filter);
         }
-        if crate::plan::smoke_requested() {
+        if let Some(once) = crate::plan::short_run() {
+            let mut callbacks = 0;
+            #[cfg(feature = "criterion-compat")]
+            {
+                callbacks += self.suite.short_run_callbacks;
+            }
             for group in self.suite.groups.iter_mut().filter(|group| {
                 self.suite
                     .group_filter
@@ -105,9 +110,26 @@ impl Engine {
                     .is_none_or(|filter| group.name.contains(filter))
             }) {
                 for bench in &mut group.benchmarks {
-                    bench.func.call(&mut Bencher::new(1));
-                    println!("Testing {:?}/{:?} ... ok", group.name, bench.name);
+                    let mut bencher = Bencher::new(1);
+                    bench.func.call(&mut bencher);
+                    callbacks += 1;
+                    if once {
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "group":group.name,"benchmark":bench.name,"iterations":1,
+                                "elapsed_ns":bencher.elapsed_ns,"output_witness":bench.func.take_witness(),
+                                "inference":"single observation",
+                            })
+                        );
+                    } else {
+                        println!("Testing {:?}/{:?} ... ok", group.name, bench.name);
+                    }
                 }
+            }
+            if callbacks == 0 {
+                eprintln!("[zenbench] no benchmark callbacks matched the selection");
+                std::process::exit(2);
             }
             return SuiteResult::default();
         }
@@ -992,7 +1014,7 @@ fn run_comparison_group(
     // Compute individual summaries
     let has_cpu_time = cpu_samples.iter().any(|s| s.iter().any(|&v| v > 0));
     let mut individual_results = Vec::new();
-    for (i, bench) in group.benchmarks.iter().enumerate() {
+    for (i, bench) in group.benchmarks.iter_mut().enumerate() {
         let per_iter: Vec<f64> = samples[i]
             .iter()
             .zip(iters_per_round.iter())
@@ -1049,6 +1071,7 @@ fn run_comparison_group(
             summary,
             cpu_summary,
             tags: bench.tags.clone(),
+            output_witness: bench.func.take_witness(),
             subgroup: bench.subgroup.clone(),
             cold_start_ns: cold_starts[i] as f64,
             slope_ns,
@@ -1059,6 +1082,26 @@ fn run_comparison_group(
         });
     }
 
+    if individual_results
+        .iter()
+        .any(|bench| bench.output_witness.is_some())
+    {
+        for (a, b, analysis) in &mut analyses {
+            let witness = |name: &str| {
+                individual_results
+                    .iter()
+                    .find(|benchmark| benchmark.name == name)
+                    .and_then(|benchmark| benchmark.output_witness.as_deref())
+            };
+            if witness(a) != witness(b) {
+                analysis.significant = false;
+                eprintln!(
+                    "[zenbench] warning: output witnesses differ or are missing for {:?}/{a:?} and {b:?}",
+                    group.name
+                );
+            }
+        }
+    }
     ComparisonResult {
         config: Some(config.clone()),
         cpu_placement: Some(group_placement),
