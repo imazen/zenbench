@@ -1,0 +1,98 @@
+{
+  "date_utc": "2026-11-22",
+  "purpose": "Verify strict CPU accounting through real child exits. The metric is a fixed synthetic value for testing acceptance.",
+  "platform": "Linux x86-64, native, delegated cgroup v2",
+  "control": "Five randomized blocks with a resident baseline, fork-and-wait candidate, and resident A/A. Each invocation used nine 65 ms CPU-time batches, with 18 ms sleeps between batches. A separate busy Python process ran outside the invocation cgroup for the foreign control.",
+  "strict_cpu_load_limit": 0.05,
+  "scope_setup": "systemd-run --user --scope -p Delegate=yes zenbench pair plan.json --mode confirm --accounting-cgroup",
+  "runs": [
+    {
+      "machine": "r3800x",
+      "logical_cpus": 16,
+      "control": "clean",
+      "runner_sha256": "ed236787885d25c7184682563b069f142c0c71905e2d4778bb7476ceb4a1ae34",
+      "accounting": "linux-cgroup-v2-cpu-stat",
+      "placement_status": "uniform_hardware",
+      "exit_code": 0,
+      "completed_invocations": 15,
+      "checked_windows": 90,
+      "rejected_windows": 0,
+      "windows_with_heavy_foreign_processes": 0,
+      "windows_by_phase": {
+        "boundary": 30,
+        "during": 45,
+        "scoped_exit": 15
+      },
+      "verdicts": {
+        "forked": "equivalent",
+        "__aa": "equivalent"
+      }
+    },
+    {
+      "machine": "r3800x",
+      "logical_cpus": 16,
+      "control": "foreign",
+      "runner_sha256": "ed236787885d25c7184682563b069f142c0c71905e2d4778bb7476ceb4a1ae34",
+      "accounting": "linux-cgroup-v2-cpu-stat",
+      "placement_status": "uniform_hardware",
+      "exit_code": 2,
+      "completed_invocations": 15,
+      "checked_windows": 90,
+      "rejected_windows": 90,
+      "windows_with_heavy_foreign_processes": 90,
+      "windows_by_phase": {
+        "boundary": 30,
+        "during": 45,
+        "scoped_exit": 15
+      },
+      "verdicts": {
+        "forked": "invalid",
+        "__aa": "invalid"
+      }
+    },
+    {
+      "machine": "r3500",
+      "logical_cpus": 6,
+      "control": "pre-adjustment six-CPU quiet control",
+      "runner_sha256": "ed236787885d25c7184682563b069f142c0c71905e2d4778bb7476ceb4a1ae34",
+      "accounting": "linux-cgroup-v2-cpu-stat",
+      "placement_status": "uniform_hardware",
+      "exit_code": 2,
+      "completed_invocations": 15,
+      "checked_windows": 75,
+      "rejected_windows": 22,
+      "windows_with_heavy_foreign_processes": 0,
+      "windows_by_phase": {
+        "boundary": 30,
+        "during": 30,
+        "scoped_exit": 15
+      },
+      "verdicts": {
+        "forked": "invalid",
+        "__aa": "invalid"
+      }
+    },
+    {
+      "machine": "r3500",
+      "logical_cpus": 6,
+      "control": "clean",
+      "runner_sha256": "2f227c5f11cfaf25c6a3853a262aa895032009b978e1b3b157e680c3b24ec606",
+      "accounting": "linux-cgroup-v2-cpu-stat",
+      "placement_status": "uniform_hardware",
+      "exit_code": 0,
+      "completed_invocations": 15,
+      "checked_windows": 60,
+      "rejected_windows": 0,
+      "windows_with_heavy_foreign_processes": 0,
+      "windows_by_phase": {
+        "boundary": 30,
+        "during": 15,
+        "scoped_exit": 15
+      },
+      "verdicts": {
+        "forked": "equivalent",
+        "__aa": "equivalent"
+      }
+    }
+  ]
+}

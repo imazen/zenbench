@@ -76,8 +76,8 @@ enum Commands {
         resume: Option<PathBuf>,
         #[arg(long)]
         dry_run: bool,
-        /// Delegated Linux cgroup v2 parent for Confirm CPU accounting.
-        #[arg(long)]
+        /// Use the current delegated Linux cgroup v2 for Confirm CPU accounting, or supply its path.
+        #[arg(long, num_args = 0..=1, default_missing_value = "auto", value_name = "PATH")]
         accounting_cgroup: Option<PathBuf>,
         /// Admission wait seconds; default zero reports not-run immediately.
         #[arg(long, default_value_t = 0)]

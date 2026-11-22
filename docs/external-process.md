@@ -250,8 +250,8 @@ renice unrelated work or assume that nice values identify a CPU class.
 ### Linux accounting for short-lived descendants
 
 For workloads that start and reap CPU-intensive subprocesses, such as a
-build, run `pair --mode=confirm --accounting-cgroup PATH` from a writable,
-delegated cgroup v2 parent at `PATH`. The parent must contain the zenbench
+build, run `pair --mode=confirm --accounting-cgroup` from a writable,
+delegated cgroup v2 parent. The parent must contain the zenbench
 supervisor. Each invocation gets a fresh child cgroup. Zenbench moves the
 launcher into it before executing the program. The workload must keep all of
 its processes inside that scope and join them before exiting.
@@ -260,11 +260,12 @@ With a systemd user manager that supports delegation, start the supervisor
 inside a delegated scope:
 
 ```sh
-systemd-run --user --scope -p Delegate=yes sh -ec '
-  group=$(sed -n "s/^0:://p" /proc/self/cgroup)
-  exec zenbench pair "$1" --mode=confirm --accounting-cgroup "/sys/fs/cgroup$group"
-' sh plan.json
+systemd-run --user --scope -p Delegate=yes \
+  zenbench pair plan.json --mode=confirm --accounting-cgroup
 ```
+
+Add `--dry-run` to check the setup and preview invocations. Use
+`--accounting-cgroup=PATH` if the delegated parent uses a nonstandard mount.
 
 This mode compares the aggregate host CPU counters with the invocation
 cgroup's cumulative `cpu.stat usage_usec`. CPU from short-lived descendants
@@ -274,4 +275,13 @@ reset or inconsistent counters invalidate the observation. Heavy foreign
 process, RAM and temperature checks still apply. Each window retains the CPU
 accounting method and the lower bound on owned CPU it used. The scoped path
 checks CPU load through the leader's exit because its counters stay available.
+The terminal report counts rejected windows and shows how many involved
+heavy processes, high CPU load, or missing CPU data. These counts can overlap.
+The sampler waits for a longer CPU counter interval on small hosts so that
+counter rounding alone leaves room under the 5% load limit. Each invocation
+needs to stay alive long enough for at least one sampled work window.
 See the [Linux kernel's cgroup v2 CPU accounting documentation](https://docs.kernel.org/admin-guide/cgroup-v2.html#cpu-interface-files).
+
+Native Linux controls exercised the quiet and competing-process cases.
+The six-CPU control passed after the sampler used longer windows.
+[Control results](../benchmarks/pair_scoped_admission_2026-11-22.json).

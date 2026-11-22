@@ -797,6 +797,9 @@ fn observe_invocation(
         return observe(monitor, workers, phase);
     };
     let began = Instant::now();
+    if let Some(previous) = previous.as_ref() {
+        scope.wait_for_sample(previous);
+    }
     let mut state = monitor.snapshot_excluding_processes(workers);
     let current = scope.sample();
     let result = current
@@ -1099,8 +1102,16 @@ fn report(packet: &Packet) -> String {
                 .any(|v| v["cpu_load"].as_f64().is_some_and(|v| v > 0.05))
         })
         .count();
+    let resources = if packet.mode == "confirm" {
+        format!(
+            "resource_admission={}\n",
+            resource_admission_summary(packet)
+        )
+    } else {
+        String::new()
+    };
     format!(
-        "zenbench_pair schema=1 mode={} complete={} fingerprint={} decision={}\nplacement={} invocations_with_observed_cpu_load_above_5pct={}\n{}\n{failures}Positive change means slower. Intervals assume independent approximately normal block log ratios.\nIterate exit 0 means execution completed only; Confirm requires valid observations and A/A equivalence.\nDetails: {}",
+        "zenbench_pair schema=1 mode={} complete={} fingerprint={} decision={}\nplacement={} invocations_with_observed_cpu_load_above_5pct={}\n{resources}{}\n{failures}Positive change means slower. Intervals assume independent approximately normal block log ratios.\nIterate exit 0 means execution completed only; Confirm requires valid observations and A/A equivalence.\nDetails: {}",
         packet.mode,
         packet.complete,
         packet.fingerprint,
@@ -1111,6 +1122,42 @@ fn report(packet: &Packet) -> String {
         serde_json::to_string(&packet.summaries).unwrap()
     )
 }
+
+fn resource_admission_summary(packet: &Packet) -> Value {
+    let config = zenbench::GateConfig::strict();
+    let mut checked = 0;
+    let mut rejected = 0;
+    let mut busy_cpu = 0;
+    let mut heavy = 0;
+    let mut missing_cpu = 0;
+    for observation in packet.invocations.iter().flat_map(|i| &i.observations) {
+        if observation["used_for_admission"] != true {
+            continue;
+        }
+        checked += 1;
+        if observation["clean"] == true {
+            continue;
+        }
+        rejected += 1;
+        if observation["policy"] == "whole-host-strict-v1" {
+            match observation["cpu_load"].as_f64() {
+                Some(load) => busy_cpu += usize::from(load > config.max_cpu_load),
+                None => missing_cpu += 1,
+            }
+            heavy += usize::from(
+                observation["heavy_process_count"]
+                    .as_u64()
+                    .is_some_and(|count| count > config.max_heavy_processes as u64),
+            );
+        }
+    }
+    json!({
+        "cpu_accounting":packet.context["resource_accounting"].as_str().unwrap_or("live-process"),
+        "checked_windows":checked,"rejected_windows":rejected,"cpu_above_limit_windows":busy_cpu,
+        "heavy_process_windows":heavy,"cpu_unavailable_windows":missing_cpu,
+    })
+}
+
 pub(crate) fn read(path: &Path, format: &str) -> Result<String, String> {
     let packet = load(path)?;
     Ok(match format {
@@ -1845,6 +1892,26 @@ mod confirmation_tests {
     fn analyze(p: &mut Packet) -> i32 {
         p.summaries = summarize(p);
         exit_code(p)
+    }
+    #[test]
+    fn resource_summary_counts_only_windows_that_can_reject() {
+        let mut p = packet();
+        p.context = json!({"resource_accounting":accounting::METHOD});
+        p.invocations[0].observations = vec![
+            json!({"phase":"during","policy":"whole-host-strict-v1","used_for_admission":true,
+                "clean":false,"cpu_load":0.1,"heavy_process_count":1}),
+            json!({"phase":"exit_transition","policy":"whole-host-strict-v1","used_for_admission":false,
+                "clean":false,"cpu_load":0.3,"heavy_process_count":0}),
+            json!({"phase":"scoped_exit","policy":"whole-host-strict-v1","used_for_admission":true,
+                "clean":false,"cpu_load":null,"heavy_process_count":0}),
+        ];
+        let summary = resource_admission_summary(&p);
+        assert_eq!(summary["cpu_accounting"], accounting::METHOD);
+        assert_eq!(summary["checked_windows"], 44);
+        assert_eq!(summary["rejected_windows"], 2);
+        assert_eq!(summary["cpu_above_limit_windows"], 1);
+        assert_eq!(summary["heavy_process_windows"], 1);
+        assert_eq!(summary["cpu_unavailable_windows"], 1);
     }
     #[test]
     fn case_fit_keeps_strata_and_excludes_failed_coordinates() {

@@ -135,6 +135,28 @@ fn read(root: &Path, directory: &str) -> Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 #[test]
+fn scoped_accounting_reports_platform_or_scope_requirements_before_launch() {
+    let root = root();
+    let plan = plan(&root, "base");
+    let output = cli(&root)
+        .arg("pair")
+        .arg(&plan)
+        .args(["--mode=confirm", "--dry-run", "--accounting-cgroup"])
+        .arg(&root)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let expected = if cfg!(target_os = "linux") {
+        "accounting path must be a cgroup v2 directory"
+    } else {
+        "cgroup accounting requires Linux"
+    };
+    assert!(stderr.contains(expected), "{stderr}");
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
 fn same_binary_different_env_preserves_process_clusters_and_control() {
     let root = root();
     let plan = plan(&root, "candidate");

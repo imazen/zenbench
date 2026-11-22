@@ -1,5 +1,18 @@
 # Zenbench Project Instructions
 
+### Known Bugs: x86 Linux cross runner and scoped counter resolution
+
+The hosted i686 Cross job on `4d227294` returned OS error 38 in both
+supervisor lifecycle tests. The earlier `9292d875` run recorded the same
+failure. The native i686 CLI unit tests passed locally in the Cross 0.2.5
+container with Rust 1.100.0. The hosted failure is unresolved.
+
+A quiet six-CPU scoped pair run rejected 22 CPU-load windows with a
+160-tick target and zero heavy processes. The follow-up uses a 300-tick
+target and caps the wait at 1.6 seconds for low-capacity hosts. The native
+six-CPU replay passed all 60 windows without changing the strict threshold.
+The separate 16-CPU busy control still rejected all 90 windows.
+
 ### Known Bugs: default placement on asymmetric CPUs
 
 Default startup previously refused mixed core/cache classes and unknown CPU

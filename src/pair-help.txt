@@ -48,6 +48,13 @@ Positive latency change means slower. A/A is a diagnostic, not a bias correction
 Default CPU placement warns and measures when uniform placement is unverified.
 For a confirmation verdict, inspect zenbench cpu-info and use zenbench exec
 for a verified inherited boundary where supported.
+
+Linux Confirm can count CPU from descendants after they exit. Start in a
+delegated cgroup v2 scope:
+  systemd-run --user --scope -p Delegate=yes zenbench pair PLAN --mode=confirm --accounting-cgroup
+Use --accounting-cgroup=PATH for an explicit delegated parent containing the
+supervisor. Add --dry-run to check the setup and preview the planned invocations.
+
 Commands must stay in the foreground and join workers. Unix programs must not
 daemonize or leave their process group. No implicit shell is used.
 
